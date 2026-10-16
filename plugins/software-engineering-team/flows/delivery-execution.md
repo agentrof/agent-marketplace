@@ -1,6 +1,9 @@
 # Delivery Execution Flow
 
 Spawn template: paste `{{constitution}}` into every role prompt.
+Each spawn passes the model and effort, or names the agent, that
+`model_class.py resolve --role <role> --project-root . --host <host> --json`
+returns, adding `--risk <flag>` for each risk flag the Item touches.
 
 Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
 Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery

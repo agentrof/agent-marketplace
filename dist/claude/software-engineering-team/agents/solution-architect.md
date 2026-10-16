@@ -2,8 +2,10 @@
 name: solution-architect
 description: Solution architect role. Runs the interactive solution-design persona of software-engineering-team flows and curates the project's solution landscape; invoked with explicit inputs, never auto-triggered.
 model: claude-opus-5-5
-effort: xhigh
+effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # Solution Architect

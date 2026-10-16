@@ -54,6 +54,9 @@ claim, contract pin or architecture stamp is created or read.
 The main session orchestrates. It spawns every role in the foreground, one
 call that returns the role's result, and never spawns a delivery
 coordinator or a background agent that would report to it.
+Each spawn passes the model and effort, or names the agent, that
+`model_class.py resolve --role <role> --task <id> --project-root . --host
+<host> --json` returns; a step that names a class passes `--class <class>`.
 
 Each step names its `scripts/task_lane.py` verb. The task holds the
 request and approval times; GitHub holds the pull request, review, CI and
@@ -121,8 +124,8 @@ The task's `rigor` sets the verification:
 6. Review. Spawn one `code-reviewer` in the foreground with the task and
    the output of `gh pr diff <pr>`. It checks each acceptance criterion
    against the diff and its tests and returns findings with severities. At
-   `high`, spawn a second `code-reviewer` in the foreground with the same
-   inputs and the lens: authentication and authorization, secret handling,
+   `high`, spawn a second `code-reviewer` in the foreground, resolved with
+   `--class security_review`, with the same inputs and the lens: authentication and authorization, secret handling,
    data loss, irreversible operations and their rollback. Only a critical
    finding blocks: the developer fixes it on the branch, and the reviewer
    that raised it re-reads only the fix diff, once. Every other finding

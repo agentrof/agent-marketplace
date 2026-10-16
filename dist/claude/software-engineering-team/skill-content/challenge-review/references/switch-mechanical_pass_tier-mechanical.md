@@ -11,7 +11,7 @@ A mechanical pass decides nothing. It does work whose result the returned
 findings, a compiler or an approval already fix, so it runs on a writer's
 `-mechanical` variant or without a role. The review before it runs as switch
 `review_panels` selects, and every review, re-check and calibration keeps its
-roles and tiers.
+roles and classes.
 
 ## Pass kinds
 
@@ -36,8 +36,8 @@ repairs, and every review, re-check or calibration.
 | `solution-architect` | `solution-architect-mechanical` | Solution landscape, components and decisions | Solution Design |
 
 A variant is its writer: the same body, boundaries and identity on the
-`low` tier, never a separate fixer, so writer ownership is unchanged.
-Every other role, and every other flow's writer, keeps its own tier. A
+`mechanical` class, never a separate fixer, so writer ownership is unchanged.
+Every other role, and every other flow's writer, keeps its own class. A
 variant never reads for a review, re-check or calibration: the Operation
 counterpart that reviews the other contract runs as its base role.
 
@@ -88,7 +88,7 @@ writer inside its own pass stays in that pass.
 ## Measurement
 
 The project owner runs this outside every task; no role acts on it. The
-variants run on the `low` tier, whose host settings in
+variants run on the `mechanical` class, whose host settings in
 `platforms/<host>/execution-profiles.json` are starting values that the
 frozen-task A/B sets before a project selects `mechanical`.
 
@@ -101,11 +101,11 @@ frozen-task A/B sets before a project selects `mechanical`.
    the host contract names: with a session-level setting, or, where role
    files keep their own effort over the session's, in the role files of a
    scratch copy.
-3. A fresh, read-only judge on the strongest tier compares each result with
+3. A fresh, read-only judge on the strongest class compares each result with
    the accepted fix: every finding applied, no unrelated edit, compilers
    green. Record wall time and output tokens per run.
 4. The cheapest candidate that applies every finding correctly with no
-   unrelated edit sets the variants' tier and that tier's rows in a package
+   unrelated edit sets the variants' class and that class's rows in a package
    change.
 
 After the owner selects `mechanical`, record per mechanical pass its kind,
@@ -113,6 +113,6 @@ whether it ran on the `-mechanical` variant or as the resumed base writer,
 the model and effort that ran it, wall time, output tokens, re-check outcome
 and any unrelated edit the re-check found, and compare with the base writer's
 passes of the same kind. A pass that resumed the base writer to reuse its
-read history ran on the writer's own tier, so it says so in its record and
+read history ran on the writer's own class, so it says so in its record and
 never counts as a variant pass. The
 registry's promotion rule judges these over at least 3 Deliveries.

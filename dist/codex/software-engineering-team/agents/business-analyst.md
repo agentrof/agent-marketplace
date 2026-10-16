@@ -2,7 +2,7 @@
 name: business-analyst
 description: Business analyst role. Runs the interactive analysis persona of software-engineering-team flows and grows the topic's analysis space; invoked with explicit inputs, never auto-triggered.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: high
 output_contract: prose
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: backlog-reviewer
 description: Independent backlog challenger for epic, story and test-plan packages; never auto-triggered.
-reasoning: high
+model_class: routine_review
 output_contract: prose
 tools: Read, Grep, Glob
 ---

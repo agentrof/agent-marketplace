@@ -408,9 +408,9 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
                 "terminology_language", args.terminology_language
             ),
         }
-        # The owner's tier and role overrides survive a refresh, and setup
-        # writes none of its own; one the installed tier map no longer takes
-        # stops it below, naming the tier or role.
+        # The owner's class and role overrides survive a refresh, and setup
+        # writes none of its own; one the installed class map no longer takes
+        # stops it below, naming the slot or role. Retired tier keys drop.
         config.update(role_settings.normalized(current))
     else:
         config = {

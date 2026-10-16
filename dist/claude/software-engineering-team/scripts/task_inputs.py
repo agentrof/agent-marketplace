@@ -596,7 +596,7 @@ def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry
 
     A mechanical pass decides nothing, so a review, re-check, calibration,
     triage or repair task, and every role without a writer variant, keeps its
-    role's tier.
+    role's class.
     """
     kinds = policy["pass_kinds"]
     spec = kinds.get(kind)
@@ -610,17 +610,17 @@ def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry
     owners = set(registry.get(spec["switch"], {}).get("flows") or [])
     if not owners & set(route["flows"]):
         raise ValueError(f"pass kind {kind} belongs to the flows switch {spec['switch']} owns;"
-                         f" a {entry} task, a code repair included, keeps its role's tier")
+                         f" a {entry} task, a code repair included, keeps its role's class")
     if read_only:
         raise ValueError(f"pass kind {kind} never serves a review, re-check or calibration: this"
-                         f" {mode} task of {role} keeps its role's tier")
+                         f" {mode} task of {role} keeps its role's class")
     if mode not in spec["modes"]:
         raise ValueError(f"pass kind {kind} runs in mode {' or '.join(spec['modes'])}; a {mode}"
-                         " task, authoring or repair, keeps its role's tier")
+                         " task, authoring or repair, keeps its role's class")
     if role not in spec["documents"]:
         raise ValueError(f"pass kind {kind} runs only as a writer whose variant switch"
                          f" {spec['switch']} declares ({', '.join(sorted(spec['documents']))});"
-                         f" {role} keeps its tier")
+                         f" {role} keeps its class")
     if (spec["switch"], spec["value"]) not in chosen:
         raise ValueError(f"pass kind {kind} runs only at switch {spec['switch']} {spec['value']}")
     if findings is None or project is None:

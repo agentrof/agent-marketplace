@@ -76,7 +76,7 @@ TOOL_NAME_CANON = {
 PATCH_HEADER_RE = re.compile(r"^\*\*\* (Add|Update|Delete) File: (.+)$")
 
 # The complete bootstrap config has only sanctioned subprocess writers:
-# project_config.py for the languages and the tier and role overrides, and
+# project_config.py for the languages and the class and role overrides, and
 # setup for structural replacement. Neither traverses PreToolUse, so direct
 # Write/Edit changes are denied.
 CONFIG_GUARD_KEYS = (
@@ -94,7 +94,7 @@ PYTHON_COMMAND_RE = re.compile(r"^python(?:3(?:[.][0-9]+)?)?$")
 # cmd.exe and PowerShell. Those shells disagree about quoting and expansion,
 # so POSIX escape rules cannot establish a trusted direct command.
 WINDOWS_CMD_ALWAYS_UNSAFE_RE = re.compile(r"[\x00-\x1f\x7f^%!`$]")
-SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set", "set-tier", "set-role-tier"}
+SANCTIONED_PROJECT_CONFIG_COMMANDS = {"set", "set-class", "set-role-class"}
 SANCTIONED_SHELL_ASSIGNMENTS = {"PYTHONDONTWRITEBYTECODE": "1"}
 APPLICATION_ROOT_WRITERS = {
     "init",
@@ -2362,12 +2362,12 @@ def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
     if script == "project_config.py":
         if not args or args[0] not in SANCTIONED_PROJECT_CONFIG_COMMANDS:
             return False
-        # The writer validates the host, tier, model, effort and role against
-        # the package tier map; a retired one must stay removable.
-        if args[0] == "set-tier":
+        # The writer validates the host, class, model, effort and role against
+        # the package class map; a retired one must stay removable.
+        if args[0] == "set-class":
             options = parsed_options(
-                args[1:], {"--config", "--host", "--tier", "--model", "--effort"},
-                {"--default", "--confirmed", "--dry-run", "--json"},
+                args[1:], {"--config", "--host", "--class", "--model", "--effort"},
+                {"--escalated", "--default", "--confirmed", "--dry-run", "--json"},
             )
             target = _cli_path(
                 options.get("--config", "") if options else "", cwd
@@ -2376,15 +2376,15 @@ def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
                 options
                 and target == config_path.resolve()
                 and options.get("--host")
-                and options.get("--tier")
+                and options.get("--class")
                 and ("--model" in options or "--effort" in options)
                 != ("--default" in options)
                 and options.get("--model") != ""
                 and options.get("--effort") != ""
             )
-        if args[0] == "set-role-tier":
+        if args[0] == "set-role-class":
             options = parsed_options(
-                args[1:], {"--config", "--role", "--tier"},
+                args[1:], {"--config", "--role", "--class"},
                 {"--default", "--dry-run", "--json"},
             )
             target = _cli_path(
@@ -2394,8 +2394,8 @@ def sanctioned_config_writer(payload: dict, config_path: Path) -> bool:
                 options
                 and target == config_path.resolve()
                 and options.get("--role")
-                and ("--tier" in options) != ("--default" in options)
-                and options.get("--tier") != ""
+                and ("--class" in options) != ("--default" in options)
+                and options.get("--class") != ""
             )
         options = parsed_options(
             args[1:], {"--config", "--field", "--value"},

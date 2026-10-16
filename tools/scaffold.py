@@ -27,7 +27,7 @@ KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 AGENT_TEMPLATE = """---
 name: {name}
 description: {title} role invoked by {plugin} flows with explicit project-local inputs; not auto-triggered.
-reasoning: medium
+model_class: routine_authoring
 output_contract: prose
 ---
 

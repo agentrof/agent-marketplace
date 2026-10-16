@@ -75,7 +75,7 @@ calibration ruled. Calibration is skipped when the result has none. A claim that
 the manifest's `unresolved_findings` summary marks with `calibrated_severity`
 was ruled in an earlier cycle and keeps that ruling.
 
-1. Spawn a fresh `code-reviewer` on its own tier, neither an implementation
+1. Spawn a fresh `code-reviewer` on its own class, neither an implementation
    writer nor the reviewer that returned the claims. Give it each claim as
    returned, with its id, severity, file, description and impact, the Severity
    Definitions and `SELF-CHECK`, and let it read the frozen candidate through

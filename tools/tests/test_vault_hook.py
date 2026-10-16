@@ -2664,7 +2664,7 @@ class VaultHookShellContractTests(unittest.TestCase):
                 unsupported_flag, docs,
             ))
 
-    def test_set_tier_and_set_role_tier_are_config_writers_under_an_exact_option_parse(self):
+    def test_set_class_and_set_role_class_are_config_writers_under_an_exact_option_parse(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _docs, config = self.project(root)
@@ -2681,61 +2681,63 @@ class VaultHookShellContractTests(unittest.TestCase):
                     payload["shell_family"] = "cmd"
                 return self.hook.sanctioned_config_writer(payload, config)
 
-            target = ("--config", str(config), "--host", "codex", "--tier", "high")
+            target = ("--config", str(config), "--host", "codex", "--class", "critical_decision")
             for args in (
                 (*target, "--effort", "low"),
                 (*target, "--model", "gpt-5.5"),
                 (*target, "--model", "session", "--effort", "max", "--confirmed", "--dry-run",
                  "--json"),
                 (*target, "--default"),
-                # A tier or host the package retired is the writer's to judge.
-                ("--json", "--default", "--tier", "ghost", "--host", "retired",
+                (*target, "--escalated", "--effort", "xhigh"),
+                # A class or host the package retired is the writer's to judge.
+                ("--json", "--default", "--class", "ghost", "--host", "retired",
                  "--config", str(config)),
             ):
                 with self.subTest(accepted=args):
-                    self.assertTrue(sanctioned("set-tier", *args))
+                    self.assertTrue(sanctioned("set-class", *args))
             for args in (
                 target,
                 (*target, "--effort", "low", "--default"),
                 (*target, "--model", "session", "--default"),
                 (*target, "--effort", ""),
                 (*target, "--model", ""),
-                ("--config", str(config), "--tier", "high", "--default"),
+                ("--config", str(config), "--class", "critical_decision", "--default"),
                 ("--config", str(config), "--host", "codex", "--default"),
-                ("--host", "codex", "--tier", "high", "--default"),
-                ("--config", str(other), "--host", "codex", "--tier", "high", "--default"),
+                ("--host", "codex", "--class", "critical_decision", "--default"),
+                ("--config", str(other), "--host", "codex", "--class", "critical_decision", "--default"),
                 (*target, "--default", "--default"),
                 (*target, "--model", "gpt-5.5", "--model", "session"),
                 (*target, "--default", "--field", "output_language"),
                 (*target, "--default", "extra"),
                 (*target, "--effort=low"),
-                ("--config", str(config), "--host", "", "--tier", "high", "--default"),
+                (*target, "--escalated", "--escalated", "--default"),
+                ("--config", str(config), "--host", "", "--class", "critical_decision", "--default"),
             ):
                 with self.subTest(refused=args):
-                    self.assertFalse(sanctioned("set-tier", *args))
+                    self.assertFalse(sanctioned("set-class", *args))
             role = ("--config", str(config), "--role", "code-reviewer")
             for args in (
-                (*role, "--tier", "medium"),
+                (*role, "--class", "routine_authoring"),
                 (*role, "--default"),
-                (*role, "--tier", "low", "--dry-run", "--json"),
+                (*role, "--class", "mechanical", "--dry-run", "--json"),
                 # A role the package retired is the writer's to judge.
                 ("--default", "--role", "retired-role", "--config", str(config)),
             ):
                 with self.subTest(accepted_role=args):
-                    self.assertTrue(sanctioned("set-role-tier", *args))
+                    self.assertTrue(sanctioned("set-role-class", *args))
             for args in (
                 role,
-                (*role, "--tier", "low", "--default"),
-                (*role, "--tier", ""),
-                ("--config", str(config), "--tier", "low"),
+                (*role, "--class", "mechanical", "--default"),
+                (*role, "--class", ""),
+                ("--config", str(config), "--class", "mechanical"),
                 ("--config", str(config), "--role", "", "--default"),
                 ("--config", str(other), "--role", "code-reviewer", "--default"),
-                (*role, "--tier", "low", "--confirmed"),
+                (*role, "--class", "mechanical", "--confirmed"),
                 (*role, "--model", "session"),
-                (*role, "--tier=low"),
+                (*role, "--class=mechanical"),
             ):
                 with self.subTest(refused_role=args):
-                    self.assertFalse(sanctioned("set-role-tier", *args))
+                    self.assertFalse(sanctioned("set-role-class", *args))
             # The retired effort writer is no config writer any more.
             self.assertFalse(sanctioned("set-effort", *target, "--effort", "low"))
             # The language writer keeps its own parse.
@@ -2744,12 +2746,12 @@ class VaultHookShellContractTests(unittest.TestCase):
                 "--value", "Turkish"))
             for args in (
                 ("--config", str(config), "--field", "output_language", "--default"),
-                ("--config", str(config), "--host", "codex", "--tier", "high",
+                ("--config", str(config), "--host", "codex", "--class", "critical_decision",
                  "--effort", "low"),
             ):
                 with self.subTest(refused_set=args):
                     self.assertFalse(sanctioned("set", *args))
-            self.assertFalse(sanctioned("tiers", "--config", str(config)))
+            self.assertFalse(sanctioned("classes", "--config", str(config)))
 
     @integration
     def test_cmd_pre_and_command_post_preserve_official_config_change(self):

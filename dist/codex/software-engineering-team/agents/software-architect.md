@@ -2,7 +2,7 @@
 name: software-architect
 description: Software architect role. Spawned by software-engineering-team flows to evolve the living architecture documents delta-first; never auto-triggered.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: high
 output_contract: prose
 ---
 

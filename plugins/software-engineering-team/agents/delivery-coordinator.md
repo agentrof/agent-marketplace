@@ -1,7 +1,7 @@
 ---
 name: delivery-coordinator
 description: Delivery Coordinator role invoked by software-engineering-team flows with explicit project-local inputs; not auto-triggered.
-reasoning: medium
+model_class: orchestration
 output_contract: prose
 ---
 

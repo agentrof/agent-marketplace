@@ -1,9 +1,11 @@
 ---
 name: devops-engineer-mechanical
 description: DevOps engineer role. Spawned by software-engineering-team flows to realize the approved architecture as a runnable containerized environment; never auto-triggered. Writer variant for passes that apply only the fixes a review verdict names.
-model: claude-sonnet-5-5
+model: claude-haiku-5-5
 effort: high
 output_contract: prose
+disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
+omitClaudeMd: true
 ---
 
 # DevOps Engineer

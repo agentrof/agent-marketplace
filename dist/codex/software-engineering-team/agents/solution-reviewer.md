@@ -2,7 +2,7 @@
 name: solution-reviewer
 description: Read-only challenger for the approved Solution Design package.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: high
 output_contract: prose
 tools: Read, Grep, Glob
 ---

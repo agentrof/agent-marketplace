@@ -5,6 +5,7 @@ model: claude-sonnet-5-5
 effort: high
 output_contract: prose
 tools: Read, Grep, Glob
+omitClaudeMd: true
 ---
 
 # Solution Reviewer

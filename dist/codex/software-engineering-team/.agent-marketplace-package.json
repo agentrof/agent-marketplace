@@ -19,83 +19,158 @@
     ".codex-plugin/plugin.json":
       "e91a09adf51c52fc7dd6084ff751e46204528dd26b6952573c06f150b0ec8c31"
     ,
+    "agents/analysis-challenger-escalated.md":
+      "13cf2479ec47b9ed1142952b546b2cd048bae6cfd12ee0ce33e10da552571f69"
+    ,
     "agents/analysis-challenger.md":
-      "90842a6052871d8b772efac2e3d65a613224e4c402717a1cf7bad9e45b8b3768"
+      "38b4c1ff0638cf13f6fa925f50bb38ec52b61343b4857e0385a5048d8158574a"
+    ,
+    "agents/backend-developer-escalated.md":
+      "c904412d470fa9a4ba168db97ed18bcaa3c88e5e88d073a68c71d5ee4641d14e"
     ,
     "agents/backend-developer.md":
-      "ee0fe2f20b349a293a6830f5b2b73cedac95eb2421a3c5cea689389e8198cac8"
+      "fb2181306d55df41a7fbc6b5fcb93f71e680970e18f65ff7300eb6fe3d61efdc"
+    ,
+    "agents/backlog-reviewer-escalated.md":
+      "fea312d066e342af6dda88dc31f1097999655785d904dcb58b078fc227133445"
+    ,
+    "agents/backlog-reviewer-lens-escalated.md":
+      "1723122f1f13f920036e77cabd27f4721f80f1d9d62f0c11299dd83cf4bf1720"
     ,
     "agents/backlog-reviewer-lens.md":
-      "bcb41d14d7fab561fb1cc2cde5a2453f76d46b32cf0df6510bd86af31522b513"
+      "7919dfd4f9ed50e5f9a91820497a0e6167c1f06e3ce01c4a38d9f0469dddf97c"
     ,
     "agents/backlog-reviewer.md":
-      "73ccce598840d66d4903729d4275adcd033471539678874f69b4a317ead17619"
+      "c25cdbb48323f54f4974c358d30c2d09bb28891924aa466913ec513e8cb3e9d0"
+    ,
+    "agents/business-analyst-escalated.md":
+      "87e4b2ff48a4df736de66ba0870cb214f60f38227a73b27517c25daae2b4f950"
     ,
     "agents/business-analyst.md":
-      "9efb521192c9aeb97720beee997fde10e3e220c3a581adaa8137e1ef5b8b645c"
+      "5e78d9bf1f96e010fcba5916c882e5bd0cb36a2364664d0aeef56a4dd75a4d1f"
+    ,
+    "agents/code-reviewer-escalated.md":
+      "d1ac3a70105fa9bc09fa0adfad0ed7626e039bdbb6f2ba4c2f240e4672023382"
+    ,
+    "agents/code-reviewer-lens-escalated.md":
+      "153a0d004b41c9aff5b5c0f211ca680485219ecd0320ec52a8342e577941025b"
     ,
     "agents/code-reviewer-lens.md":
-      "1a0ffc41bacb38ad4c93c0c37aaae82911a4b24faf5b785d027f803117ab1493"
+      "72ae0fcdacd3fbbd92bcfd7bc739d0c6ea817656a38d7733c48cc20120e89751"
+    ,
+    "agents/code-reviewer-security.md":
+      "ded8a5ae52029b6a4e6b2cfea9a7ef925fd76e6a5aad4a498d9331265667112d"
     ,
     "agents/code-reviewer.md":
-      "667f4b7fbdf50f520f846ea5a470ed412d04f11243607871ce255848b4723cb1"
+      "0e04df240c91560d798a97078f63c91b2f15273e5090cb0d118ce3fb341ec121"
     ,
     "agents/delivery-coordinator.md":
-      "428247b00d0e6e949c8abe74f85f022ddfed2070d9a6c86d10fb6dfc03492b3b"
+      "fe51d5235e2f3dfdfcf9037f695d371161598259972ebd19bda160cabf958244"
+    ,
+    "agents/design-system-reviewer-escalated.md":
+      "1cb96b3de053d909b307e632f8259b06f50b54deb502786f95c929d5545619a0"
+    ,
+    "agents/design-system-reviewer-lens-escalated.md":
+      "12409a040ab4446496db5302241e3208a9d16400ef54cd0d115d98df392270a1"
     ,
     "agents/design-system-reviewer-lens.md":
-      "ce6264ed32461e540167295706e11cc1b8b379d3eb06b536964bcce3477a9df9"
+      "ec396ef1250eb7172e853b10ac5ad1239320129bb2eda0809267431f5919629b"
     ,
     "agents/design-system-reviewer.md":
-      "0e1f2635965217223879cba8508c33db3867dcc98862775d8ba791cf50b9af39"
+      "d3268bf18b57eb34c8ee46b1a91df8639ff4f0003855bc97997488da16d8962e"
+    ,
+    "agents/devops-engineer-escalated.md":
+      "fc9eb700f722790f20e69d77d146b29208f47204cf177e98b2399d535d0d2ef8"
+    ,
+    "agents/devops-engineer-mechanical-escalated.md":
+      "eb413e48f76e6cda7a2c6f97c0bd608c557b61db51d7ecfd6cdc29f1962fbce1"
     ,
     "agents/devops-engineer-mechanical.md":
-      "ce9927f9327ff1e03dfa09203b73cff94d124fb97e120796139ddc06d82691ff"
+      "211c279a1f97c32178cb45d2820a7d09b3677ec9762f706dc500de3fb25283a6"
     ,
     "agents/devops-engineer.md":
-      "9df2882a3d3af70524165d89b3c4d01bde1d9c0ab034085252e58d1c1f618990"
+      "6f472f37ada9d97bd5606afc1bf69e0b571b69a28af3b7910e22e3018e80f12f"
+    ,
+    "agents/domain-expert-escalated.md":
+      "757be7b4ae325028195845cf48c57ea04e237587a0929258f8ff883a6ac3a681"
     ,
     "agents/domain-expert.md":
-      "39d129403402a9c2c7564cdffcb67785bcb9b4b1373f62511c5df82b9275d223"
+      "e21d45315f901b34a231e724a084708a177de308e6c2887079398504c2566f08"
+    ,
+    "agents/experience-reviewer-escalated.md":
+      "79984a097531a211229d781c7a96bd41ae3736196e5aa5bf75764a7b751bfdb0"
     ,
     "agents/experience-reviewer.md":
-      "d2afd2f12ea60328c7046664fc286f901c1121649e8bc3f7e10908eebd3e4639"
+      "9be52cbfff1379a3d2cf35c3abc41b2fbcbf850cc093b9c7161a7c0fe774a79c"
+    ,
+    "agents/frontend-developer-escalated.md":
+      "743934e4d2b594d24bfa97426bcb98ee656cd510a062d08673f6cd36b219883a"
     ,
     "agents/frontend-developer.md":
-      "2113e03c3624e3317385567c1199592550f898e5b14e1f186bf97ab501687b65"
+      "1a0d70d3141ae6ab4e87620bab37d8f8a0e9c53a127b514958b365436e05b06c"
+    ,
+    "agents/product-owner-escalated.md":
+      "52b9f49dfb8ee0ddbaa29c845f3ce6dcb2210e60d8ef2ab8c149e7a128698b11"
+    ,
+    "agents/product-owner-mechanical-escalated.md":
+      "d5cc2f92f627913513b5765427af50bd7b4084d0ba9fdbe6406cd927229adf6e"
     ,
     "agents/product-owner-mechanical.md":
-      "b035b03cd666ff83a0293832bd5abeffdaad731733f3afd38793296a5d0378e2"
+      "41cbcd4c461bc83a1f71af738b2d34e02bdf08c8a20b65aecf207b41227c5d5d"
     ,
     "agents/product-owner.md":
-      "699a7a5c223ccf8a459d3f7f705e11f25e1288e6bd097afee1f12e18e25d2a25"
+      "1bd59d26eb4a04ffd6996ebffffbc59cc0b5354667d6f1e8ac0d4330696517e1"
+    ,
+    "agents/qa-engineer-escalated.md":
+      "59d9aed979df520ead576fd6982d98e5539a505d3b6796cb09c30a6f4b80db8f"
+    ,
+    "agents/qa-engineer-mechanical-escalated.md":
+      "cfb37e8d71092ca945f0283b2dc085f237a5f196168cbfa74efa4cdda5f447ef"
     ,
     "agents/qa-engineer-mechanical.md":
-      "1ea9d8159ddbc8102d05eeabaab9dd8e2b0db76ac529f48d6a886d3aadd20c41"
+      "8174fb5c668e5412df9454a036c05f353296a2661603d312d54366345f1f3571"
     ,
     "agents/qa-engineer.md":
-      "e49f51df0c04a3e7e60fb61f4eff187d1a64111251e8fe526aa6556ef132eedb"
+      "0779606e15a835e9f3704a3d35e13b21afe253cb45a160a21ce4987608a858ac"
+    ,
+    "agents/software-architect-escalated.md":
+      "f0e8cee7a6b4e0f606ab22b99b1a0fb86102afc0429a04dc4ff13cd70f02f806"
     ,
     "agents/software-architect.md":
-      "fcd4deff239816e4931f8b0e0e85f441c53caa216b97ff5c0ed2c2301d8f4dcd"
+      "d3726c38f417f8fa422e02f3d2098b5b8155b41e4984bf3c8544dcd8f592b443"
+    ,
+    "agents/solution-architect-escalated.md":
+      "83cd10f0e510e742178d7421d4f415dea72be00b3c69c63db6203403b135a92f"
+    ,
+    "agents/solution-architect-mechanical-escalated.md":
+      "f441bd9df436d5f3298c6967d93862d71a2267b9fadc6dcd939b6d000a87142b"
     ,
     "agents/solution-architect-mechanical.md":
-      "f81b87317b90e290ca6986581c3a57252509848757d5ec0f33b6d01f496ffd07"
+      "d153dd01ed786e93d7aa9063eae90a1453af93bf045deb287c8e36b8fbc31aed"
     ,
     "agents/solution-architect.md":
-      "2c42669ddeaf5ff7fa8dcd644a000d76907ba19693d0311e6f1cb8c8c8ceda68"
+      "79d583eb2dabcf37c2881cf797501668e1c229d402ca83d787006511d2728b33"
+    ,
+    "agents/solution-reviewer-escalated.md":
+      "111320d6e02c120ff8c1333a7df17dfe83f51a6136c90d5ae5f68259d049bb28"
+    ,
+    "agents/solution-reviewer-lens-escalated.md":
+      "2ae6b94ba659b38f8b1ed32b31a7fd0670e1476c3a068814c32954c4f78f0b3e"
     ,
     "agents/solution-reviewer-lens.md":
-      "e3bf3fcb45178a244a6b2b09a6795bb5d44a4d0fa9f87a69b4670f6c1c9e85fd"
+      "42c5b0022bfb1ee962e814af94ddc1b328ce7a7d0eb0c4f6412b771b61795d38"
     ,
     "agents/solution-reviewer.md":
-      "32fad3c4737b5bacfcfed956bdcb8888030d4d8bb431ab35f475f691f34bfcb0"
+      "63a47a4a5a859414f42305c25c1a6ffb58d6a84afc68e156a38724c0a45682c6"
+    ,
+    "agents/ux-designer-escalated.md":
+      "c9112a50adeaaeb8c4a1e5b4e4e4d635f69af388e684f94adb2954771980b4d5"
     ,
     "agents/ux-designer.md":
-      "3f8af848a3fe76dd4af1a5c22ec03ea98b979baad6f3d2096579a89be3e9e45d"
+      "8e68ac8581dd0f54c77bca49f45fa05ad583ea8f191b717f0b9d76209bf734a6"
     ,
     "constitution.md":
-      "9ab4dd0b8df2fde66c82556e9a743a347294034035a73e6746f4bb12292ff00b"
+      "84df1f5975660898023262b49e424e253fe85c93920c59ea664b5896c6f24313"
     ,
     "flows/backlog-planning.md":
       "353c25d5cacab85d815b00aa110306737f30b0a8ad928ab045c558ea44d43d5f"
@@ -104,7 +179,7 @@
       "3ffad4ae7c6d98ba582a6919f71e96c35ce3825fda295a3ec8382b04414a778a"
     ,
     "flows/delivery-execution.md":
-      "83ddb6cccc0880a0eb6bec3f9fde73ec9193b2c723aa821c544d982990fc552b"
+      "cacf75414a81cb2d1dc1d5a5be0fcd811abc3d8423516331e03b2e90a9a08e0f"
     ,
     "flows/delivery-governance.md":
       "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
@@ -125,7 +200,7 @@
       "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
     ,
     "flows/fast-lane.md":
-      "83e2104ec507341d435502729d77dffb83b5c18e0f10eb14e683a2a18272b64d"
+      "92c49c4f3094e135dc2de9ce3487c68b390e7879373855b587ae8152953c0265"
     ,
     "flows/operation.md":
       "2a48be3a2321e14a3f154494c812d245e3f3b2ee5061ac28e2d8e7025e53cb06"
@@ -140,7 +215,7 @@
       "d8f59a3b7f2a956263e77f87b9ae2a2977093e19d6b41f4f81cf21f77f6900f0"
     ,
     "host-contract.md":
-      "f1db19c1ffb1c24877dc0450be80792d6e903f8c2690a366a58d989c92b2dca7"
+      "9c277e4ee299a8f0f20559a65e967922b6a8d694bbc18be5907a3df5d8ebce3b"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -224,13 +299,13 @@
       "c1ea21c439be664099cfba1779d9b98d1fbed9944d899f7fecd54fef57b5fc3b"
     ,
     "scripts/generate_codex_project.py":
-      "50cf0dcb2b0bae7c7e81a386a900ee2954615d4ef11eb2b96d6f5879b98994ba"
+      "18e3511f531893c5551e8564102ac9931ba8d1a1c1b2f21a3676c0d9df1a44a8"
     ,
     "scripts/hook_launcher.py":
       "450086b054cecaa8070947ea5829691c7278f88df05a684555101dfdac23196a"
     ,
     "scripts/host_listing.py":
-      "dbaca8977555d96f71b80e6e6b842ebfa242501c24d6ba04763990a5316451d6"
+      "508f6ad2e048594e5228c736647fd273588f080430d74c637e3e13dfef5a94c3"
     ,
     "scripts/host_models.py":
       "0055612b763ed5d5549432f86d2b978d6d3ff5af243e18e8b6d558f6d8d1f659"
@@ -247,6 +322,9 @@
     "scripts/marketplace_paths.py":
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
+    "scripts/model_class.py":
+      "ba7c94ac9c4ffc243d7665e7d4a186beb52be5e88cfb87c1da950b4c1dec437b"
+    ,
     "scripts/operation_compile.py":
       "d125e95eea4a18ad5ac45a3c421434698a66cadfab3038f81038a93be8052190"
     ,
@@ -257,7 +335,7 @@
       "155b3c52017cc5ab6de3767b351a9e1de483d6408eca4da17b400e9a5d97e629"
     ,
     "scripts/project_config.py":
-      "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
+      "d20cad53bed9b8d85cf264eee7631a579a3e579392ac74e3782827811e6c6d10"
     ,
     "scripts/project_context.py":
       "875630c752abab00578400b4603cd867af28dbf7c7c4832e1d37751f9b532d54"
@@ -275,7 +353,7 @@
       "a6343f84ecec31095e660d4ea8cfde2711d859304c14fd1f0be04ad409f81131"
     ,
     "scripts/role_settings.py":
-      "bb29528f8f415836298dd51cbad4a1d084ffde15c2130641d65e4e92bf5c5062"
+      "de9223bdc1e7a33986ecff02e7390d345f8b28060590786175dce55b412bf87e"
     ,
     "scripts/runtime_floor.py":
       "511eaa656636b33440f7eb752c960934fc516d81deeeb06b1f009268128ce283"
@@ -287,7 +365,7 @@
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
     "scripts/setup_project.py":
-      "ddfad711127a09adbe3f84843749e3b4d3bd03f653082e5dcd1f47499299ccac"
+      "43d41d79c356cb836ee8fde5410e9129375a6feb51460b35a2962b6738e14ce3"
     ,
     "scripts/stage_package.py":
       "e0d667a6012af3cc67afa787ebaa6d12a9b9bf87adc422cc70dcd4b61456427b"
@@ -296,7 +374,7 @@
       "9074dc24c1eb57a0c0b7ef9dde98a17bd5b79ea553233a600a54cbcb32a865c5"
     ,
     "scripts/task_inputs.py":
-      "4e4dac8ad7f01dec7f3e2d86f02746ff67297617789555d2211c3ab722b961b0"
+      "16ca5f8e12e50fb17bf64801c659588cee5158a7e347acf8a4df0da3375a23a3"
     ,
     "scripts/task_lane.py":
       "e43f9ec969dff7ec6c30b6f8ff6940a09b3288066178332bccc3cb96440a49ec"
@@ -311,7 +389,7 @@
       "3018dffa62af0d49e674197b1a0a2036443c2a916aa7c1c73f1ffb529552adc2"
     ,
     "scripts/vault_hook.py":
-      "12b90877550235da4f0d72ffe200d0d01105c3857769934ecd66e44d5d530374"
+      "629db613c71c758b8c5640cade1e798820b907ed07560b1cb7d5f3c5d7e70b88"
     ,
     "scripts/vault_index.py":
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
@@ -407,7 +485,7 @@
       "d4a89209d70c18854e415f506547b068759b52f0dd51759447443e764a184de4"
     ,
     "skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md":
-      "bc0e1b68883d56f4e2c756164a0d8b9b2fba1bd827bec08c045fc7a92b149598"
+      "dff49cc85afdc1b621ef4f07cf3aa59046a84f222d7d97c08747ba73180c759f"
     ,
     "skill-content/challenge-review/references/switch-reader_waves-all_at_once.md":
       "3902b589453f594c79c32b3f20d9d9126e825f8ab9e6f905ef934b7084157d97"
@@ -419,13 +497,13 @@
       "eaaeb28e96e4421ece56bc4bd1b868b4ab41dffba9bd5b1d57d24d3d4c7a1778"
     ,
     "skill-content/challenge-review/references/switch-review_loop-blocking_delta.md":
-      "2ba3bd1a00cb627cafdf9edf34c7aba411e4bb49b5f6e3fef5843f4513f05452"
+      "06b835974aa8cd232b94d8efede5946f40388324eed013373d00ebccaee05dd6"
     ,
     "skill-content/challenge-review/references/switch-review_panels-lens_panel.md":
-      "3b647cbaf841f4212de8e8c18abd1ea2ac727bdf59c4a381f5d5b4846402995e"
+      "ee24f92fef8272fffb1284e2b4741fe3f79adeab60648de1d8c9b9ca3b6ffa12"
     ,
     "skill-content/challenge-review/references/switch-review_rounds-single_pass.md":
-      "9cba8c83dc528ff6fa582fafafaddc42210d306e327e100e2ea6e7d702c63f89"
+      "d77e71fb65b21a986bbd88c7a88a5a37dae3245158702b46fcae6627697de988"
     ,
     "skill-content/challenge-review/references/switch-review_scope-impact_closure.md":
       "f16995fd7cdb5370b9a798d7ae8e4269124cad3d4f7d396dbd11d69f4f58f212"
@@ -461,7 +539,7 @@
       "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
     ,
     "skill-content/code-review/references/switch-code_review_panel-beside_official.md":
-      "be3be367917f0e6e42272262cc89899774976272325de244e229a4b9db2f99fa"
+      "8a622320bff9536734856bf97d443f5103e0745f4d7196a6cc629faa5bf5bf87"
     ,
     "skill-content/code-review/references/switch-code_review_panel-risk_scoped.md":
       "e827434f9735f89a8e37d4d29c507ff003d1c39af71a1a95d3764f086b5961e0"
@@ -473,13 +551,16 @@
       "468900afff495e6077aa3c6b0f2199eee9824ac3fe4541532147ff2277193d8c"
     ,
     "skill-content/code-review/references/switch-review_loop-blocking_delta.md":
-      "08e22f5d1ff8adbc0841e1f34c9debeb46d5b9daa1710f5de500be91db559863"
+      "d923de39a2b7c0b8d5e88268613fc0a8ef8d251ee7557a41d124e18da7dcaae1"
     ,
     "skill-content/configure/SKILL.md":
-      "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
+      "bad92d40cf4f3761e5c967618e43ef8ac061e6e34d4ae3964a3717c5f922f4cf"
     ,
     "skill-content/configure/data/process-switches.json":
-      "75992591ef6ea0b0bd610b2ee4e2fce8eaf1213d2d444a7f888c948107dc320a"
+      "15bc9f84cda694edc05195bc5abaa83d570df1df873aa2126ce7a6dcab344a14"
+    ,
+    "skill-content/configure/data/purpose-variants.json":
+      "cc60fba8d1f514ad3ba3917b4b6a6b053ad829090be02ef4aa98062f12c3e30b"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -488,13 +569,13 @@
       "dd99177f7ffc6e91fe189b9d5cc2eae518071e90b1d73a67913400c7aa955a74"
     ,
     "skill-content/configure/references/config-contract.md":
-      "acf3d1271b38168474b5cd7e245e3a9e9913ee45ca37bde3c59baa89c2b4d27b"
+      "d91ce0cdd594a5f5e42cc43b02f144cacbbf019ccf6e6acdd9750480bfd33145"
     ,
     "skill-content/configure/references/process-policy.md":
       "62d3e93a082404ef6d6818db8f302f167a04ae80be3d0b268b93bb6de8b17239"
     ,
     "skill-content/configure/references/role-models.md":
-      "6de77ca2745c140a03f3baa932e94f7489b4694965f2de753fbfd7ca40daca63"
+      "27eb4815c428b9fd907f7089162aa520222b36f9da72fca7d2e2034f48265d7f"
     ,
     "skill-content/configure/references/switch-execution_planning-single_source_bundle.md":
       "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
@@ -869,7 +950,7 @@
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"
     ,
     "skill-content/setup/SKILL.md":
-      "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
+      "8c59ecce59d1b49c248675c5d8e1088fa4475cfc58a2c1292f1c27a8849a768e"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "598c71d4a7c4d0b72d8a57d2bc18898292583a7c692d3d227d0e12a50218a39b"
@@ -1126,6 +1207,9 @@
     "templates/memory/profile.md":
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
+    "templates/model-classes.json":
+      "b8e53929f258a2ce40631ec2a44c8baaca257072e95e7565ecf58172113384ae"
+    ,
     "templates/project-context-policy.json":
       "1064215323cacff3ba2748f6992ac5d43026183c4f30e43b1633d579800d951f"
     ,
@@ -1152,9 +1236,6 @@
     ,
     "templates/task-input-policy.json":
       "c26391187d793f2e715bdba7c60bf9ead15d96ab842fc3784bb3b6ab6d4facef"
-    ,
-    "templates/tier-map.json":
-      "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"
     ,
     "templates/vault-index-policy.json":
       "d44d46600e86a49f6b054d6a79ce989ff8b43740357fa8c8b0cfe9b015755584"

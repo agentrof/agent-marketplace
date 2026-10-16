@@ -41,8 +41,7 @@ MODEL_CONFIG_RELPATH = "tools/data/models.json"
 LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 PRODUCT_CONFIG_RELPATH = "product.json"
 
-AGENT_REQUIRED_KEYS = {"name", "description", "reasoning", "output_contract"}
-AGENT_REASONING_ENUM = {"high", "medium", "low", "inherit"}
+AGENT_REQUIRED_KEYS = {"name", "description", "model_class", "output_contract"}
 # How the role hands results back. prose: findings/artifacts in the reply
 # text (every current persona). structured: a forced tool call. Declared so
 # a composer can refuse pairing a prose persona with schema forcing; the
@@ -348,13 +347,13 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                     "error", rel(tree, path), 1, "frontmatter_shape",
                     f"agent frontmatter missing keys: {sorted(missing)}",
                     "add the missing keys; agents require name, description,"
-                    " reasoning, output_contract",
+                    " model_class, output_contract",
                 ))
             if extra:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
                     f"agent frontmatter has unsupported keys: {sorted(extra)}",
-                    "remove them; agents carry name, description, reasoning,"
+                    "remove them; agents carry name, description, model_class,"
                     " output_contract and optionally a read-only tools whitelist",
                 ))
             if "tools" in fm:
@@ -368,15 +367,15 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                         f" {sorted(AGENT_READONLY_TOOLS)}. Full-capability agents"
                         " omit the key",
                     ))
-            reasoning = fm.get("reasoning", "")
-            reasoning_enum = declared_tiers(tree)
-            if reasoning and reasoning not in reasoning_enum:
+            model_class = fm.get("model_class", "")
+            classes = declared_classes(tree)
+            if model_class and classes and model_class not in classes:
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "frontmatter_shape",
-                    f"agent reasoning '{reasoning}' is not in"
-                    f" {sorted(reasoning_enum)}",
-                    "use a host-neutral level from tools/data/models.json"
-                    " reasoning_levels",
+                    f"agent model_class '{model_class}' is not in"
+                    f" {sorted(classes)}",
+                    "use a purpose class of tools/data/models.json"
+                    " model_classes",
                 ))
             contract = fm.get("output_contract", "")
             if contract and contract not in AGENT_OUTPUT_CONTRACT_ENUM:
@@ -2329,74 +2328,52 @@ def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
                             " name one plugin")
 
 
-def _config_shape_errors(config: dict) -> list[str]:
-    problems: list[str] = []
-    if not isinstance(config.get("schema_version"), int):
-        problems.append("schema_version must be an integer")
-    levels = config.get("reasoning_levels")
-    if (not isinstance(levels, list) or not levels
-            or not all(isinstance(level, str) and KEBAB_RE.match(level)
-                       for level in levels)):
-        problems.append("reasoning_levels must be a non-empty kebab-case list")
-    return problems
-
-
 def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
-    """tools/data/models.json is the reasoning policy file the canonical
-    agent frontmatter reads from; an unloadable or malformed config would
-    let the enum silently fall back, so its shape is validated like any
-    other policy artifact."""
+    """tools/data/models.json is the purpose class declaration the canonical
+    agent frontmatter, the execution profiles and the class map read from; a
+    malformed one would let those checks silently pass, so its shape is
+    validated like any other policy artifact."""
     if tree.config is None:
-        try:
-            json.loads((tree.root / MODEL_CONFIG_RELPATH).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            problem = "model config is missing or not valid JSON"
-        else:
-            problem = ("model config must be a JSON object holding schema_version"
-                       " and reasoning_levels")
-        findings.append(Finding(
-            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape", problem,
-            "restore tools/data/models.json; the agent reasoning enum"
-            " lives there",
-        ))
-        return
-    for problem in _config_shape_errors(tree.config):
-        findings.append(Finding(
-            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape", problem,
-            "fix the config block; the enum feeds the frontmatter_shape"
-            " reasoning check",
-        ))
-    levels = tree.config.get("reasoning_levels")
-    builder_levels = build_distributions.CANONICAL_REASONING_LEVELS
-    if isinstance(levels, list) \
-            and all(isinstance(level, str) for level in levels) \
-            and set(levels) != builder_levels:
         findings.append(Finding(
             "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape",
-            f"reasoning_levels {sorted(set(levels))} differ from the"
-            f" distribution builder's tiers {sorted(builder_levels)}",
-            "change reasoning_levels and CANONICAL_REASONING_LEVELS in"
-            " tools/build_distributions.py together",
+            "model config is missing or not valid JSON",
+            "restore tools/data/models.json; the purpose classes live there",
+        ))
+        return
+    for problem in build_distributions.model_classes_problems(tree.config):
+        findings.append(Finding(
+            "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape", problem,
+            "fix the declaration; it feeds the frontmatter_shape model_class check"
+            " and every execution profile",
         ))
 
 
-def declared_tiers(tree: Tree) -> set[str]:
-    """Return the reasoning tiers tools/data/models.json declares."""
-    levels = (tree.config or {}).get("reasoning_levels")
-    return set(levels) if isinstance(levels, list) and levels and all(
-        isinstance(level, str) for level in levels
-    ) else set(AGENT_REASONING_ENUM)  # model_config_shape reports bad shapes
+def declared_classes(tree: Tree) -> set[str]:
+    """Return the purpose classes tools/data/models.json declares, or none
+    when it is malformed (model_config_shape reports that)."""
+    if build_distributions.model_classes_problems(tree.config):
+        return set()
+    return set(tree.config["model_classes"])
+
+
+def declared_slots(tree: Tree) -> set[str]:
+    """Return every class slot the execution profiles map."""
+    if build_distributions.model_classes_problems(tree.config):
+        return set()
+    return set(build_distributions.class_slots(tree.config["model_classes"]))
 
 
 def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
     """Every host pins its catalog models by documented exact IDs and maps
-    exactly the canonical reasoning tiers to a catalog model and a supported
+    exactly the class slots to a catalog model and a supported
     effort; model names stay under platforms/."""
     try:
         adapters = build_distributions.load_adapters(tree.root)
     except ValueError:
         return  # registration and product_namespace report adapter failures
-    tiers = declared_tiers(tree)
+    slots = declared_slots(tree)
+    if not slots:
+        return  # model_config_shape reports a malformed class declaration
     for host, adapter in adapters.items():
         tables = {}
         for kind, path, hint in (
@@ -2404,7 +2381,7 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
                  "key each catalog model by an exact ID the host documents, with"
                  " its family, supported efforts, sources and verified date"),
                 ("profile", build_distributions.execution_profile_path(tree.root, host),
-                 "map every reasoning tier in tools/data/models.json to a model"
+                 "map every class slot of tools/data/models.json to a model"
                  " of the host's model catalog and an effort that model supports")):
             try:
                 tables[kind] = (path, json.loads(read_text(path)), hint)
@@ -2426,7 +2403,7 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
             findings.extend(Finding(
                 "error", rel(tree, path), 1, "execution_profiles", problem, hint,
             ) for problem in build_distributions.execution_profile_problems(
-                value, catalog, adapter, tiers))
+                value, catalog, adapter, slots))
 
 
 def check_host_cli_versions(tree: Tree, findings: list[Finding]) -> None:
@@ -2462,7 +2439,7 @@ def check_effort_policy(tree: Tree, findings: list[Finding]) -> None:
     """Each host's effort policy confirms and refuses only efforts of its
     vocabulary, states its evidence with sources and a verified date, and
     refuses no effort the package profile pins: a project may override a role
-    tier's effort only within it."""
+    class's effort only within it."""
     try:
         adapters = build_distributions.load_adapters(tree.root)
     except ValueError:
@@ -2781,7 +2758,7 @@ SWITCH_PARAMETER_TYPES = {"positive_integer", "glob_list"}
 # A package limit is a number; a promotion ships no glob list.
 SWITCH_LIMIT_TYPES = {"positive_integer"}
 VALUE_DATA_RE = re.compile(r"^skill-content/[a-z0-9]+(?:-[a-z0-9]+)*/data/[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
-AGENT_VARIANT_KEYS = {"suffix", "tier", "description", "agents"}
+AGENT_VARIANT_KEYS = {"suffix", "class", "description", "agents"}
 MECHANICAL_PASS_SWITCH = "mechanical_pass_tier"
 MECHANICAL_PASS_VALUE = "mechanical"
 TASK_INPUT_POLICY_RELPATH = "templates/task-input-policy.json"
@@ -2792,7 +2769,7 @@ def _nonblank(value: object) -> bool:
 
 
 def agent_variant_problems(where: str, variants: object, values: list[str], default: object,
-                           agents: set[str], tiers: set[str]) -> list[str]:
+                           agents: set[str], classes: set[str]) -> list[str]:
     """Return the problems of one switch's generated agent variants."""
     if not isinstance(variants, dict) or not variants:
         return [f"{where}: agent_variants must map a switch value to its variant"]
@@ -2802,12 +2779,12 @@ def agent_variant_problems(where: str, variants: object, values: list[str], defa
         if value not in values or value == default:
             problems.append(f"{at}: agent variants belong to a declared value other than the default")
         if not isinstance(spec, dict) or set(spec) != AGENT_VARIANT_KEYS:
-            problems.append(f"{at}: an agent variant holds exactly suffix, tier, description and agents")
+            problems.append(f"{at}: an agent variant holds exactly suffix, class, description and agents")
             continue
         if not isinstance(spec["suffix"], str) or not KEBAB_RE.match(spec["suffix"]):
             problems.append(f"{at}: variant suffix must be kebab-case")
-        if spec["tier"] not in tiers:
-            problems.append(f"{at}: variant tier {spec['tier']!r} is not a declared reasoning tier")
+        if classes and spec["class"] not in classes:
+            problems.append(f"{at}: variant class {spec['class']!r} is not a declared purpose class")
         # The description is rendered into agent frontmatter as one plain scalar.
         if not _nonblank(spec["description"]) or ":" in spec["description"] \
                 or "\n" in spec["description"]:
@@ -2869,7 +2846,7 @@ def value_data_problems(plugin: Path, switches: dict) -> list[str]:
 def mechanical_variant_problems(plugin: Path, switches: dict) -> list[str]:
     """A mechanical pass applies fixes as its owning writer, so the switch
     declares writer variants and never a read-only reviewer's or challenger's:
-    every review, re-check and calibration keeps its role's tier."""
+    every review, re-check and calibration keeps its role's class."""
     spec = switches.get(MECHANICAL_PASS_SWITCH)
     if not isinstance(spec, dict):
         return []
@@ -2891,7 +2868,7 @@ def mechanical_variant_problems(plugin: Path, switches: dict) -> list[str]:
         if agent in read_only or {tool.strip() for tool in tools.split(",") if tool.strip()}:
             problems.append(
                 f"{MECHANICAL_PASS_VALUE!r} agent variant {agent!r} is a read-only reviewer or"
-                " challenger; its reviews, re-checks and calibrations keep their tier")
+                " challenger; its reviews, re-checks and calibrations keep their class")
     return problems
 
 
@@ -2964,7 +2941,7 @@ def parameter_problems(where: str, parameters: object, values: list[str], defaul
 
 
 def process_switch_problems(data: object, flows: set[str], agents: set[str],
-                            tiers: set[str], plugin: Path | None = None) -> list[str]:
+                            classes: set[str], plugin: Path | None = None) -> list[str]:
     """Return the shape problems of the package's process switch registry."""
     if not isinstance(data, dict) or set(data) != {"schema_version", "switches"} \
             or data.get("schema_version") != 1:
@@ -3032,7 +3009,7 @@ def process_switch_problems(data: object, flows: set[str], agents: set[str],
             problems.extend(parameter_problems(where, spec["parameters"], ids, default, plugin))
         if "agent_variants" in spec:
             variants = spec["agent_variants"]
-            problems.extend(agent_variant_problems(where, variants, ids, default, agents, tiers))
+            problems.extend(agent_variant_problems(where, variants, ids, default, agents, classes))
             for variant in variants.values() if isinstance(variants, dict) else []:
                 if not isinstance(variant, dict) or not isinstance(variant.get("agents"), list):
                     continue
@@ -3049,7 +3026,7 @@ def process_switch_problems(data: object, flows: set[str], agents: set[str],
 def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
     """Process switches are declared once in the package registry, and every
     switch is anchored in each flow that owns it as switch `<id>`."""
-    tiers = declared_tiers(tree)
+    classes = declared_classes(tree)
     for plugin in plugin_dirs(tree):
         path = plugin / PROCESS_SWITCHES_RELPATH
         flows_dir = plugin / "flows"
@@ -3076,7 +3053,7 @@ def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
             continue
         agents = {agent.stem for agent in agent_files(plugin)}
         for problem in process_switch_problems(data, {flow.stem for flow in flow_paths},
-                                               agents, tiers, plugin):
+                                               agents, classes, plugin):
             err(path, problem, "declare each switch once with its owning flows, values,"
                 " default, component metric and promotion rule")
         switches = data.get("switches") if isinstance(data, dict) else None

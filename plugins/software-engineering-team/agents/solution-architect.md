@@ -1,7 +1,7 @@
 ---
 name: solution-architect
 description: Solution architect role. Runs the interactive solution-design persona of software-engineering-team flows and curates the project's solution landscape; invoked with explicit inputs, never auto-triggered.
-reasoning: high
+model_class: critical_decision
 output_contract: prose
 ---
 

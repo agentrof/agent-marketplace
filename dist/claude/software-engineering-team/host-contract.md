@@ -138,27 +138,29 @@
   `software-engineering-team-<agent-id>.md` files that carry its generated
   header. It leaves every other file there and lists under `kept` one that
   carries the header, such as a user's copy of a rendered role.
-- Role agents use the package's `auto` execution profile: each of the
-  three role tiers runs one model of the package's model catalog, named by
-  its exact model ID, at the tier's `effort`. The high tier runs
-  `claude-opus-5-5` at effort `xhigh`, the medium tier `claude-opus-5-5` at
-  effort `medium` and the low tier `claude-sonnet-5-5` at effort `high`; the
-  catalog keeps `claude-haiku-4-5-20251001`, which no tier runs. A role
-  without an `effort` would follow the session's level, `max` included.
-  A pinned ID does not follow the main conversation: unlike a family alias
-  such as `opus`, it keeps its version and context window when the main
-  conversation runs a newer model or a `[1m]` variant of that family. Every
-  build also ships the `-lens` variants of the read-only document reviewers
-  on the `low` tier, `claude-sonnet-5-5` at effort `high`; only
-  review panels under switch `review_panels` at `lens_panel` spawn them, and
-  the reviewers themselves keep their own tier. Every build also ships
-  `code-reviewer-lens` on the same tier; only the code review panel under
-  switch `code_review_panel` at `beside_official` or `risk_scoped` spawns it, and
-  `code-reviewer` keeps its own tier. The package cannot switch the profile
-  per user.
-  The pinned models need Claude Code 2.1.284 or later: Sonnet 5.5 from
-  2.1.284, Opus 5.5 from 2.1.280 and Haiku 4.5 from 2.1.74, the first version
-  that honours a full model ID in agent frontmatter. To run
+- Role agents use the package's `auto` execution profile by purpose class.
+  Each class slot runs one model of the package's model catalog, named by its
+  exact model ID, at the slot's `effort`; a class that escalates has a second
+  slot, `<class>_escalated`, for a task of size `l`, rigor `high` or a risk
+  flag. `mechanical` runs `claude-haiku-5-5` at `high`; `routine_authoring`
+  and `routine_review` `claude-sonnet-5-5` at `high`; `complex_authoring`
+  `claude-sonnet-5-5` at `xhigh`; `critical_decision` `claude-opus-5-5` at
+  `high`; `security_review` `claude-opus-5-5` at `xhigh` and `orchestration`
+  `claude-sonnet-5-5` at `medium`, the last two never escalating. Each role
+  file carries its own class's pin. Every spawn passes the `model` family
+  alias and the `effort` that `model_class.py resolve` returns, which
+  override the file's pins for that spawn; a per-spawn `effort` needs Claude
+  Code 2.1.292 or later. The `haiku` alias resolves to Haiku 4.5 on Bedrock,
+  Vertex and Foundry. A role without an `effort` would follow the session's
+  level, `max` included. Every build also ships the `-lens` variants of the
+  read-only document reviewers and `code-reviewer-lens` on `routine_review`;
+  only review panels under switch `review_panels` at `lens_panel` and the
+  code review panel under switch `code_review_panel` at `beside_official` or
+  `risk_scoped` spawn them, and the reviewers themselves keep their own
+  class. The package cannot switch the profile per user.
+  The pinned models need Claude Code 2.1.293 or later: Haiku 5.5 from
+  2.1.293, Sonnet 5.5 from 2.1.284, Opus 5.5 from 2.1.280 and Haiku 4.5,
+  which no class runs, from 2.1.74. To run
   every role on the main conversation's model for good, for example when the
   provider never offers a pinned model, the user sets
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in the `env` block of the project's
@@ -167,24 +169,35 @@
   `CLAUDE_CODE_EFFORT_LEVEL`, which pins one level for the session and every
   subagent. Both settings reach every subagent in the session, not only this
   team.
-- A project sets a tier's model and effort and a role's tier through
+- Rendered role agents set `omitClaudeMd: true`, so a role starts without the
+  user's and the project's `CLAUDE.md` chain (Claude Code 2.1.271 or later);
+  the constitution in its prompt carries the rules every role needs. Their
+  `disallowedTools` remove the artifact, workflow and scheduling tools and
+  every MCP server (`mcp__*`); `frontend-developer`, `ux-designer`,
+  `experience-reviewer` and `qa-engineer` keep the browser servers and lose
+  only the desktop, terminal and visualization ones, and only
+  `delivery-coordinator` keeps `Agent`. The list is
+  `platforms/claude/agent-tools.json`.
+- A project sets a class slot's model and effort and a role's class through
   `/configure models`, which records only overrides in
-  `workspace/config.json`: `tier_models`, per host and tier a `model`, an
+  `workspace/config.json`: `class_models`, per host and slot a `model`, an
   exact model ID of this host's model list or `session`, and an `effort`,
-  either one optional, and `role_tiers`, which moves any role, the generated
-  variants included, between the high, medium and low tiers on every host.
-  Setup writes neither key. A role's tier comes from `role_tiers`, else the
-  package; the tier's model and effort come from `tier_models`, else the
-  package's `auto` profile, and a missing key keeps the package value.
-  `session` renders `model: inherit`, which runs the role on the main
-  conversation's model at the tier's `effort`. Setup and refresh render
-  every role, its `-lens` and `-mechanical` variants included, into
-  `.claude/agents/software-engineering-team-<agent-id>.md` with its resolved
-  `model` and `effort` and report each role's tier, model, effort and
-  source; `project_config.py tiers` prints the config-level effective map.
-  Generated role files are never edited by hand: `/configure models` renders
-  them again. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` still overrides that
-  `model`, `CLAUDE_CODE_EFFORT_LEVEL` still overrides that `effort`, and a
+  either one optional, and `role_classes`, which moves any role, the
+  generated variants included, to another class on every host. Setup writes
+  neither key and drops the retired `tier_models` and `role_tiers`. A role's
+  class comes from `role_classes`, else the package; the slot's model and
+  effort come from `class_models`, else the package's `auto` profile, and a
+  missing key keeps the package value. `session` renders `model: inherit`,
+  which runs the role on the main conversation's model at the slot's
+  `effort`, and `model_class.py resolve` then passes no `model`. Setup and
+  refresh render every role, its `-lens` and `-mechanical` variants
+  included, into `.claude/agents/software-engineering-team-<agent-id>.md`
+  with its resolved `model` and `effort` and report each role's class,
+  model, effort and source; `project_config.py classes` prints the
+  config-level effective map. Generated role files are never edited by
+  hand: `/configure models` renders them again.
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` still overrides that `model`,
+  `CLAUDE_CODE_EFFORT_LEVEL` still overrides that `effort`, and a
   `maxEffortLevel` setting, the lowest across settings files, or an
   organization effort limit caps it. `/tasks` names each running role's
   model and the effort its definition sets. The first render creates
@@ -194,14 +207,14 @@
   with a visible warning, by one strategy on both hosts:
   - Setup and refresh read this host's own model list from the binary that
     runs this session, without a model request, and judge each model a role
-    is pinned to, the project's `tier_models` included: `available` when the
+    is pinned to, the project's `class_models` included: `available` when the
     list holds it and reflects the signed-in account,
     `unavailable` when the list does not hold it, since this binary cannot
     run it, and `unverified` when no list could be read or the list reflects
     no account. Every probe has a time limit, and one that fails gives
     `unverified`, never an error that stops setup.
   - The roles of an `unavailable` model run on this session's model at their
-    own effort, and setup prints a warning that names the model, its tiers
+    own effort, and setup prints a warning that names the model, its class slots
     and its roles; every setup or refresh judges the model again. An
     `unverified` model keeps its pin with a note, and the run-time rule
     covers it.
@@ -210,7 +223,7 @@
     when the failed run changed nothing.
   - On Claude Code the binary is `CLAUDE_CODE_EXECPATH` or the executable of
     `CLAUDE_PID`, else `claude` on PATH when its version meets the highest
-    `min_cli_version` of the catalog models the tiers run. The list is the
+    `min_cli_version` of the catalog models the class slots run. The list is the
     `models` of its reply to the `initialize` control request, and it
     reflects the account only when the reply's `account.tokenSource` names a
     claude.ai login. The request runs with every hook off and loads no MCP
@@ -246,22 +259,19 @@
     reports its failure only in its completion message. Its `PostToolUse` hook
     warns when a role started on another model than its pin, and that run
     stands. A rendered role's pin is the `model` of its rendered file, or of
-    the package tier map when the project holds no such file; without a pin
+    the package class map when the project holds no such file; without a pin
     both hooks stay silent.
     Neither hook fires for a spawn that passes `model` or under
     `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so a model the user chose never
-    triggers them and a re-spawn never repeats.
+    triggers them and a re-spawn never repeats; since every resolved spawn
+    passes `model`, the hooks cover only a spawn made without the resolver.
 - Every build also ships the `-mechanical` variants of the document writers
   `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `low` tier, `claude-sonnet-5-5` at effort `high`. Only
+  on the `mechanical` class, `claude-haiku-5-5` at effort `high`. Only
   switch `mechanical_pass_tier` at `mechanical` spawns them, for a pass that
   applies the fixes a review names; the writers themselves keep their own
-  tier, and no review, re-check or calibration runs on a variant. A variant
-  runs its pass in a fresh context at that setting. Every variant moves its
-  writer from Opus to Sonnet, the smaller model; its effort `high` is above
-  the `medium` of `product-owner`, `qa-engineer` and `devops-engineer` and
-  below the `xhigh` of `solution-architect`. These values are placeholders
-  until the variants' frozen-task A/B sets them.
+  class, and no review, re-check or calibration runs on a variant. A variant
+  runs its pass in a fresh context at that setting.
 - Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
   is planned inside `/delivery-plan` with one owner gate, presented through
   `AskUserQuestion`, and handed over to `/deliver-governed DLV-###`; `/execution-plan

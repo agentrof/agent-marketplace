@@ -505,6 +505,26 @@ def pending_decisions(body: str, stories=None) -> list[str]:
             and (wanted is None or wanted & {story.casefold() for story in decision_blocks(row)})]
 
 
+def pending_owner_questions(body: str) -> list[dict]:
+    """Questions a published plan can ask now, before their blocked Items start."""
+    if not holds_decision_log(body):
+        return []
+    rows, errors = decision_rows(body)
+    if errors:
+        raise ValueError("; ".join(errors))
+    questions = []
+    for row in rows:
+        if row["status"] != "pending" or not decision_blocks(row):
+            continue
+        question = {key: row[key] for key in ("id", "class", "question", "recommendation")}
+        question.update(options=[option.strip() for option in row["options"].split(";") if option.strip()],
+                        blocks=decision_blocks(row))
+        question["question_hash"] = "sha256:" + hashlib.sha256(
+            json.dumps(question, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+        questions.append(question)
+    return questions
+
+
 def pending_rows_text(ids: list[str]) -> str:
     return f"User Decisions {'row' if len(ids) == 1 else 'rows'} {', '.join(ids)}" \
            f" {'is' if len(ids) == 1 else 'are'} pending"

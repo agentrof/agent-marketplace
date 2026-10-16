@@ -2605,14 +2605,15 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
                            remote: str = "origin") -> dict:
     root = main_worktree(project_root.resolve())
     refuse_merged_delivery(root, delivery_id, remote)
-    from delivery_compile import delivery_findings, docs_root
+    from delivery_compile import delivery_findings, docs_root, pending_owner_questions
     docs = docs_root(root)
     directory, findings = delivery_findings(docs, delivery_id)
     if directory is None or findings:
         raise RuntimeError("Delivery package is not portable: " + "; ".join(findings))
     delivery_path_value = directory / "delivery.md"
     from delivery_compile import split_note
-    props, _ = split_note(delivery_path_value)
+    props, body = split_note(delivery_path_value)
+    owner_questions = pending_owner_questions(body)
     if props.get("status") != "execution_approved":
         raise RuntimeError("publish-execution-plan requires execution_approved")
     refs = canonical_refs(delivery_id)
@@ -2651,6 +2652,7 @@ def publish_execution_plan(project_root: Path, delivery_id: str,
                                (refs["integration"], integration_oid, integration_candidate)])
     return {"ok": True, "delivery": delivery_id, "fence": fence_candidate,
             "integration": integration_candidate, "operation_not_carried": not_carried,
+            **({"owner_questions": owner_questions} if owner_questions else {}),
             "refs": short_refs(delivery_id)}
 
 

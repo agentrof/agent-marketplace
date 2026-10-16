@@ -2,6 +2,7 @@
 name: autopilot
 description: Let the orchestrating session take the recommended option at every question of an allowed class for a stated time or until a goal, record each decision and queue every other question.
 exposure: entry
+model_invocable: false
 ---
 
 # Autopilot
@@ -79,7 +80,9 @@ guard stops an agent that runs the packaged script, not a process that writes
 the runtime files with the user's filesystem authority; the package's vault
 hook narrows that gap without closing it. Ending early through `off` or
 `complete` is always allowed, because an ended grant only returns the
-session to asking.
+session to asking. This is the one entry an agent never invokes, so the
+source-tree fallback keeps its user-only guard; an agent runs the packaged
+script's `off`, `complete`, `status` and `report` verbs directly.
 
 ## Procedure
 

@@ -393,15 +393,15 @@ def skill_metadata(path: Path) -> tuple[str, str, str, str, dict]:
         raise ValueError(f"{path}: project_scope must be project or external")
     if project_scope == "external" and exposure != "entry":
         raise ValueError(f"{path}: only entry skills may be external")
-    # Entry invocation flags: model_invocable lets agents call an entry, such as a
-    # report; user_invocable false hides a retired entry from the user's menu.
+    # Entry invocation flags: agents may call every entry the user can, unless
+    # model_invocable is false; user_invocable false hides an entry from the menu.
     flags = {}
-    for key, default in (("model_invocable", False), ("user_invocable", True)):
+    for key, default in (("model_invocable", True), ("user_invocable", True)):
         raw = fields.get(key, str(default).lower())
         if raw not in {"true", "false", True, False}:
             raise ValueError(f"{path}: {key} must be true or false")
         flags[key] = raw in {"true", True}
-        if flags[key] != default and exposure != "entry":
+        if key in fields and exposure != "entry":
             raise ValueError(f"{path}: only entry skills may set {key}")
     unexpected = set(fields) - {
         "name", "description", "exposure", "project_scope", "model_invocable",

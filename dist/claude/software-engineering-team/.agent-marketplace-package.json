@@ -320,7 +320,7 @@
       "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
     ,
     "skill-content/autopilot/SKILL.md":
-      "071a08e687d7169d377160c91ae0e3eb1a8e815437f54eba64b8bc6e4882eb24"
+      "71faec9554427e74592262571a9d4711d3cd3bcf62da493df308fbbf3e1595ed"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
       "a89fe73d565a15949287c8b7235e55a36e0ff3b3888e3cd63e48ef7c8bdc1a55"
@@ -860,7 +860,7 @@
       "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
     ,
     "skill-content/retrospective/SKILL.md":
-      "0e0d250b0fa374fc8cd4aa12272d7f1aa6e6d2a32040c4045ae05d7245b394c7"
+      "1ae1be4ab99eadfe16dda5c4538c785e3fdd1fd74741c0e5c9ca583b89afaf7c"
     ,
     "skill-content/setup/SKILL.md":
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
@@ -1019,7 +1019,7 @@
       "8fbd75651e221bb30b2929789facec58535da0674e42071f0d8d62cd9c391ee2"
     ,
     "skills/business-analysis/SKILL.md":
-      "5a8db8475d4ded91218859f045fdd8459b3bc434eaeba17b3ad1b99d0fd2e2db"
+      "857247fedde64ee993a6a9079ad078a3ff25250d03a005b8e6701aa468feb83f"
     ,
     "skills/challenge-review/SKILL.md":
       "5e17cba0f95745abb0e20b19c808b36441c0d9e844899b7fc1876241b80eb98e"
@@ -1028,22 +1028,22 @@
       "a6741da18a9f1841113f098f11717f0bac195239cea81b00d1a03c1019fec034"
     ,
     "skills/configure/SKILL.md":
-      "28daeda7bc85d3fb416a51581f7217b1f74b42679841de53bf38124216702dda"
+      "8caa3466ab26db18c22ec0e1e7c8afcf327d8098e313ec9cfc29efd902a2517d"
     ,
     "skills/deliver-governed/SKILL.md":
       "916ad0d7d8d2e83e5df34158bcb4f41b574e7827e9b7c6ff971aac3ed9b3986d"
     ,
     "skills/deliver/SKILL.md":
-      "6496eea93a117e8e16730f7b15916d2af419c77f30a0d0eec1b7efb4a62bb85a"
+      "8695aa2de73cdffd54146f498fe3e2afdf6e1e9de9f1923ce859de4e68a302f5"
     ,
     "skills/delivery-plan/SKILL.md":
       "4323f9cd16bebe04dde4a3eb626e0545c9d87367a20452919c14af591ed3b340"
     ,
     "skills/demo/SKILL.md":
-      "16beee1812cda07bf39e114b9fbdbc619e7d4add2fec66bc80fd979f3c46586b"
+      "038cde58e046bde26c843c02dd21c0166d043c271463557d700e4dc1da57e92a"
     ,
     "skills/design-system/SKILL.md":
-      "295238d2a12e7d0528eb64a7475fc0c5dd2d7a071a0a52f5d1f141777d3bc455"
+      "4db363221c6c36ea82f502adc886617c011b1a3176b90f780d34bf84f80abcfd"
     ,
     "skills/docker-compose/SKILL.md":
       "dbfcad827496b0c3d9f3223fc45fde3eee0088e0fb09fa26afd92b18cd0144ea"
@@ -1052,13 +1052,13 @@
       "ba1070fa42940336091042bd222e2e01564e0810374201ae3b08efe27f8a0642"
     ,
     "skills/experience-design/SKILL.md":
-      "e2ada88fd2dc3bf76335a0abb2e99e973c5c72c4a5e2dc1056df5cb13661dee6"
+      "57524ce94abe8d793a52bb5c7d565d64a225fa8d491306614df0dcf36b313e58"
     ,
     "skills/experience-modeling/SKILL.md":
       "3a466e87d43a86c2b03823e2401c7f01c11cdb8a399de843b94a8dcac56680c2"
     ,
     "skills/issue-report/SKILL.md":
-      "3b32e37e700e7f93f8b4cec9a86938c40f103cd9a969e69934bfa657e6a5583a"
+      "f56cdc50fe9196203d6bdb5dffe37d0a01f21a840f967c4fb2f63c83cd57803e"
     ,
     "skills/nosql-database-design/SKILL.md":
       "4147fa00254efaab084a98e31ca30ca27b62857696c9e8135daeb572cd893b66"
@@ -1067,7 +1067,7 @@
       "0cb0c4d4018374b7080d35495743777ed38fa0c95973597a283fae6fb78ce920"
     ,
     "skills/organize-docs/SKILL.md":
-      "cccafe9fd1a3305d37d9b8a944718456e32547b7fbe783e8afd0038a9b654f4f"
+      "ca9fa4740fdcafac5ae4ca5d941bad58e2f37969a587dac2e34532de972f186b"
     ,
     "skills/product-planning/SKILL.md":
       "bc68d827eba86b370312639fb1b82faa8e51ef98cb7328f198fb746d9c190278"
@@ -1082,7 +1082,7 @@
       "d8630e1e320752e5f07e18562cc0c42e129d70fb98cd3781f6353d3b09092708"
     ,
     "skills/requirement/SKILL.md":
-      "11b54247fd6daac94a54c22ecef5e23b781d20503af008789297731408600c37"
+      "52860c1a5431f075fb1c40280e0b13bca3441ef6b15e944e7ec7a3424f31ba7c"
     ,
     "skills/requirements-analysis/SKILL.md":
       "8e41405635a3ce8d75b6eb8ea25deaeedbd1f2dee9890df928948d0447337b16"
@@ -1091,10 +1091,10 @@
       "6e6f6825adb005f0efc00043a312e571bf30e87dc831221d0b5e110128a6ac86"
     ,
     "skills/setup/SKILL.md":
-      "82ebd6a99718e7da6c63b8b9b5879b100c3b06040a43384cf7575dcb3a717c50"
+      "9e82bda800ca53c05417527211b5ebe47d4846d265be2067258449a66b0500e0"
     ,
     "skills/sketch/SKILL.md":
-      "173712fca42bec5a2492a8d272d5ff34a61c2d09146dc6350c65e9e9482f95b0"
+      "a6b8f3e6b13270af1dfe8983ec81ff40ba500796719243aa61f179a99e50c7c5"
     ,
     "skills/software-architecture/SKILL.md":
       "69dd9adf218d2b85e1f4d9692d13a1cc0b6c298bf4905b3962a7a1418f091bf7"
@@ -1103,7 +1103,7 @@
       "bd073bfad1321c81cd78f2d1c40533203b46ebd9821a0820345fa406f12d409d"
     ,
     "skills/solution-design/SKILL.md":
-      "f232a0bdea7e2340d92347246ce5e22aabb20b66d29b835515cd8c73d1d6cac3"
+      "c17b04484bd3a0e23a1e58a8c3f81d791a368c49c86c68b12b6f30585d89a69a"
     ,
     "skills/sql-database-design/SKILL.md":
       "0ba5223bd69fd790f0b61553dcc0f6e9a4559b1506c959701f7994e002a11a1d"

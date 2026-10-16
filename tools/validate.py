@@ -1044,9 +1044,14 @@ def check_distribution_packaging(tree: Tree, findings: list[Finding]) -> None:
         for name in codex_surface:
             metadata = codex_archive / "skills" / name / "agents" / "openai.yaml"
             metadata_text = read_text(metadata) if metadata.is_file() else ""
-            if "allow_implicit_invocation: false" not in metadata_text:
-                error(metadata, f"{name} lacks explicit-only Codex policy",
-                      "generate agents/openai.yaml with implicit invocation disabled")
+            source = plugin / "skill-content" / name / "SKILL.md"
+            header = read_text(source).split("---", 2)[1] if source.is_file() else ""
+            # An entry is agent-invocable unless its canonical source opts out.
+            implicit = "false" if re.search(r"(?m)^model_invocable:\s*false\s*$", header) else "true"
+            if f"allow_implicit_invocation: {implicit}" not in metadata_text:
+                error(metadata, f"{name} Codex invocation policy does not follow its canonical"
+                      f" model_invocable ({implicit})",
+                      "regenerate agents/openai.yaml with tools/build_distributions.py")
             if f"${plugin.name}:{name}" not in metadata_text:
                 error(metadata, f"{name} lacks its fully namespaced Codex prompt",
                       "generate default_prompt with $<plugin>:<skill>")

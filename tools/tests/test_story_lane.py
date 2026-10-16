@@ -358,13 +358,32 @@ class GovernedRenameTests(unittest.TestCase):
 
 
 class EntryExposureTests(unittest.TestCase):
-    def test_retrospective_is_model_invocable_and_deliver_is_user_only(self):
-        skills = ROOT / "dist" / "claude" / "software-engineering-team" / "skills"
-        retrospective = (skills / "retrospective" / "SKILL.md").read_text(encoding="utf-8")
-        story = (skills / "deliver" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertNotIn("disable-model-invocation", retrospective)
-        self.assertNotIn("user-invocable: false", retrospective)
-        self.assertIn("disable-model-invocation: true", story)
+    # Agents may call every entry the user can; arming autopilot stays the user's.
+    MODEL_INVOCABLE = ["business-analysis", "configure", "deliver", "demo", "design-system",
+                       "experience-design", "issue-report", "organize-docs", "requirement",
+                       "retrospective", "setup", "sketch", "solution-design"]
+    USER_ONLY = ["autopilot"]
+
+    def test_the_model_invocable_entries_are_listed_on_both_hosts(self):
+        claude = ROOT / "dist" / "claude" / "software-engineering-team" / "skills"
+        codex = ROOT / "dist" / "codex" / "software-engineering-team" / "skills"
+        invocable, user_only = [], []
+        for wrapper in sorted(claude.glob("*/SKILL.md")):
+            header = wrapper.read_text(encoding="utf-8").split("---", 2)[1]
+            if "user-invocable: false" in header:
+                continue
+            name = wrapper.parent.name
+            (user_only if "disable-model-invocation: true" in header else invocable).append(name)
+            policy = (codex / name / "agents" / "openai.yaml").read_text(encoding="utf-8")
+            self.assertIn(f"allow_implicit_invocation: {'false' if name in self.USER_ONLY else 'true'}",
+                          policy, name)
+        self.assertEqual(invocable, self.MODEL_INVOCABLE)
+        self.assertEqual(user_only, self.USER_ONLY)
+
+    def test_autopilot_arming_still_needs_the_typed_command(self):
+        text = (TEAM / "skill-content" / "autopilot" / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("model_invocable: false", text.split("---", 2)[1])
+        self.assertIn("`on` refuses without one", " ".join(text.split()))
 
     def test_the_planning_entries_are_hidden_like_internal_skills(self):
         claude = ROOT / "dist" / "claude" / "software-engineering-team" / "skills"

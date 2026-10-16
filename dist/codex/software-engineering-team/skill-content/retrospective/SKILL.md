@@ -2,7 +2,6 @@
 name: retrospective
 description: Reports fast-lane story times, request-to-merge average, median and max, each story's step breakdown, the slowest stories and numbered improvement proposals; opens an issue per proposal only on the user's approval.
 exposure: entry
-model_invocable: true
 ---
 
 # Retrospective

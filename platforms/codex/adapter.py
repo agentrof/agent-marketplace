@@ -83,7 +83,7 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
         f"  short_description: \"{short}\"\n"
         f"  default_prompt: \"{prompt}\"\n"
         "policy:\n"
-        "  allow_implicit_invocation: false\n"
+        f"  allow_implicit_invocation: {'true' if flags['model_invocable'] else 'false'}\n"
     )
     return [
         (f"skills/{name}/SKILL.md", wrapper),

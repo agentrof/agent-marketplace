@@ -1,6 +1,6 @@
 """Review panels: lens data per step, one protocol that a task binds only at
-switch `review_panels: lens_panel`, and `-lens` reader variants on the `low`
-tier that leave the single reviewers and every default-path instruction as
+switch `review_panels: lens_panel`, and `-lens` reader variants on the `routine_review`
+class that leave the single reviewers and every default-path instruction as
 released."""
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ def read(relative: str) -> str:
 
 
 def tier(agent: str) -> str:
-    match = re.search(r"^reasoning: (\S+)$", read(f"agents/{agent}.md"), re.MULTILINE)
+    match = re.search(r"^model_class: (\S+)$", read(f"agents/{agent}.md"), re.MULTILINE)
     assert match, agent
     return match.group(1)
 
@@ -40,10 +40,12 @@ class ReviewPanelFlowTests(unittest.TestCase):
 class LensVariantTierTests(unittest.TestCase):
     def test_canonical_readers_keep_their_released_tier(self):
         agents = {path.stem for path in (TEAM / "agents").glob("*.md")}
-        self.assertEqual({agent for agent in agents if tier(agent) in {"lens", "low"}}, set())
+        self.assertEqual({agent for agent in agents if tier(agent) == "mechanical"}, set())
         for agent in (*LENS_VARIANTS, "analysis-challenger", "domain-expert"):
             with self.subTest(agent=agent):
-                self.assertEqual(tier(agent), "high")
+                # The solution reviewer judges the design and runs the critical class.
+                self.assertEqual(tier(agent), "critical_decision"
+                                 if agent == "solution-reviewer" else "routine_review")
                 self.assertIn("tools: Read, Grep, Glob", read(f"agents/{agent}.md"))
 
 

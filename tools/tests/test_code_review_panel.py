@@ -76,8 +76,8 @@ class CodeReviewPanelRegistryTests(unittest.TestCase):
         self.assertEqual(step["default_panel"], [[lens] for lens in LENSES])
         self.assertTrue(all(lens["focus"].strip() for lens in step["lenses"]))
 
-    def test_the_official_reviewer_and_every_calibration_reader_keep_their_tier(self):
-        self.assertRegex(read("agents/code-reviewer.md"), r"(?m)^reasoning: high$")
+    def test_the_official_reviewer_and_every_calibration_reader_keep_their_class(self):
+        self.assertRegex(read("agents/code-reviewer.md"), r"(?m)^model_class: routine_review$")
         # Only the review panel switches ship lens variants; review_loop ships none.
         switches = json.loads(read(REGISTRY))["switches"]
         self.assertNotIn("agent_variants", switches["review_loop"])

@@ -89,13 +89,21 @@ FIXTURE_TABLES = {
 """,
     "platforms/claude/execution-profiles.json": """\
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "profiles": {
     "auto": {
-      "high": {"model": "claude-opus-5-5", "effort": "xhigh"},
-      "medium": {"model": "claude-opus-5-5", "effort": "medium"},
-      "low": {"model": "claude-sonnet-5-5", "effort": "high"},
-      "inherit": {}
+      "mechanical": {"model": "claude-sonnet-5-5", "effort": "high"},
+      "mechanical_escalated": {"model": "claude-sonnet-5-5", "effort": "high"},
+      "routine_authoring": {"model": "claude-opus-5-5", "effort": "medium"},
+      "routine_authoring_escalated": {"model": "claude-opus-5-5", "effort": "medium"},
+      "complex_authoring": {"model": "claude-opus-5-5", "effort": "medium"},
+      "complex_authoring_escalated": {"model": "claude-opus-5-5", "effort": "medium"},
+      "routine_review": {"model": "claude-opus-5-5", "effort": "medium"},
+      "routine_review_escalated": {"model": "claude-opus-5-5", "effort": "medium"},
+      "critical_decision": {"model": "claude-opus-5-5", "effort": "xhigh"},
+      "critical_decision_escalated": {"model": "claude-opus-5-5", "effort": "xhigh"},
+      "security_review": {"model": "claude-opus-5-5", "effort": "xhigh"},
+      "orchestration": {"model": "claude-opus-5-5", "effort": "medium"}
     }
   }
 }
@@ -144,13 +152,21 @@ FIXTURE_TABLES = {
 """,
     "platforms/codex/execution-profiles.json": """\
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "profiles": {
     "auto": {
-      "high": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "medium": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "low": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "inherit": {}
+      "mechanical": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "mechanical_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "routine_authoring": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "routine_authoring_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "complex_authoring": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "complex_authoring_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "routine_review": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "routine_review_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "critical_decision": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "critical_decision_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "security_review": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "orchestration": {"model": "gpt-6.1-sol", "effort": "xhigh"}
     }
   }
 }
@@ -217,7 +233,7 @@ class ModelDriftTests(unittest.TestCase):
             json.dumps(catalog, indent=2) + "\n", encoding="utf-8")
 
     def repin(self, host: str, model: str, to: str, **fields) -> None:
-        """Pin ``to`` in place of ``model``: its catalog entry and every tier on it."""
+        """Pin ``to`` in place of ``model``: its catalog entry and every slot on it."""
         catalog = self.catalog(host)
         catalog["models"] = {
             (to if name == model else name): ({**entry, **fields} if name == model else entry)
@@ -303,15 +319,16 @@ class ModelDriftTests(unittest.TestCase):
             "id": "gpt-6.1-sol",
             "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         }])
-        # Every tier runs Sol on Codex, the variants' low tier included.
-        self.assertEqual(strong["tiers"], ["high", "medium", "low"])
+        # Every class slot runs Sol on Codex here, the mechanical one included.
+        self.assertEqual(strong["slots"], list(json.loads(build_distributions.execution_profile_path(
+            self.root, "codex").read_text(encoding="utf-8"))["profiles"]["auto"]))
         self.assertIn("code-reviewer", strong["roles"])
         self.assertIn("backlog-reviewer-lens", strong["roles"])
         self.assertIn("product-owner-mechanical", strong["roles"])
         self.assertNotIn("efforts", strong)
         fast = codex["models"]["gpt-6-luna"]
         self.assertEqual((fast["newer"], fast["listed"], fast["drift"]), ([], True, False))
-        self.assertEqual((fast["tiers"], fast["roles"]), ([], []))
+        self.assertEqual((fast["slots"], fast["roles"]), ([], []))
 
     def test_a_pinned_model_the_host_no_longer_lists_is_drift(self):
         self.pin_scenario()
@@ -475,31 +492,33 @@ class ModelDriftTests(unittest.TestCase):
                         "codex gpt-6-sol to gpt-6.1-sol"):
             self.assertIn(finding, lines[0])
         self.assertIn("no newer `haiku` model is listed. The owner decides", out)
-        # The catalog renames the pinned entry and every tier that names it follows.
+        # The catalog renames the pinned entry and every slot that names it follows.
         self.assertIn('-    "gpt-6-sol": {', lines)
         self.assertIn('+    "gpt-6.1-sol": {', lines)
         self.assertIn(f'+      "verified": "{TODAY}"', lines)
         self.assertIn('+    "claude-opus-5-6": {', lines)
         self.assertIn('--- a/platforms/codex/execution-profiles.json', lines)
-        self.assertIn('+      "high": {"model": "gpt-6.1-sol", "effort": "xhigh"},', lines)
-        self.assertIn('+      "high": {"model": "claude-opus-5-6", "effort": "xhigh"},', lines)
-        # The candidate lists no `xhigh`, so every Codex tier, all at `xhigh`,
+        self.assertIn('+      "critical_decision": {"model": "gpt-6.1-sol", "effort": "xhigh"},',
+                      lines)
+        self.assertIn('+      "critical_decision": {"model": "claude-opus-5-6", "effort": "xhigh"},',
+                      lines)
+        # The candidate lists no `xhigh`, so every Codex slot, all at `xhigh`,
         # must change with it.
-        for tier in ("high", "medium", "low"):
-            self.assertIn(f"- Tier `{tier}` runs effort `xhigh`, which `gpt-6.1-sol` does not"
-                          " list", out)
+        for slot in ("critical_decision", "routine_authoring", "mechanical"):
+            self.assertIn(f"- Class slot `{slot}` runs effort `xhigh`, which `gpt-6.1-sol` does"
+                          " not list", out)
         self.assertNotIn("runs effort `high`", out)
         self.assertIn(f"`{model_drift.AB_REFERENCE}`", out)
         self.assertIn("## Measurement", (ROOT / model_drift.AB_REFERENCE).read_text(
             encoding="utf-8"))
         self.assertIn("`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` for the session", out)
         self.assertIn("--execution-profile inherit`, then start the session", out)
-        for row in ("| codex | high | | `gpt-6-sol` | | | |",
-                    "| codex | high | | `gpt-6.1-sol` | | | |",
-                    "| codex | low | | `gpt-6.1-sol` | | | |",
-                    "| claude | high | | `claude-opus-5-6` | | | |"):
+        for row in ("| codex | critical_decision | | `gpt-6-sol` | | | |",
+                    "| codex | critical_decision | | `gpt-6.1-sol` | | | |",
+                    "| codex | mechanical | | `gpt-6.1-sol` | | | |",
+                    "| claude | critical_decision | | `claude-opus-5-6` | | | |"):
             self.assertIn(row, lines)
-        self.assertNotIn("| claude | low |", out)
+        self.assertNotIn("| claude | mechanical |", out)
         self.assertIn("Quality decides", out)
         self.assertIn("Flow B of `docs/maintainer-operations-protocol.md`", out)
         self.assertIn("at `minor` for `software-engineering-team`", out)

@@ -561,10 +561,10 @@ class SetupCheckTests(unittest.TestCase):
     """What both project generators make of a listing: verdicts, fallbacks and notes."""
 
     ROWS = {
-        "architect": {"tier": "high", "model": "model-a", "effort": "high"},
-        "developer": {"tier": "medium", "model": "model-a", "effort": "medium"},
-        "reviewer": {"tier": "low", "model": "model-b", "effort": "low"},
-        "writer": {"tier": "medium", "model": "session", "effort": "medium"},
+        "architect": {"class": "high", "model": "model-a", "effort": "high"},
+        "developer": {"class": "medium", "model": "model-a", "effort": "medium"},
+        "reviewer": {"class": "low", "model": "model-b", "effort": "low"},
+        "writer": {"class": "medium", "model": "session", "effort": "medium"},
     }
     LISTING = {"status": "ok", "binary": "/opt/host/bin/host", "version": "1.2.3",
                "view": "account", "detail": "the account's list",
@@ -573,8 +573,8 @@ class SetupCheckTests(unittest.TestCase):
     def test_the_check_judges_each_model_the_roles_run(self):
         pins = host_listing.pinned(self.ROWS, "session", ("high", "medium", "low"))
         self.assertEqual(pins, {
-            "model-a": {"tiers": ["high", "medium"], "roles": ["architect", "developer"]},
-            "model-b": {"tiers": ["low"], "roles": ["reviewer"]}})
+            "model-a": {"classes": ["high", "medium"], "roles": ["architect", "developer"]},
+            "model-b": {"classes": ["low"], "roles": ["reviewer"]}})
         check = host_listing.model_check(self.LISTING, pins)
         self.assertEqual(check, {"status": "ok", "binary": "/opt/host/bin/host",
                                  "version": "1.2.3", "view": "account",
@@ -585,26 +585,26 @@ class SetupCheckTests(unittest.TestCase):
         self.assertEqual(host_listing.unavailable({"status": "not_run"}), set())
 
     def test_an_effort_a_listed_model_outside_the_catalog_does_not_take_is_named(self):
-        tiers = {"high": {"model": "model-c", "effort": "high"},
+        slots = {"high": {"model": "model-c", "effort": "high"},
                  "medium": {"model": "model-c", "effort": "low"},
                  "low": {"model": "model-b", "effort": "high"},
                  "other": {"model": "session", "effort": "high"},
                  "unlisted": {"model": "model-z", "effort": "high"}}
         self.assertEqual(
-            host_listing.effort_conflicts(self.LISTING, tiers, catalog={"model-b"}),
-            [{"tier": "high", "model": "model-c", "effort": "high", "efforts": ["low"]}])
+            host_listing.effort_conflicts(self.LISTING, slots, catalog={"model-b"}),
+            [{"class": "high", "model": "model-c", "effort": "high", "efforts": ["low"]}])
         failed = {**self.LISTING, "status": "failed", "models": {}}
-        self.assertEqual(host_listing.effort_conflicts(failed, tiers, catalog=set()), [])
+        self.assertEqual(host_listing.effort_conflicts(failed, slots, catalog=set()), [])
 
-    def test_the_notes_name_the_tier_the_roles_and_the_model(self):
+    def test_the_notes_name_the_class_the_roles_and_the_model(self):
         pins = host_listing.pinned(self.ROWS, "session", ("high", "medium", "low"))
         check = host_listing.model_check({**self.LISTING, "view": "generic"}, pins)
-        conflicts = [{"tier": "high", "model": "model-c", "effort": "high", "efforts": ["low"]}]
+        conflicts = [{"class": "high", "model": "model-c", "effort": "high", "efforts": ["low"]}]
         notes = host_listing.check_notes("host-project", check, pins, {"model-a"}, conflicts,
                                          "the parent session's model")
         self.assertEqual(len(notes), 3, notes)
         self.assertEqual(notes[0], (
-            "host-project: warning: model-a is unavailable for the high and medium tiers:"
+            "host-project: warning: model-a is unavailable for the high and medium classes:"
             " this host's own model list (generic view, /opt/host/bin/host 1.2.3) does not hold"
             " it. Their roles architect, developer run on the parent session's model at their"
             " own effort; every setup or refresh judges it again."))
@@ -612,12 +612,12 @@ class SetupCheckTests(unittest.TestCase):
             "host-project: note: model-b keeps its pin unverified: the account's list; the"
             " run-time rule covers it."))
         self.assertEqual(notes[2], (
-            "host-project: warning: the high tier runs model-c at effort high, which this"
+            "host-project: warning: the high class runs model-c at effort high, which this"
             " host's own model list does not name for it (low); choose another effort through"
             " /configure models."))
         recorded = host_listing.check_notes("host-project", {"status": "not_run"}, pins,
                                             {"model-b"}, [], "the session's model")
-        self.assertIn("model-b is unavailable for the low tier: the last setup judged it"
+        self.assertIn("model-b is unavailable for the low class: the last setup judged it"
                       " unavailable. Its roles reviewer run", recorded[0])
 
 
@@ -675,13 +675,13 @@ class HostContractTests(unittest.TestCase):
         " visible warning, by one strategy on both hosts:",
         "Setup and refresh read this host's own model list from the binary that runs this"
         " session, without a model request, and judge each model a role is pinned to, the"
-        " project's `tier_models` included: `available` when the list holds it and reflects"
+        " project's `class_models` included: `available` when the list holds it and reflects"
         " the signed-in account, `unavailable` when the list does"
         " not hold it, since this binary cannot run it, and `unverified` when no list could be"
         " read or the list reflects no account. Every probe has a time limit, and one that"
         " fails gives `unverified`, never an error that stops setup.",
         "The roles of an `unavailable` model run on this session's model at their own effort,"
-        " and setup prints a warning that names the model, its tiers and its roles; every"
+        " and setup prints a warning that names the model, its class slots and its roles; every"
         " setup or refresh judges the model again. An `unverified` model keeps its pin with a"
         " note, and the run-time rule covers it.",
         "At run time a role whose pinned model fails gets a warning that never blocks work"
@@ -702,7 +702,7 @@ class HostContractTests(unittest.TestCase):
         for fragment in (
                 "On Claude Code the binary is `CLAUDE_CODE_EXECPATH` or the executable of"
                 " `CLAUDE_PID`, else `claude` on PATH when its version meets the highest"
-                " `min_cli_version` of the catalog models the tiers run.",
+                " `min_cli_version` of the catalog models the class slots run.",
                 "The list is the `models` of its reply to the `initialize` control request,"
                 " and it reflects the account only when the reply's `account.tokenSource`"
                 " names a claude.ai login.",

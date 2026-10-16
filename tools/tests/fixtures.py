@@ -123,7 +123,7 @@ def make_refresh_pair(n_root: Path, next_root: Path) -> None:
         "---\n"
         "name: refresh-retired-probe\n"
         "description: N-only agent used to prove package refresh cleanup.\n"
-        "reasoning: low\n"
+        "model_class: mechanical\n"
         "output_contract: prose\n"
         "---\n\n"
         "# Refresh Retired Probe\n\n"

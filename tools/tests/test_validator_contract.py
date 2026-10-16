@@ -248,17 +248,17 @@ class ValidatorContractTests(unittest.TestCase):
         codex_model = sorted(catalog_models("codex"))[0]
         # (changed file, mutation or None to delete it, check, files the findings name)
         cases = (
-            (claude, lambda value: value["profiles"]["auto"]["high"].update(
+            (claude, lambda value: value["profiles"]["auto"]["critical_decision"].update(
                 model="claude-ghost-5-5"), "execution_profiles", {claude}),
             (codex, lambda value: value["profiles"].update(fast={}), "execution_profiles", {codex}),
             ("platforms/codex/model-catalog.json", lambda value: value["models"][codex_model].update(
                 efforts=["low", "ultra", "turbo"]), "execution_profiles",
              {"platforms/codex/model-catalog.json"}),
-            # A declared tier no table maps is each table's problem.
-            ("tools/data/models.json", lambda value: value["reasoning_levels"].append("extreme"),
-             "execution_profiles", {claude, codex}),
-            ("tools/data/models.json", lambda value: value["reasoning_levels"].remove("low"),
-             "model_config_shape", {"tools/data/models.json"}),
+            # A declared class no table maps is each table's problem.
+            ("tools/data/models.json", lambda value: value["model_classes"].update(
+                extreme={"escalates": False}), "execution_profiles", {claude, codex}),
+            ("tools/data/models.json", lambda value: value["model_classes"].update(
+                mechanical={"escalates": "yes"}), "model_config_shape", {"tools/data/models.json"}),
             (codex, None, "execution_profiles", {codex}),
             ("platforms/claude/model-catalog.json", None, "execution_profiles",
              {"platforms/claude/model-catalog.json"}),
@@ -347,22 +347,28 @@ class ValidatorContractTests(unittest.TestCase):
     @integration
     def test_malformed_model_config_is_a_finding_not_a_crash(self):
         missing = "model config is missing or not valid JSON"
-        shape = "reasoning_levels must be a non-empty kebab-case list"
+        whole = "must hold schema_version 2, model_classes and risk_flags"
+        shape = "model_classes must map snake_case class ids to {escalates: bool}"
+        flags = b', "risk_flags": []'
         cases = {
             "missing file": (None, missing),
-            "invalid JSON": (b'{"schema_version": 1,', missing),
-            "not UTF-8": (b'{"schema_version": 1, "reasoning_levels": ["\xff"]}', missing),
-            "not an object": (b'["high", "medium"]', "model config must be a JSON object"),
-            "levels a number": (b'{"schema_version": 1, "reasoning_levels": 5}', shape),
-            "levels a boolean": (b'{"schema_version": 1, "reasoning_levels": true}', shape),
-            "levels a string": (b'{"schema_version": 1, "reasoning_levels": "high"}', shape),
-            "levels nested lists": (b'{"schema_version": 1, "reasoning_levels": [["high"]]}', shape),
-            "levels objects": (b'{"schema_version": 1, "reasoning_levels": [{"id": "high"}]}', shape),
-            "levels absent": (b'{"schema_version": 1}', shape),
+            "invalid JSON": (b'{"schema_version": 2,', missing),
+            "not UTF-8": (b'{"schema_version": 2, "model_classes": {"\xff": {}}}', missing),
+            "not an object": (b'["mechanical", "orchestration"]', missing),
+            "classes a number": (b'{"schema_version": 2, "model_classes": 5' + flags + b'}', shape),
+            "classes a boolean": (b'{"schema_version": 2, "model_classes": true' + flags + b'}',
+                                  shape),
+            "classes a list": (b'{"schema_version": 2, "model_classes": ["mechanical"]' + flags
+                               + b'}', shape),
+            "escalates a string": (b'{"schema_version": 2, "model_classes": {"mechanical":'
+                                   b' {"escalates": "yes"}}' + flags + b'}', shape),
+            "classes objects": (b'{"schema_version": 2, "model_classes": {"Mechanical":'
+                                b' {"escalates": true}}' + flags + b'}', shape),
+            "classes absent": (b'{"schema_version": 2' + flags + b'}', whole),
         }
         # Two whole runs prove a malformed file stops no later check; every case
         # runs the checks that read the config, on the files they read.
-        whole_runs = {"missing file", "levels objects"}
+        whole_runs = {"missing file", "classes objects"}
         for case, (content, message) in cases.items():
             with self.subTest(case=case):
                 if case in whole_runs:
@@ -387,8 +393,8 @@ class ValidatorContractTests(unittest.TestCase):
                     and finding.check == "model_config_shape"
                     and message in finding.message
                     for finding in findings), findings)
-                # The agent tiers fall back to the builder's tiers instead of
-                # being judged against a malformed list.
+                # The agent classes are not judged against a malformed
+                # declaration; model_config_shape alone reports it.
                 self.assertEqual([finding for finding in findings
                                   if finding.check == "frontmatter_shape"], [])
 
@@ -928,22 +934,22 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.assert_rejected("process switches are named but the switch registry is missing")
 
     def test_agent_variants_are_validated(self):
-        variant = {"suffix": "quick", "tier": "medium", "description": "Quick variant.",
+        variant = {"suffix": "quick", "class": "routine_authoring", "description": "Quick variant.",
                    "agents": ["backlog-reviewer"]}
         self.anchor()
         self.declare(fixture_mode=dict(FIXTURE_SWITCH, agent_variants={"fast": variant}))
         self.assertEqual(self.messages(), [])
         cases = (
             ({"current": variant}, "agent variants belong to a declared value other than the default"),
-            ({"fast": dict(variant, tier="extreme")},
-             "variant tier 'extreme' is not a declared reasoning tier"),
+            ({"fast": dict(variant, **{"class": "extreme"})},
+             "variant class 'extreme' is not a declared purpose class"),
             ({"fast": dict(variant, agents=["ghost-reviewer"])}, "unknown variant agent 'ghost-reviewer'"),
             ({"fast": dict(variant, agents=[])}, "variant agents must list at least one canonical agent"),
             ({"fast": dict(variant, suffix="Quick_Pass")}, "variant suffix must be kebab-case"),
             ({"fast": dict(variant, description="Runs as: quick")},
              "variant description must be one non-empty line without a colon"),
             ({"fast": dict(variant, model="fast")},
-             "an agent variant holds exactly suffix, tier, description and agents"),
+             "an agent variant holds exactly suffix, class, description and agents"),
             ({}, "agent_variants must map a switch value to its variant"),
         )
         for variants, fragment in cases:
@@ -1214,7 +1220,8 @@ VALIDATOR_BUILDERS = {
         lambda value: value.update(schema_version="one")),
     "vault_wiring": lambda root: edit(root, FLOW, "`obsidian-vault` skill", "vault skill"),
     "model_config_shape": lambda root: edit_json(
-        root, "tools/data/models.json", lambda value: value["reasoning_levels"].remove("low")),
+        root, "tools/data/models.json", lambda value: value["model_classes"].update(
+            mechanical={"escalates": "yes"})),
     "execution_profiles": lambda root: edit_json(
         root, "platforms/codex/execution-profiles.json",
         lambda value: value["profiles"].update(fast={})),

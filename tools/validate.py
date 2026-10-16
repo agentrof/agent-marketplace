@@ -1217,8 +1217,8 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
                 continue  # hook event names are the host platform's schema
             if is_hooks_manifest and "claude" in path.parts and key == "asyncRewake":
                 continue  # Native host command-hook field.
-            if is_model_catalog and where == "$.models":
-                continue
+            if (is_model_catalog or path.name == "pricing.json") and where == "$.models":
+                continue  # keyed by the providers' exact model ids
             if not SNAKE_KEY_RE.match(key):
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "json_hygiene",
@@ -3754,9 +3754,10 @@ def check_delivery_contract_shape(
 ) -> None:
     """Keep every shipped Delivery contract required and mechanically owned."""
     root = tree.root / DELIVERY_CONTRACT_ROOT
+    # The fast lane's own data files share the folder but are not Delivery contracts.
     actual = {
         path.name for path in root.glob("*.json") if path.is_file()
-    } if root.is_dir() else set()
+    } - {"targets.json", "role-routing.json"} if root.is_dir() else set()
     if actual != DELIVERY_CONTRACT_FILES:
         findings.append(Finding(
             "error", DELIVERY_CONTRACT_ROOT.as_posix(), 1,

@@ -307,6 +307,122 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertEqual(result["repo"], "acme/shop")
 
 
+class RoleRoutingTests(unittest.TestCase):
+    def project(self, task: str = TASK) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / task_lane.TASKS).mkdir(parents=True)
+        (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
+        return root
+
+    def roles(self, text: str, kind: str = "build", size: str = "s", root: Path | None = None) -> dict:
+        return {item["role"]: item for item in task_lane.route(task_lane.role_rules(root), text, kind, size,
+                                                               task_lane.named_files(text))}
+
+    def fake_run(self, changed: str = ""):
+        def run(*args, **_kwargs):
+            if args[:2] == ("git", "diff") and "--name-only" in args and "--cached" not in args:
+                return changed
+            if args[:3] == ("gh", "pr", "list"):
+                return "[]"
+            if args[:3] == ("gh", "pr", "create"):
+                return "https://github.com/acme/shop/pull/9"
+            return ""
+        return mock.patch.object(task_lane, "run", side_effect=run)
+
+    def open_pr(self, root: Path) -> dict:
+        return task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
+
+    def check(self, root: Path, role: str = "software-architect", at: str | None = None) -> dict:
+        return task_lane.cmd_role_check(SimpleNamespace(task="TK-004", role=role, verdict="go",
+                                                        note="fits the records", at=at), root)
+
+    def test_a_keyword_routes_the_architect_as_required(self):
+        found = self.roles("Add an invoice_lines table for partial payments")
+        self.assertEqual(found["software-architect"]["mode"], "require")
+        self.assertEqual(found["software-architect"]["step"], "pre_check")
+        self.assertIn("keyword table", found["software-architect"]["reasons"])
+        self.assertNotIn("software-architect", self.roles("Add a CSV export button"))
+
+    def test_a_named_file_routes_the_architect(self):
+        found = self.roles("Rename the total column in db/migrations/0007_totals.sql please")
+        self.assertIn("file db/migrations/0007_totals.sql matches *migrations/*",
+                      found["software-architect"]["reasons"])
+
+    def test_size_l_routes_the_architect_only_for_build_tasks(self):
+        self.assertEqual(self.roles("Polish the export", size="l")["software-architect"]["reasons"], ["size l"])
+        self.assertNotIn("software-architect", self.roles("Polish the export", size="m"))
+        self.assertEqual(self.roles("Rewrite the schema notes", kind="knowledge", size="l"), {})
+
+    def test_start_writes_the_roles_field_and_prints_the_reasons(self):
+        root = self.project()
+        args = SimpleNamespace(delivery=None, at=None, request="Add a payments table", request_file=None,
+                               title="Payments", epic=None, source_story=None, covers=None, fixes=None,
+                               knowledge=False, size="s", base="main")
+        with self.fake_run():
+            result = task_lane.cmd_start(args, root)
+        self.assertEqual(result["roles"][0]["role"], "software-architect")
+        self.assertIn("keyword table", result["roles"][0]["reasons"])
+        props = task_lane.task_props(root / result["task"])
+        self.assertEqual(props["roles"], "software-architect:require:pre_check")
+
+    def test_a_required_role_blocks_open_pr_until_its_verdict_is_recorded(self):
+        root = self.project(TASK.replace("size: s", "size: l"))
+        lint = task_lane.cmd_lint(SimpleNamespace(file=None, task="TK-004"), root)
+        self.assertTrue(lint["ok"])
+        self.assertIn("role-check --task TK-004 --role software-architect", lint["warnings"][0])
+        with self.fake_run(), self.assertRaisesRegex(task_lane.Refused, "software-architect has no recorded verdict"):
+            self.open_pr(root)
+        self.assertEqual(self.check(root)["pending_roles"], [])
+        path = task_lane.task_path(root, "TK-004")
+        self.assertEqual(task_lane.lint(path), [])
+        self.assertEqual(task_lane.role_checks(path)[0]["note"], "fits the records")
+        with self.fake_run():
+            self.assertEqual(self.open_pr(root)["pr"], "9")
+
+    def test_a_changed_migration_in_the_diff_requires_the_architect(self):
+        root = self.project()
+        with self.fake_run("db/migrations/0008_add_index.sql\n"), \
+                self.assertRaisesRegex(task_lane.Refused, "software-architect"):
+            self.open_pr(root)
+
+    def test_suggested_roles_never_block(self):
+        root = self.project(TASK.replace("as CSV.", "as CSV from a new screen."))
+        roles, missing = task_lane.routed_roles(root, task_lane.task_path(root, "TK-004"))
+        self.assertEqual([(item["role"], item["mode"]) for item in roles], [("ux-designer", "suggest")])
+        self.assertEqual(missing, [])
+        with self.fake_run():
+            self.assertEqual(self.open_pr(root)["pr"], "9")
+
+    def test_a_project_rule_replaces_adds_or_drops_a_packaged_rule(self):
+        root = self.project()
+        (root / ".agentrof").mkdir()
+        (root / task_lane.PROJECT_ROUTING).write_text(json.dumps({"rules": [
+            {"role": "software-architect", "mode": "suggest", "step": "pre_check", "kinds": ["build"],
+             "keywords": ["table"], "time_budget_minutes": 2, "ask": "Check the table."},
+            {"role": "ux-designer", "mode": "off", "step": "pre_check"},
+            {"role": "security-reviewer", "mode": "require", "step": "pre_check", "kinds": ["build"],
+             "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}),
+            encoding="utf-8")
+        found = self.roles("Add a table and a login screen in src/auth/login.tsx", root=root)
+        self.assertEqual(found["software-architect"]["mode"], "suggest")
+        self.assertEqual(found["security-reviewer"]["mode"], "require")
+        self.assertNotIn("ux-designer", found)
+
+    def test_the_retrospective_counts_role_checks_and_their_minutes(self):
+        root = self.project()
+        self.check(root, at="2026-10-16T10:05:00+00:00")
+        self.check(root, "qa-engineer", at="2026-10-16T10:06:30+00:00")
+        path = task_lane.task_path(root, "TK-004")
+        task = {**task_lane.task_props(path), "role_checks": task_lane.role_checks(path)}
+        row = task_lane.task_row(task, pr("2026-10-16T10:12:00Z", "2026-10-16T10:15:00Z",
+                                          "2026-10-16T10:14:00Z", "2026-10-16T10:16:00Z"))
+        self.assertEqual(row["role_checks"], {"checks": 2, "minutes": 3.5})
+        data = task_lane.report([row], "latest 20")
+        self.assertEqual(data["targets"]["build"]["role_checks"], {"tasks": 1, "checks": 2, "minutes": 3.5})
+        self.assertIn("Role checks build: 2 on 1 of 1 tasks, 3.5 min", task_lane.render(data))
+
+
 class FastLaneOwnershipTests(unittest.TestCase):
     def test_a_task_owns_architecture_only_in_the_fast_lane(self):
         with tempfile.TemporaryDirectory() as temporary:

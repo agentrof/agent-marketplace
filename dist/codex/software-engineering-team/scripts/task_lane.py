@@ -892,7 +892,14 @@ def cmd_merge(args, root: Path) -> dict:
     if rigor == "high":
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False,
                 "next": "rigor high: the owner reviews and merges"}
-    run("gh", "pr", "merge", args.pr, "--auto", f"--{args.style}", cwd=root)
+    try:
+        run("gh", "pr", "merge", args.pr, "--auto", f"--{args.style}", cwd=root)
+    except Refused as refused:
+        # GitHub refuses auto-merge once required checks are already green; merge now.
+        if "clean status" not in str(refused):
+            raise
+        run("gh", "pr", "merge", args.pr, f"--{args.style}", cwd=root)
+        return {"task_id": args.task, "pr": args.pr, "auto_merge": False, "merged": True}
     return {"task_id": args.task, "pr": args.pr, "auto_merge": True}
 
 

@@ -253,6 +253,20 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertIn(("gh", "pr", "merge", "9", "--auto", "--merge"), calls)
         self.assertIn(task_lane.REVIEW_MARK, calls[0][-1])
 
+    def test_green_checks_merge_at_once_when_auto_merge_is_refused(self):
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            if "--auto" in args:
+                raise task_lane.Refused("gh pr merge failed: Pull request is in clean status")
+            return ""
+        with mock.patch.object(task_lane, "run", side_effect=run):
+            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
+                                                          detail=None), self.project("normal"))
+        self.assertTrue(result["merged"])
+        self.assertEqual(calls[-1], ("gh", "pr", "merge", "9", "--merge"))
+
     def test_high_rigor_leaves_the_merge_to_the_owner(self):
         calls = []
         with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):

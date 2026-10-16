@@ -7480,6 +7480,22 @@ class DeliveryGitDecisionTests(unittest.TestCase):
                     delivery_git.require_carried_control_paths(
                         [f"{DECISION_PACKAGE}/{path}", DECISION_ITEM], DECISION_ITEM, lambda _path: False)
 
+    def test_item_publication_accepts_a_rendered_relation_block_beside_the_architecture_stamp(self):
+        """render-relations may rewrite an active Item record's generated relation block during an
+        architect pass; the stamped record still passes, while an authored change beside it does not."""
+        block = (vault_check.RELATION_START + "\n\n- Reviewed by: [[delivery/items/auth-01/code-review|Code review]]\n"
+                 "- Verified by: [[delivery/items/auth-01/verification|Verification]]\n\n" + vault_check.RELATION_END)
+        rendered = vault_check.replace_relation_block(DECISION_BODY, block)
+        self.assertIn(vault_check.RELATION_START, rendered)
+        before = self.item_note(stamp=None)
+        self.assertIsNone(delivery_git.require_item_controls(before, self.item_note(body=rendered)))
+        republished = self.item_note(stamp=None, body=DECISION_BODY, integration_base_commit="b" * 40)
+        converged = self.item_note(body=rendered, integration_base_commit="c" * 40)
+        self.assertIsNone(delivery_git.require_item_controls(before, converged, republished))
+        tampered = self.item_note(body=vault_check.replace_relation_block(DECISION_BODY + "\nUnapproved change.\n", block))
+        with self.assertRaisesRegex(RuntimeError, "beyond its Architecture stamp$"):
+            delivery_git.require_item_controls(before, tampered)
+
     def test_item_publication_refuses_what_a_converged_item_record_does_not_carry(self):
         """A converged Item record holds the plan-owned fields and body of the Integration commit it
         took and keeps its own lifecycle and stamp; a control path it changed must be that commit's."""

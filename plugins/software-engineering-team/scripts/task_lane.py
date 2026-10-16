@@ -21,7 +21,11 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
 - ``report`` is the retrospective: the tasks hold the request and approval
   times, GitHub holds the PR, review, CI and merge times, read at report
   time, and ``session_cost.py`` reads each task's cost and active minutes from
-  the host session transcripts, so every wait gets an owner; ``--deep`` adds reading waste. ``--export`` rebuilds a derived file under ``.agentrof/``;
+  the host session transcripts, so every wait gets an owner; ``--deep`` adds reading waste.
+  Cost is tokens and dollars per task, its spawns and their startup context,
+  priced by ``session_cost.load_prices``. Each run appends every
+  merged task's cost and waits to the history once, and later runs read that
+  row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``;
   ``--write-report`` keeps a Delivery's summary under
   ``workspace/docs/delivery/retrospectives/``. ``file-issues`` opens one
   issue per proposal the user approved, in the project's own repository.
@@ -70,6 +74,16 @@ TARGETS_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "deliv
 TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
 TARGET_MINUTES = TARGETS["build"]["average"]
 HISTORY = EXPORT / "history.jsonl"
+COST_TOKENS = ("input", "cache_write", "cache_read", "output")
+COST_LEVERS = {
+    "startup": "Cut the context each spawn starts with: disable plugins and memory the role does not"
+               " need, and pass the role the diff and the task instead of whole documents.",
+    "spawns": "Spawn fewer agents per task: continue the same writer for its fix pass instead of a"
+              " fresh spawn, and use the mechanical writer variant for named fixes.",
+    "effort": "Run routine review and mechanical fixes at high or medium effort instead of xhigh or max.",
+    "main": "Keep the main session to orchestration: clear or compact it between tasks and leave"
+            " large reads to spawned roles.",
+}
 LEDGER = Path(".agentrof") / "plugin-ledger.md"
 PENDING_UPSTREAM = "## Pending upstream"
 WAITS = ("agent_work", "ci_wait", "review_wait", "owner_wait", "idle")
@@ -424,18 +438,25 @@ def task_branch(task: dict) -> str:
 
 
 def attach_sessions(rows: list[dict], tasks: list[dict], events: list[dict], deep: bool,
-                    until: float) -> None:
-    """Add each task's cost, wait split and, with --deep, its reading-waste signals."""
+                    until: float, prices: dict | None = None) -> dict:
+    """Add each task's cost, wait split and, with --deep, its reading-waste signals; return the
+    cost of the scanned calls no task claims. A call several task windows hold is split evenly."""
     import session_cost
+    claims = []
     for row, task in zip(rows, tasks):
         start = parse_time(row["requested_at"]).timestamp()
         end = parse_time(row["merged"]).timestamp() if row.get("merged") else until
-        mine = [event for event in events
-                if session_cost.belongs(event, task_branch(task), start, end)]
-        row["cost"] = session_cost.cost(mine)
+        claims.append([session_cost.belongs(event, task_branch(task), start, end, task.get("id", ""))
+                       for event in events])
+    holders = [sum(column) for column in zip(*claims)] if claims else [0] * len(events)
+    for row, claimed in zip(rows, claims):
+        mine = [{**event, "share": 1 / holders[index]} for index, event in enumerate(events) if claimed[index]]
+        row["cost"] = session_cost.cost(mine, prices)
         row["waits"] = classify(row, session_cost.active_minutes(mine), row["rigor"], until)
         if deep:
             row["reading"] = session_cost.reading(mine)
+    rest = session_cost.cost([event for index, event in enumerate(events) if not holders[index]], prices)
+    return {"tokens": rest["tokens"], "usd": rest["usd"]}
 
 
 def select(tasks: list[dict], delivery: str | None = None, since: str | None = None,
@@ -464,7 +485,7 @@ def summary(values: list[float]) -> dict:
             "median": round(statistics.median(values), 1), "max": round(max(values), 1)}
 
 
-def proposals(rows: list[dict]) -> list[dict]:
+def proposals(rows: list[dict], keep_weight: bool = False) -> list[dict]:
     """Up to five levers from the data, each with a stable id and its evidence."""
     found = []
     for step in STEPS:
@@ -537,20 +558,95 @@ def proposals(rows: list[dict]) -> list[dict]:
                       "cause_owner": "process", "expected_gain": "a true request-to-merge time",
                       "verify": "the next retrospective lists no open task older than a day"})
     found.sort(key=lambda item: -item["weight"])
-    for item in found:
+    for item in found if not keep_weight else []:
         item.pop("weight")
     return found[:5]
 
 
+def cost_summary(rows: list[dict]) -> dict | None:
+    """Dollars and tokens over the rows that carry a cost: totals, per task, per spawn and split."""
+    costed = [row["cost"] for row in rows if row.get("cost") and "usd" in row["cost"]]
+    if not costed:
+        return None
+    count = len(costed)
+    spawns = [spawn for item in costed for spawn in item.get("spawns", [])]
+    spent = sum(item["usd"] for item in costed)
+    main = sum(item["main"]["usd"] for item in costed)
+    def merged(key):
+        result: dict[str, float] = {}
+        for item in costed:
+            for name, value in item.get(key, {}).items():
+                result[name] = round(result.get(name, 0.0) + value, 4)
+        return result
+    return {"tasks": count, "usd": round(spent, 2), "usd_per_task": round(spent / count, 2),
+            "tokens_per_task": {key: round(sum(item["tokens"][key] for item in costed) / count)
+                                for key in COST_TOKENS},
+            "spawns_per_task": round(len(spawns) / count, 1),
+            "startup_context_per_spawn": round(statistics.mean(spawn["startup_context"] for spawn in spawns))
+            if spawns else None,
+            "by_model": merged("by_model"), "by_class": merged("by_class"),
+            "main_share": round(main / spent, 2) if spent else None,
+            "unpriced_models": sorted({model for item in costed for model in item.get("unpriced_models", [])})}
+
+
+def cost_proposals(rows: list[dict]) -> list[dict]:
+    """Cost levers, each weighted by the share of the task cost it addresses."""
+    found, spend = [], cost_summary(rows)
+    if not spend or not spend["usd"]:
+        return found
+    count, per_task = spend["tasks"], spend["usd_per_task"]
+    spawns = [spawn for row in rows if row.get("cost") for spawn in row["cost"].get("spawns", [])]
+    def lever(key, addressed, evidence, saving, verify):
+        share = addressed / per_task if per_task else 0
+        if share >= 0.1:
+            found.append({"id": f"RETRO-COST-{key.upper()}", "step": f"cost:{key}", "weight": share,
+                          "evidence": evidence, "proposal": COST_LEVERS[key], "cause_owner": "plugin"
+                          if key != "main" else "process", "expected_gain": saving, "verify": verify})
+    startup = spend["startup_context_per_spawn"] or 0
+    if startup > 30000:
+        first = sum(spawn["startup_usd"] for spawn in spawns) / count
+        lever("startup", first, f"startup context {round(startup / 1000)}k tokens per spawn over"
+              f" {len(spawns)} spawns, ${round(first, 2)} per task on first calls",
+              f"about ${round(first / 2, 2)} per task when the startup context halves",
+              "the next retrospective shows a startup context per spawn under"
+              f" {round(startup / 2000)}k tokens")
+    if spend["spawns_per_task"] > 3:
+        extra = (spend["spawns_per_task"] - 3) * (sum(spawn["usd"] for spawn in spawns) / len(spawns))
+        lever("spawns", extra, f"{spend['spawns_per_task']} spawns per task",
+              f"up to ${round(extra, 2)} per task at 3 spawns", "the next retrospective shows at most 3"
+              " spawns per task")
+    routine = [spawn for spawn in spawns if spawn["class"] in ("review", "fix")
+               and spawn.get("effort") in ("xhigh", "max")]
+    if routine:
+        heavy = sum(spawn["usd"] for spawn in routine) / count
+        lever("effort", heavy, f"{len(routine)} review or fix spawns at xhigh or max, ${round(heavy, 2)} per task",
+              f"about ${round(heavy / 2, 2)} per task (xhigh costs about twice high per task)",
+              "the next retrospective shows no review or fix spawn at xhigh or max")
+    if (spend["main_share"] or 0) > 0.4:
+        main = spend["main_share"] * per_task
+        lever("main", main, f"the main session is {round(spend['main_share'] * 100)}% of the cost,"
+              f" ${round(main, 2)} per task", f"up to ${round(main / 2, 2)} per task",
+              "the next retrospective shows a main-session share under 40%")
+    return found
+
+
 def kind_proposals(rows: list[dict]) -> list[dict]:
-    """Levers per task kind, the kind furthest over its average target first, at most three
-    per kind; each names its kind and the gap to that target."""
+    """Levers per task kind, the kind furthest over its average target first, at most four
+    per kind; time and cost levers rank together by the share of the task's minutes or
+    dollars they address; each names its kind and the gap to that target."""
     found = []
     goals = targets(rows, [])
     kinds = {row.get("kind", "build") for row in rows}
     for kind in sorted(kinds, key=lambda name: goals.get(name, {}).get("target_gap", 0), reverse=True):
         goal = goals.get(kind)
-        for item in proposals([row for row in rows if row.get("kind", "build") == kind])[:3]:
+        mine = [row for row in rows if row.get("kind", "build") == kind]
+        done = [row["total"] for row in mine if row["total"] is not None]
+        minutes = statistics.mean(done) if done else 0
+        levers = [{**item, "weight": item["weight"] / minutes if minutes and item["weight"] > 0
+                   else item["weight"]} for item in proposals(mine, keep_weight=True)]
+        levers = sorted(levers + cost_proposals(mine), key=lambda item: -item["weight"])
+        for item in levers[:4]:
+            item.pop("weight")
             versus = (f"; average {goal['average']} vs target {goal['average_target']} min"
                       f" ({'+' if goal['target_gap'] > 0 else ''}{goal['target_gap']})") if goal else ""
             found.append({**item, "id": item["id"].replace("RETRO-", f"RETRO-{kind.upper()}-", 1),
@@ -575,11 +671,13 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
                                                  if row["steps"][step] is not None]) for step in STEPS},
                         "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
-                        "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over}
+                        "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over,
+                        "cost": cost_summary(done)}
     return result
 
 
-def report(rows: list[dict], scope: str, previous: dict | None = None) -> dict:
+def report(rows: list[dict], scope: str, previous: dict | None = None,
+           unattributed: dict | None = None) -> dict:
     totals = [row["total"] for row in rows if row["total"] is not None]
     slowest = sorted((row for row in rows if row["total"] is not None),
                      key=lambda row: -row["total"])[:3]
@@ -591,6 +689,8 @@ def report(rows: list[dict], scope: str, previous: dict | None = None) -> dict:
                          "largest_minutes": row["steps"].get(row["largest_step"])}
                         for row in slowest],
             "targets": targets(rows, totals), "previous": previous,
+            "cost": cost_summary([row for row in rows if row["total"] is not None]),
+            "unattributed": unattributed,
             "proposals": kind_proposals(rows)}
 
 
@@ -621,10 +721,20 @@ def render(data: dict) -> str:
                      f" ({'met' if goal['average_met'] else 'missed'}), max {goal['max']} vs"
                      f" {goal['max_target']} ({'met' if goal['max_met'] else 'missed'}), s/m/l {sizes};"
                      f" over size target: {', '.join(goal['over_size_target']) or 'none'}")
+    for kind, goal in (data.get("targets") or {}).items():
+        if goal.get("cost"):
+            lines.append(f"Cost {kind}: {cost_line(goal['cost'])}")
+    if data.get("cost"):
+        lines.append(f"Cost all merged: {cost_line(data['cost'])}")
+    if data.get("unattributed"):
+        lines.append(f"Unattributed in the scanned window: ${data['unattributed']['usd']:.2f},"
+                     f" tokens {tokens_line(data['unattributed']['tokens'])}")
     if data.get("previous"):
         before = data["previous"]
         lines.append(f"Previous retrospective ({before['at']}): {before['merged']} merged, average"
-                     f" {before['average']}, median {before['median']}, max {before['max']} min")
+                     f" {before['average']}, median {before['median']}, max {before['max']} min"
+                     + (f"; ${before['usd_per_task']:.2f} and {before['tokens_per_task']} tokens per task"
+                        if before.get("usd_per_task") is not None else ""))
     waits = [row for row in data["per_task"] if row.get("waits")]
     if waits:
         lines += ["", "Waits (min): agent_work / ci_wait / review_wait / owner_wait / idle; cost"]
@@ -633,6 +743,12 @@ def render(data: dict) -> str:
             lines.append(f"- {row['task_id']}: " + " / ".join(str(row["waits"][key]) for key in WAITS)
                          + f"; {row['cost']['agents']} agents, models {row['cost']['models']},"
                          f" effort {row['cost']['efforts']}, output tokens {spent}")
+            if "usd" in row["cost"]:
+                spawns = row["cost"]["spawns"]
+                startup = round(statistics.mean(spawn["startup_context"] for spawn in spawns)) if spawns else 0
+                lines.append(f"  - cost ${row['cost']['usd']:.2f}; tokens {tokens_line(row['cost']['tokens'])};"
+                             f" {len(spawns)} spawns, startup context {startup} per spawn;"
+                             f" main session ${row['cost']['main']['usd']:.2f}")
             for path, count in (row.get("reading") or {}).get("repeated_reads", {}).items():
                 lines.append(f"  - read {count} times: {path}")
             if (row.get("reading") or {}).get("results_over_200kb"):
@@ -652,19 +768,41 @@ def render(data: dict) -> str:
     return "\n".join(lines)
 
 
+def tokens_line(tokens: dict) -> str:
+    return " / ".join(f"{key} {tokens[key]}" for key in COST_TOKENS)
+
+
+def cost_line(cost: dict) -> str:
+    startup = cost["startup_context_per_spawn"]
+    return (f"${cost['usd']:.2f} over {cost['tasks']} tasks, ${cost['usd_per_task']:.2f} per task;"
+            f" tokens per task {tokens_line(cost['tokens_per_task'])}; {cost['spawns_per_task']} spawns per"
+            f" task, startup context {startup if startup is not None else '-'} per spawn;"
+            f" main share {cost['main_share'] if cost['main_share'] is not None else '-'};"
+            f" by model {cost['by_model']}; by class {cost['by_class']}"
+            + (f"; unpriced {', '.join(cost['unpriced_models'])}" if cost["unpriced_models"] else ""))
+
+
 def export(data: dict, fmt: str) -> str:
     if fmt == "json":
         return json.dumps(data, indent=2) + "\n"
     buffer = io.StringIO()
     fields = ["task_id", "title", "size", "rigor", "delivery", "pr", "requested_at",
               "approved_at", "pr_opened", "ci_green", "review", "merged", "total", *STEPS, *WAITS,
-              "agents", "output_tokens"]
+              "agents", "output_tokens", "usd", "input_tokens", "cache_write_tokens", "cache_read_tokens",
+              "spawns", "startup_context", "main_usd"]
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     for row in data["per_task"]:
         spent = sum(tokens["output"] for tokens in (row.get("cost") or {}).get("tokens_by_role", {}).values())
+        cost = row.get("cost") or {}
+        spawns = cost.get("spawns") or []
         writer.writerow({**row, **row["steps"], **(row.get("waits") or {}),
-                         "agents": (row.get("cost") or {}).get("agents", ""), "output_tokens": spent})
+                         "agents": cost.get("agents", ""), "output_tokens": spent, "usd": cost.get("usd", ""),
+                         **{f"{key}_tokens": (cost.get("tokens") or {}).get(key, "")
+                            for key in ("input", "cache_write", "cache_read")},
+                         "spawns": len(spawns) if cost else "",
+                         "startup_context": round(statistics.mean(spawn["startup_context"] for spawn in spawns))
+                         if spawns else "", "main_usd": (cost.get("main") or {}).get("usd", "")})
     return buffer.getvalue()
 
 
@@ -676,23 +814,40 @@ def retrospective_note(data: dict, delivery: str) -> str:
             "- [[maps/delivery|Delivery]]\n")
 
 
-def previous_run(root: Path, scope: str) -> dict | None:
+def history(root: Path) -> list[dict]:
     path = root / HISTORY
     if not path.is_file():
-        return None
-    runs = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    return next((item for item in reversed(runs) if item.get("scope") == scope), None)
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def previous_run(root: Path, scope: str) -> dict | None:
+    return next((item for item in reversed(history(root)) if item.get("scope") == scope), None)
+
+
+def kept_costs(root: Path) -> dict[str, dict]:
+    """The cost and waits each merged task had when first reported, by task id."""
+    return {item["task_id"]: item for item in history(root) if item.get("type") == "task_cost"}
 
 
 def remember(root: Path, data: dict) -> None:
-    """Append this run's summary, the next retrospective's comparison point (derived, git-ignored)."""
+    """Append this run's summary, the next retrospective's comparison point, and once per merged
+    task its cost and waits, which outlive the host's transcripts (derived, git-ignored)."""
     total = data["request_to_merge_minutes"]
+    spend = data.get("cost") or {}
+    kept = kept_costs(root)
     path = root / HISTORY
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps({"at": now(), "scope": data["scope"], "merged": data["merged"],
                                  "average": total["average"], "median": total["median"],
-                                 "max": total["max"]}) + "\n")
+                                 "max": total["max"], "usd_per_task": spend.get("usd_per_task"),
+                                 "tokens_per_task": sum((spend.get("tokens_per_task") or {}).values())
+                                 if spend else None}) + "\n")
+        for row in data["per_task"]:
+            if row["total"] is not None and row.get("cost") and row["task_id"] not in kept:
+                handle.write(json.dumps({"type": "task_cost", "at": now(), "task_id": row["task_id"],
+                                         "cost": row["cost"], "waits": row.get("waits")}) + "\n")
 
 
 def gather(root: Path, args) -> dict:
@@ -703,13 +858,20 @@ def gather(root: Path, args) -> dict:
     prs = pull_requests(root) if chosen else {}
     rows = [task_row(task, pr_times(root, prs[task["id"]]["number"]) if task["id"] in prs else None)
             for task in chosen]
-    if chosen and not getattr(args, "no_sessions", False):
+    unattributed = None
+    kept = kept_costs(root)
+    deep = getattr(args, "deep", False)
+    fresh = [row for row in rows if row["task_id"] not in kept or row["total"] is None]
+    if chosen and not getattr(args, "no_sessions", False) and (fresh or deep):
         import session_cost
         since = min(parse_time(task["requested_at"]).timestamp() for task in chosen)
-        attach_sessions(rows, chosen, session_cost.scan(root, since), getattr(args, "deep", False),
-                        datetime.now(timezone.utc).timestamp())
+        unattributed = attach_sessions(rows, chosen, session_cost.scan(root, since), deep,
+                                       datetime.now(timezone.utc).timestamp(), session_cost.load_prices(root))
+    for row in rows:
+        if row["total"] is not None and row["task_id"] in kept:
+            row.update(cost=kept[row["task_id"]]["cost"], waits=kept[row["task_id"]]["waits"])
     scope = args.delivery or (f"since {args.since}" if args.since else f"latest {args.recent}")
-    return report(rows, scope, previous_run(root, scope))
+    return report(rows, scope, previous_run(root, scope), unattributed)
 
 
 # --- story links and board -------------------------------------------------

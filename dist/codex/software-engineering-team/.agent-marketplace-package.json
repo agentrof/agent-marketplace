@@ -281,7 +281,7 @@
       "511eaa656636b33440f7eb752c960934fc516d81deeeb06b1f009268128ce283"
     ,
     "scripts/session_cost.py":
-      "10d61bb3885cae1ec45496de45595ef6aea80f0aef08acc0a32a25e58c0b10a6"
+      "c67e19c70847ac657442cfc6785a0cb90af3feea1b6bb7d20921c166ac2fb5a5"
     ,
     "scripts/setup_check.py":
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
@@ -299,7 +299,7 @@
       "4e4dac8ad7f01dec7f3e2d86f02746ff67297617789555d2211c3ab722b961b0"
     ,
     "scripts/task_lane.py":
-      "25b08b20eb0cfe7eedf94eeaf59aee06d1b426d86d3b48d348eccbd0f582dde2"
+      "68090918aedca641f3ee967eefb6721795ab742eb8e854cb52f2ceea32b4fa5c"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -863,7 +863,10 @@
       "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
     ,
     "skill-content/retrospective/SKILL.md":
-      "0fac857fd7bcb28643c67adfcae4f322b44c4c4bb73bb63fa0fdca1181f95623"
+      "583608a7c5d381ae750ef55e2205cc4c24031a6b536bebd2d516186458bdf5a2"
+    ,
+    "skill-content/retrospective/data/pricing.json":
+      "096b472cd57add46de459add6db514aa5619a930e3b4a955400957221726908b"
     ,
     "skill-content/setup/SKILL.md":
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"

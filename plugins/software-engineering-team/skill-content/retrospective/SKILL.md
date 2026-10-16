@@ -27,7 +27,7 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
 - `--deep` adds reading waste: files read 5 or more times and tool results
   over 200 KB.
 - `--export csv|json` also rebuilds `.agentrof/retrospective/tasks.<ext>`,
-  a derived, git-ignored file.
+  a derived, git-ignored file with the time and cost columns.
 
 ## Procedure
 
@@ -35,19 +35,38 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
    `scripts/task_lane.py report` with `--delivery DLV-###`, `--since <window>`,
    `--deep` and `--export <format>` as asked. The tasks give the request and
    approval times; the pull request, review, CI and merge times come from
-   GitHub; agent count, models, effort and tokens per role and the active
-   minutes come from the project's host session transcripts, matched
-   to a task by its branch, else by its time window.
+   GitHub; agent count, models, effort, tokens, dollars and the active
+   minutes come from the project's host session transcripts. A spawned agent
+   whose description or first prompt names exactly one task id is that
+   task's; else a record on a `task/...` branch is that task's; else the
+   main session and any other record fall in every task window that holds
+   them, split evenly. What no task claims is reported as unattributed.
+   Prices come from `data/pricing.json` (USD per 1M tokens per model, with
+   its date, sources and assumptions); a project overrides or adds a model in
+   `.agentrof/pricing.json` with the same `models` shape. A model without a
+   price counts tokens only and is listed as unpriced. Each run appends every
+   merged task's cost and waits once to `.agentrof/retrospective/history.jsonl`
+   and later runs read that row first, so cost survives the host's transcript
+   cleanup.
 2. Return its text as it is:
    - task count; request-to-merge average, median and max against the target
      (15 minutes on average, 50 at most for a large task) and the previous
      retrospective of the same scope;
    - per task the steps (define, write, ci, review, merge_wait; ci and review
      run side by side), the waits (agent work, CI wait, review wait, owner
-     wait, idle) and the cost;
+     wait, idle) and the cost: dollars, tokens (input, cache write, cache
+     read, output), spawns with the startup context each one began with (its
+     first prompt: input plus cache tokens) and the main session's part;
+   - per kind and for all merged tasks: total dollars, dollars, tokens and
+     spawns per task, average startup context per spawn, dollars by model and
+     by class (author, review, fix, security, main), the main-session share,
+     and the previous retrospective's dollars and tokens per task;
    - the slowest tasks with their largest step;
-   - 3 to 5 numbered proposals, each with its evidence, cause owner (project,
-     plugin, host tool, owner or process), expected gain and how to verify it.
+   - up to 4 numbered proposals per kind, time and cost levers (startup
+     context, spawns per task, xhigh effort on review or fix, main-session
+     share) ranked together by the share of the task's minutes or dollars
+     they address, each with its evidence, cause owner (project, plugin, host
+     tool, owner or process), expected gain and how to verify it.
    Add nothing it does not measure; an empty scope says so.
 3. For a Delivery scope the user may keep the summary: `--write-report` writes
    `workspace/docs/delivery/retrospectives/dlv-###-retrospective.md`, which a

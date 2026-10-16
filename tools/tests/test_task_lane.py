@@ -706,6 +706,173 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.assertFalse(any("RETRO-REVIEW" in " ".join(call) for call in calls if call[:2] == ("gh", "issue")))
 
 
+class RetrospectiveDollarTests(unittest.TestCase):
+    """Dollars, startup context, task attribution and kept costs in the retrospective."""
+
+    def setUp(self):
+        import session_cost
+        self.session_cost = session_cost
+        self.home = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.home))
+        self.project = self.home / "work" / "shop"
+        self.project.mkdir(parents=True)
+        self.folder = self.home / "claude" / str(self.project.resolve()).replace("/", "-")
+        (self.folder / "s1" / "subagents").mkdir(parents=True)
+        self.prices = session_cost.load_prices(self.project)
+
+    @staticmethod
+    def record(minute, kind, branch="main", **extra):
+        return json.dumps({"type": kind, "timestamp": f"2026-10-16T10:{minute:02d}:00Z",
+                           "gitBranch": branch, **extra})
+
+    def call(self, minute, key, branch="main", model="claude-opus-5-5", **usage):
+        return self.record(minute, "assistant", branch,
+                           message={"id": key, "model": model, "content": [], "usage": usage})
+
+    def agent(self, name, lines, description="", agent_type="software-engineering-team:backend-developer"):
+        base = self.folder / "s1" / "subagents"
+        (base / f"agent-{name}.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (base / f"agent-{name}.meta.json").write_text(
+            json.dumps({"agentType": agent_type, "description": description}), encoding="utf-8")
+
+    def scan(self):
+        return self.session_cost.scan(self.project, 0, self.home / "claude", self.home / "codex")
+
+    def test_a_spawn_is_priced_once_per_message_and_starts_with_its_first_prompt(self):
+        self.agent("r1", [
+            self.record(1, "user", message={"content": "Review the diff."}),
+            self.call(2, "a1", input_tokens=2, cache_creation_input_tokens=60000, output_tokens=1,
+                      cache_creation={"ephemeral_5m_input_tokens": 50000, "ephemeral_1h_input_tokens": 10000}),
+            self.call(2, "a1", input_tokens=2, cache_creation_input_tokens=60000, output_tokens=50,
+                      cache_creation={"ephemeral_5m_input_tokens": 50000, "ephemeral_1h_input_tokens": 10000}),
+            self.call(3, "a2", input_tokens=1, cache_read_input_tokens=60000, output_tokens=100)],
+            description="Review TK-004", agent_type="software-engineering-team:code-reviewer")
+        cost = self.session_cost.cost(self.scan(), self.prices)
+        # a1: 2*4 + 50000*5 + 10000*8 (1h write) + 50*20; a2: 1*4 + 60000*0.2 + 100*20, per 1M tokens.
+        self.assertEqual(cost["usd"], 0.345)
+        self.assertEqual(cost["tokens"], {"input": 3, "output": 150, "cache_read": 60000, "cache_write": 60000})
+        spawn = cost["spawns"][0]
+        self.assertEqual((spawn["startup_context"], spawn["class"], spawn["role"], spawn["purpose"]),
+                         (60002, "review", "code-reviewer", "Review TK-004"))
+        self.assertEqual(cost["by_class"], {"review": 0.345})
+        self.assertEqual(cost["main"]["usd"], 0.0)
+
+    def test_haiku_switches_to_its_long_context_rates_above_100k_prompt_tokens(self):
+        def price(cache_read):
+            return self.session_cost.usd({"model": "claude-haiku-5-5", "tokens": {
+                "input": 1000, "cache_write": 0, "cache_read": cache_read, "output": 1000}}, self.prices)
+        self.assertAlmostEqual(price(90000), 0.0015)
+        self.assertAlmostEqual(price(100000), 0.008)
+        self.assertIsNone(self.session_cost.usd({"model": "claude-unknown-1", "tokens": {
+            "input": 1, "cache_write": 0, "cache_read": 0, "output": 1}}, self.prices))
+        self.assertIsNotNone(self.session_cost.rates("claude-opus-5-5[1m]", self.prices))
+
+    def test_a_project_price_file_overrides_a_model(self):
+        (self.project / ".agentrof").mkdir()
+        (self.project / ".agentrof" / "pricing.json").write_text(json.dumps({"models": {
+            "claude-opus-5-5": {"input": 1, "cache_write_5m": 1, "cache_write_1h": 1, "cache_read": 1,
+                                "output": 1}}}), encoding="utf-8")
+        prices = self.session_cost.load_prices(self.project)
+        self.assertEqual(prices["claude-opus-5-5"]["output"], 1)
+        self.assertEqual(prices["claude-sonnet-5-5"]["output"], 10)
+
+    def test_spawns_follow_their_task_id_branches_their_task_and_the_rest_splits_by_window(self):
+        (self.folder / "s1.jsonl").write_text("\n".join([
+            self.call(5, "m1", output_tokens=10), self.call(25, "m2", output_tokens=20),
+            self.call(50, "m3", output_tokens=40),
+            self.call(45, "m4", branch="task/tk-002-b", output_tokens=400)]) + "\n", encoding="utf-8")
+        self.agent("d1", [self.record(39, "user", message={"content": "Build it on task/tk-001-a."}),
+                          self.call(40, "d1", output_tokens=100)], description="Developer")
+        self.agent("d2", [self.record(9, "user", message={"content": "Compare TK-001 with TK-002."}),
+                          self.call(10, "d2", output_tokens=200)])
+        tasks = [{**RetrospectiveTests.task, "id": "TK-001", "file": "tk-001-a.md"},
+                 {**RetrospectiveTests.task, "id": "TK-002", "file": "tk-002-b.md",
+                  "requested_at": "2026-10-16T10:03:00+00:00"}]
+        rows = [task_lane.task_row(tasks[0], pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")),
+                task_lane.task_row(tasks[1], pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:30:00Z"))]
+        rest = task_lane.attach_sessions(rows, tasks, self.scan(), False, 1e12, self.prices)
+        self.assertEqual([row["cost"]["tokens"]["output"] for row in rows], [205, 525])
+        self.assertEqual(rest["tokens"]["output"], 40)
+        self.assertEqual(rows[0]["cost"]["main"]["tokens"]["output"], 5)
+        self.assertEqual(len(rows[0]["cost"]["spawns"]), 2)
+
+    def test_codex_tokens_split_cached_and_written_input_and_name_their_branch(self):
+        folder = self.home / "codex" / "2026" / "10" / "16"
+        folder.mkdir(parents=True)
+        lines = [{"timestamp": "2026-10-16T10:01:00Z", "type": "session_meta", "payload": {
+                     "cwd": str(self.project.resolve()), "git": {"branch": "task/tk-004-export"},
+                     "source": {"subagent": {"thread_spawn": {"agent_path": "team/code_reviewer"}}}}},
+                 {"timestamp": "2026-10-16T10:01:00Z", "type": "event_msg",
+                  "payload": {"type": "user_message", "message": "Check TK-004."}},
+                 {"timestamp": "2026-10-16T10:01:00Z", "type": "turn_context",
+                  "payload": {"model": "gpt-6.1-sol", "effort": "high"}},
+                 {"timestamp": "2026-10-16T10:02:00Z", "type": "event_msg", "payload": {
+                     "type": "token_count", "info": {"last_token_usage": {
+                         "input_tokens": 1000, "cached_input_tokens": 600, "cache_write_input_tokens": 100,
+                         "output_tokens": 50}}}}]
+        (folder / "rollout-x.jsonl").write_text("\n".join(map(json.dumps, lines)) + "\n", encoding="utf-8")
+        calls = [event for event in self.scan() if event["kind"] == "call"]
+        self.assertEqual((calls[0]["task"], calls[0]["branch"], calls[0]["role"]),
+                         ("TK-004", "task/tk-004-export", "code-reviewer"))
+        cost = self.session_cost.cost(calls, self.prices)
+        self.assertEqual(cost["tokens"], {"input": 300, "output": 50, "cache_read": 600, "cache_write": 100})
+        self.assertEqual(cost["usd"], 0.0014)
+
+    def costed_row(self, task_id="TK-001"):
+        row = task_lane.task_row({**RetrospectiveTests.task, "id": task_id},
+                                 pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z"))
+        spawn = {"role": "code-reviewer", "model": "claude-opus-5-5", "purpose": "", "class": "review",
+                 "effort": "xhigh", "startup_context": 64000, "startup_usd": 0.4,
+                 "tokens": {"input": 1, "output": 1000, "cache_read": 1000000, "cache_write": 64000}, "usd": 1.0}
+        row["cost"] = {"agents": 1, "models": {}, "efforts": {}, "tokens_by_role": {},
+                       "tokens": {"input": 2, "output": 2000, "cache_read": 2000000, "cache_write": 64000},
+                       "usd": 2.0, "main": {"tokens": {}, "usd": 1.0}, "spawns": [spawn],
+                       "by_model": {"claude-opus-5-5": 2.0}, "by_class": {"main": 1.0, "review": 1.0},
+                       "unpriced_models": []}
+        row["waits"] = dict.fromkeys(task_lane.WAITS, 0.0)
+        return row
+
+    def test_the_report_prices_each_task_and_kind_and_ranks_cost_levers_with_time(self):
+        data = task_lane.report([self.costed_row()], "latest 20")
+        cost = data["targets"]["build"]["cost"]
+        self.assertEqual((cost["usd_per_task"], cost["spawns_per_task"], cost["startup_context_per_spawn"],
+                          cost["main_share"]), (2.0, 1.0, 64000, 0.5))
+        self.assertEqual(cost["tokens_per_task"]["cache_read"], 2000000)
+        ids = [item["id"] for item in data["proposals"]]
+        for lever in ("STARTUP", "EFFORT", "MAIN"):
+            self.assertIn(f"RETRO-BUILD-COST-{lever}", ids)
+        self.assertLessEqual(len(ids), 4)
+        text = task_lane.render(data)
+        self.assertIn("  - cost $2.00; tokens input 2 / cache_write 64000 / cache_read 2000000 / output 2000;"
+                      " 1 spawns, startup context 64000 per spawn; main session $1.00", text)
+        self.assertIn("Cost build: $2.00 over 1 tasks, $2.00 per task;", text)
+        header = task_lane.export(data, "csv").splitlines()[0].split(",")
+        self.assertTrue({"usd", "input_tokens", "cache_write_tokens", "cache_read_tokens", "spawns",
+                         "startup_context", "main_usd"} <= set(header))
+        self.assertIn("2.0", task_lane.export(data, "csv").splitlines()[1].split(","))
+
+    def test_a_merged_task_keeps_its_cost_once_and_later_reports_read_it_first(self):
+        root = self.project
+        data = task_lane.report([self.costed_row()], "latest 20")
+        task_lane.remember(root, data)
+        task_lane.remember(root, data)
+        kept = task_lane.kept_costs(root)
+        self.assertEqual(list(kept), ["TK-001"])
+        self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_cost"), 1)
+        self.assertEqual(task_lane.previous_run(root, "latest 20")["usd_per_task"], 2.0)
+        tasks = root / task_lane.TASKS
+        tasks.mkdir(parents=True)
+        (tasks / "tk-001-a.md").write_text(TASK.replace("TK-004", "TK-001"), encoding="utf-8")
+        args = SimpleNamespace(delivery=None, since=None, recent=20, deep=False, no_sessions=False)
+        with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "pr_times", return_value=pr(
+                    "2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")), \
+                mock.patch.object(self.session_cost, "scan", side_effect=AssertionError("scanned")):
+            again = task_lane.gather(root, args)
+        self.assertEqual(again["per_task"][0]["cost"]["usd"], 2.0)
+        self.assertIn("$2.00 and 2066002 tokens per task", task_lane.render(again))
+
+
 class GovernedRenameTests(unittest.TestCase):
     OLD = __import__("re").compile(r"/deliver(?= DLV-| \{)|--entry deliver(?![-\w])|entry=\"deliver\"")
 

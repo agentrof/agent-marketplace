@@ -4296,9 +4296,14 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             # real services behind, so only a successful down permits settlement.
             if state.get("pending"):
                 state.setdefault("interrupted_commands", []).append(state["pending"])
-            state.update(cleanup_required=True, pending={"verb": verb, "value": value, "started_at": time.time(),
-                                                        "candidate_hash": current["candidate_hash"],
-                                                        "environment_identity": environment_identity})
+            # A declared QA verb reads results; it never brings services up, so
+            # running one after down leaves no teardown owed. Its pending entry
+            # still demands teardown if it is interrupted.
+            if not declared:
+                state["cleanup_required"] = True
+            state["pending"] = {"verb": verb, "value": value, "started_at": time.time(),
+                                "candidate_hash": current["candidate_hash"],
+                                "environment_identity": environment_identity}
             session["runtime"] = state
             write_session(root, session)
         # Only fixed verbs and declared identifier tokens enter this argument

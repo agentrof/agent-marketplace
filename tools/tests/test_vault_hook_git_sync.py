@@ -258,6 +258,27 @@ class VaultHookGitSyncTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_restore_is_attested_after_later_merges_leave_the_experience_tree_unchanged(self):
+        (self.root / "notes.txt").write_text("later ordinary merge\n", encoding="utf-8")
+        self.commit("Later change outside Experience")
+        self.git("push", "origin", "HEAD:refs/heads/main")
+        self.path.write_bytes(b'{"revision": 1}\n')
+        payload = self.restore_payload()
+        self.assertEqual(self.hook.shell_snapshot(payload), 0)
+        self.git("restore", "--source=HEAD", "--worktree", "--", "workspace/docs/experience-design")
+        code, error = self.verify(payload)
+        self.assertEqual(code, 0, error)
+        self.assertEqual(self.path.read_bytes(), self.expected)
+
+    def test_later_experience_change_past_the_handoff_is_not_attested(self):
+        self.path.write_bytes(b'{"revision": 3}\n')
+        self.commit("Experience change outside the handoff")
+        self.git("push", "origin", "HEAD:refs/heads/main")
+        output = io.StringIO()
+        with redirect_stderr(output):
+            self.assertEqual(self.hook.shell_snapshot(self.restore_payload()), 2)
+        self.assertIn("could not be attested", output.getvalue())
+
     def restore_command(self):
         """The attested restore the guard names, with this host's quoting of Git's path."""
         git = subprocess.list2cmdline([self.git_path]) if os.name == "nt" else shlex.quote(self.git_path)

@@ -87,6 +87,44 @@
       "end": "none"
     }
   ],
+  "phase_starts": [
+    {
+      "entry": "backlog-plan",
+      "after": {
+        "requirement": [
+          "approved"
+        ]
+      }
+    },
+    {
+      "entry": "delivery-plan",
+      "after": {
+        "requirement": [
+          "incorporated"
+        ],
+        "delivery": [
+          "merged",
+          "cancelled"
+        ]
+      }
+    },
+    {
+      "entry": "execution-plan",
+      "after": {
+        "delivery": [
+          "scope_approved"
+        ]
+      }
+    },
+    {
+      "entry": "deliver",
+      "after": {
+        "delivery": [
+          "execution_approved"
+        ]
+      }
+    }
+  ],
   "transport_interval_seconds": 600,
   "transport_max_attempts": 3,
   "transport_error_codes": [

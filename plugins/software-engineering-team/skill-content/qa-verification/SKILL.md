@@ -18,8 +18,8 @@ rules (`<space>:BR-<CODE>-###`), stable story scenarios
 (`<story-id>-TS-###`) and
 edge cases. This skill defines HOW to verify. WHAT the stack-specific checks
 look like comes from each stack skill bound to the change: also load their
-`references/qa-checklist.md` files before planning. Not for authoring tests,
-fixing bugs, or reviewing code style (the review role owns style).
+`references/qa-checklist.md` files before planning. Not for code style (the
+review role owns it).
 
 ## Test Plan Categories
 
@@ -35,7 +35,7 @@ Classify every planned check into exactly one category. A plan missing any categ
   AC/BR identity their source_refs cite, with the test tags in the suite
   results. The product is a matrix: one row per identity, mapped tests, result.
 - A row with no mapped test is NO-TEST. That is a deterministic finding, never a judgment call, and it fails the audit.
-- Run the audit mechanically with the packaged
+- Run the audit with the packaged
   `skill-content/qa-verification/scripts/scenario_report.py --plan <test-plan.md>
   --junit <results.xml>`. Exit code 1 means gaps exist.
 - [coverage-audit](references/coverage-audit.md): tagging conventions per suite type and the full matrix schema. Read when building the matrix or when a mapped-test lookup is ambiguous.
@@ -50,7 +50,7 @@ Classify every planned check into exactly one category. A plan missing any categ
   verification is required.
 - DON'T hardcode tool invocations or ports. These approved contracts are the
   only project entry points.
-- Run each live group the Test Plan names: `run --kind live_test --group <group>`; at `run: combined`, one `--group a,b`.
+- Run each live group the Test Plan names, none when `live_verification` defers (record `live: deferred_to_integration`): `run --kind live_test --group <group>`; at `run: combined`, one `--group a,b`.
 - DO record the exact commands executed in the report, so the run is reproducible.
 - The suite is hermetic: the test and mutation commands never depend on a standing environment; a suite found depending on one is a blocking finding (waiver semantics in the environment stack skill's Hermetic Suite Rule).
 - The mutation gate is mandatory on code stories: run the mutation command scoped to the story's changed code-owned files (environment-owned paths are verified by the live protocol, not by mutants); a surviving mutant anywhere in a changed file is a finding, a missing mutation_command on a code story is a blocking finding. Method: [mutation](references/mutation.md). Read when running the mutation gate or judging a survivor.
@@ -107,7 +107,7 @@ FAIL if ANY of:
 - Any AC or BR id lacks a mapped test.
 - Any test fails, errors, or passes for the wrong reason.
 - Any runtime CRITICAL or FAIL condition observed.
-- Verification Contract missing, or Environment Contract missing when the live protocol must run (escalate; do not improvise commands).
+- Verification Contract missing, or Environment Contract missing when the live protocol must run (escalate).
 
 Rules:
 

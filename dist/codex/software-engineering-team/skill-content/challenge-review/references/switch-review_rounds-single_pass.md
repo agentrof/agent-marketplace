@@ -83,3 +83,14 @@ major finding becomes a follow-up. A critical finding still open after it goes
 to the step's approval gate with its evidence, and the owner decides: approve
 with it as a follow-up, order one more writer pass and re-review, or reject.
 No further round starts without that decision.
+
+## Enforcement
+
+`backlog_compile.py check`, `backlog_review_inputs.py` and `record-rechecks`
+refuse, naming this rule, a `Recheck Closures` table that closes no finding
+`Returned Findings` lists as critical, which is a writer pass of major or
+minor fixes only, and a draft review round written under the same Process
+Policy pin as a draft predecessor round that returned no critical finding.
+A round opened by a policy change, or after an approved round, is not a
+second pass. Operation, Solution Design and Design System records keep no
+round or recheck record, so their single pass rests on this file alone.

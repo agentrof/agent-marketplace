@@ -74,10 +74,16 @@ LANE_TABLE = "deliver/references/switch-lane_table-recorded.md"
 LANE_ISOLATION = "deliver/references/switch-lane_isolation-scratch_clone.md"
 LEVEL_CHANGE = "deliver/references/switch-level_change_map-assertion_map.md"
 DELIVER = (ITEM_COST, LANE_ISOLATION, LANE_TABLE, LEVEL_CHANGE,
+           "deliver/references/switch-finding_disposition-follow_up_issue.md",
+           "deliver/references/switch-repair_pass-scoped_repair.md",
+           "deliver/references/switch-item_verification-single_verifier.md",
            "qa-verification/references/switch-qa_preflight-lifecycle_first.md",
            "deliver/references/switch-step_baseline-median.md",
            "qa-verification/references/switch-runtime_lifecycle-long_lived.md",
-           "qa-verification/references/switch-live_case_reuse-delta_since_green.md")
+           "qa-verification/references/switch-live_case_reuse-delta_since_green.md",
+           "qa-verification/references/switch-live_verification-delivery_integration.md",
+           "qa-verification/references/switch-item_live_gate-tooling_items.md",
+           "qa-verification/references/switch-pass_carry_over-per_item.md")
 EXPECTED = {
     **{f"{entry}:{role}": [] for entry, role in (
         ("business-analysis", "analysis-challenger"), ("business-analysis", "business-analyst"),

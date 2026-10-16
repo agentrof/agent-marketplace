@@ -41,6 +41,11 @@ KIND = {
 }
 
 
+def record_types(kinds) -> set[str]:
+    """Claimed `architecture_record_kinds` as record types: a `stub --kind` name stands for its record type."""
+    return {KIND[kind][3] if kind in KIND else kind for kind in kinds}
+
+
 def kind_for_id(record_id: str) -> tuple[str, str, str, str] | None:
     return next((entry for entry in KIND.values()
                  if record_id.startswith(entry[0] + "-")), None)
@@ -626,7 +631,7 @@ def stamp_item(docs: Path, item_ref: str) -> int:
         print("architecture_compile: Item owns no architecture records")
         return 1
     claimed_components = set(item_props.get("architecture_components", []))
-    claimed_kinds = set(item_props.get("architecture_record_kinds", []))
+    claimed_kinds = record_types(item_props.get("architecture_record_kinds", []))
     for row in delta["records"]:
         if (claimed_components and row["component_ref"]
                 and row["component_ref"] not in claimed_components):

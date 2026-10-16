@@ -1541,6 +1541,68 @@ def recheck_rows(docs: Path, body: str, path: str) -> tuple[list[dict[str, str]]
     return rows, errors
 
 
+SINGLE_PASS_RULE = ("switch review_rounds single_pass starts a recheck or a new round only for a writer"
+                    " pass that fixes a critical finding; record a major or minor finding as an"
+                    " accepted follow-up instead")
+
+
+def single_pass_recheck_findings(docs: Path, body: str, path: str) -> list[str]:
+    """At review_rounds single_pass, refuse Recheck Closures that close no critical finding.
+
+    A writer pass that fixes only major or minor findings is the round the
+    value removes; its rechecks are its record. A recheck of a major or minor
+    finding stays allowed beside a critical one, in the pass that carries it.
+    """
+    if RECHECK_CLOSURES not in headings(body):
+        return []
+    try:
+        loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
+    except ValueError as exc:
+        return [f"{path} needs the review_rounds value of the Process Policy: {exc}"]
+    if loop != SINGLE_PASS_LOOP:
+        return []
+    returned = (returned_findings(docs, body, path)[0]
+                if RETURNED_FINDINGS in headings(body) else {})
+    closed = sorted({row["finding"] for row in recheck_rows(docs, body, path)[0]})
+    if any(returned.get(identifier) == "critical" for identifier in closed):
+        return []
+    return [f"{path} records rechecks of {', '.join(closed) or 'no finding'} without a critical"
+            f" finding among them; {SINGLE_PASS_RULE}"]
+
+
+def single_pass_round_findings(docs: Path, reviews: list[dict]) -> list[str]:
+    """At review_rounds single_pass, refuse a draft round whose draft predecessor returned no critical.
+
+    Both rounds unapproved under one Process Policy pin are passes of the same
+    review; a round written under another pin is the fresh round a policy
+    change opens, and an approved predecessor belongs to an earlier revision.
+    """
+    current = latest(reviews)
+
+    def stamped(review: dict) -> bool:
+        props = review["props"]
+        return bool(props.get("status") == "approved" or props.get("source_hash")
+                    or props.get("approved_at_utc"))
+
+    if current is None or stamped(current):
+        return []
+    earlier = [review for review in reviews if review["round"] < current["round"]]
+    previous = latest(earlier)
+    if (previous is None or stamped(previous) or RETURNED_FINDINGS not in headings(previous["body"])
+            or recorded_pin(previous["props"]) != recorded_pin(current["props"])):
+        return []
+    if "critical" in returned_findings(docs, previous["body"], previous["path"])[0].values():
+        return []
+    try:
+        loop = session_read(("review_loop", docs.resolve()), lambda: review_loop_value(docs))
+    except ValueError as exc:
+        return [f"{current['path']} needs the review_rounds value of the Process Policy: {exc}"]
+    if loop != SINGLE_PASS_LOOP:
+        return []
+    return [f"{current['path']} opens round {current['round']} after {previous['path']}, which"
+            f" returned no critical finding; {SINGLE_PASS_RULE}"]
+
+
 def recheck_closure_record(docs: Path, body: str, path: str, props: dict) -> list[str]:
     """Validate a review note's Recheck Closures when the compiler writes them.
 
@@ -1557,7 +1619,7 @@ def recheck_closure_record(docs: Path, body: str, path: str, props: dict) -> lis
         return [f"{path} needs the remediation_bookkeeping value of the Process Policy: {exc}"]
     if value != COMPILER_BOOKKEEPING:
         return []
-    return recheck_rows(docs, body, path)[1]
+    return recheck_rows(docs, body, path)[1] + single_pass_recheck_findings(docs, body, path)
 
 
 def table_cell(value: str) -> str:
@@ -1698,6 +1760,7 @@ def record_rechecks(args) -> int:
             errors.append(f"{path}: {exc}")
             continue
         errors.extend(recheck_rows(docs, with_recheck_section(body, rows), path)[1])
+        errors.extend(single_pass_recheck_findings(docs, with_recheck_section(body, rows), path))
         written[path] = (note, original, text.encode("utf-8"))
     if errors:
         return fail(errors)
@@ -3108,7 +3171,7 @@ def global_criterion_coverage_findings(record: dict, docs: Path, *,
 
 def review_completion_findings(docs: Path, reviews: list[dict], sections: list[str],
                                contract: dict) -> list[str]:
-    errors = []
+    errors = single_pass_round_findings(docs, reviews)
     current = latest(reviews)
     for review in reviews:
         if review is not current and review["props"].get("status") != "approved" and not (
@@ -4068,6 +4131,122 @@ def status_tag(props: dict, status: str) -> None:
     props["status"] = status
 
 
+# The pre-review check: mechanical consistency a reader would otherwise spend a
+# round on. Each rule reads only an explicit marker, so authored prose without
+# one is never guessed at.
+ACCEPTANCE_ITEM_RE = re.compile(r"^\s*-\s+\[[ xX]\]\s+\S", re.MULTILINE)
+CRITERIA_LIST_RE = re.compile(r"^\s*([1-9][0-9]*(?:\s*-\s*[1-9][0-9]*)?)"
+                              r"(?:\s*,\s*([1-9][0-9]*(?:\s*-\s*[1-9][0-9]*)?))*\s*$")
+# A row list starts the Given or When text with "rows:", or follows "in rows:".
+ROW_LIST_RE = re.compile(r"(?:^|\bin\s)rows:\s*(.+)$", re.IGNORECASE | re.DOTALL)
+SUPPLIES_RE = re.compile(r"^Supplies:\s*(.+)$", re.MULTILINE)
+ROOT_STORY_COUNT_RE = re.compile(r"\b([0-9]+) stories with ([0-9]+) (?:sibling )?test plans\b")
+ROOT_EPIC_COUNT_RE = re.compile(r"\b(?:retains|contains|holds) ([0-9]+) epics\b")
+WIKILINK_TARGET_RE = re.compile(r"\[\[([^\[\]|#\n]+)")
+
+
+def story_criterion_numbers(value: str, maximum: int) -> set[int] | None:
+    """The story Acceptance item numbers a scenario's story_criteria lists, or None when malformed."""
+    if not CRITERIA_LIST_RE.fullmatch(value):
+        return None
+    numbers: set[int] = set()
+    for part in value.split(","):
+        low, _, high = part.strip().partition("-")
+        first, last = int(low), int(high or low)
+        if last < first:
+            return None
+        # Keep invalid endpoints for diagnostics without expanding an untrusted range.
+        numbers.update((first, last))
+        numbers.update(range(first, min(last, maximum) + 1))
+    return numbers
+
+
+def precheck_findings(record: dict) -> list[str]:
+    """Return the mechanical findings a review would otherwise spend a round on.
+
+    - every story Acceptance item is verified by a scenario once any scenario of
+      its Test Plan declares story_criteria, and no listed number is missing;
+    - a scenario's declared rows equal the items of the row list its Given or
+      When text holds;
+    - every story note the Dependencies section links, in prose too, is declared
+      in depends_on; check already requires a reason line per declared edge;
+    - no deliverable key is named on a Supplies line of two stories;
+    - the root backlog's stated epic, story and test plan counts equal the package.
+    """
+    findings: list[str] = []
+    by_target = {story["path"].removesuffix(".md"): story for story in record["stories"]}
+    suppliers: dict[str, list[str]] = {}
+    for story in record["stories"]:
+        sid, plan = story["id"], story["test_plan"]
+        items = len(ACCEPTANCE_ITEM_RE.findall(section(story["body"], "Acceptance")))
+        covered: set[int] = set()
+        declared = False
+        for scenario, block in scenario_blocks(story.get("test_body", "")):
+            fields = scenario_fields(block)[0]
+            if "story_criteria" in fields:
+                declared = True
+                numbers = story_criterion_numbers(fields["story_criteria"], items)
+                if numbers is None:
+                    findings.append(f"{plan} scenario {scenario} story_criteria must list Acceptance item"
+                                    f" numbers such as 1, 3-5: {fields['story_criteria']}")
+                    continue
+                for number in sorted(n for n in numbers if n > items):
+                    findings.append(f"{plan} scenario {scenario} cites story criterion {number}, but {sid}"
+                                    f" Acceptance holds {items}")
+                covered |= numbers
+            if ROWS_RE.fullmatch(fields.get("rows", "")):
+                for field in ("Given", "When"):
+                    listed = ROW_LIST_RE.search(fields.get(field, ""))
+                    if listed is None:
+                        continue
+                    count = len([row for row in listed.group(1).split(";") if row.strip()])
+                    if count != int(fields["rows"]):
+                        findings.append(f"{plan} scenario {scenario} declares rows: {fields['rows']}, but"
+                                        f" its {field} lists {count} rows")
+        if declared:
+            for number in sorted(set(range(1, items + 1)) - covered):
+                findings.append(f"{story['path']} Acceptance item {number} has no scenario whose"
+                                " story_criteria traces to it")
+        linked = {target.strip().removesuffix(".md")
+                  for target in WIKILINK_TARGET_RE.findall(section(story["body"], "Dependencies"))}
+        linked = {target for target in linked
+                  if target in by_target and target != story["path"].removesuffix(".md")}
+        for target in sorted(linked - set(story["dependency_targets"])):
+            findings.append(f"{story['path']} Dependencies links {by_target[target]['id']}, which depends_on"
+                            " does not declare")
+        for line in SUPPLIES_RE.findall(story["body"]):
+            for key in sorted(set(re.findall(r"`([^`\n]+)`", line))):
+                suppliers.setdefault(key, []).append(sid)
+    for key, owners in sorted(suppliers.items()):
+        if len(owners) > 1:
+            findings.append(f"deliverable `{key}` is supplied by more than one story: {', '.join(owners)}")
+    backlog = record.get("backlog") or {}
+    body = backlog.get("body", "")
+    stories, epics = len(record["stories"]), len(record["epics"])
+    for stated_stories, stated_plans in ROOT_STORY_COUNT_RE.findall(body):
+        if (int(stated_stories), int(stated_plans)) != (stories, stories):
+            findings.append(f"{backlog.get('path', 'backlog')} states {stated_stories} stories with"
+                            f" {stated_plans} test plans; the package holds {stories} of each")
+    for stated in ROOT_EPIC_COUNT_RE.findall(body):
+        if int(stated) != epics:
+            findings.append(f"{backlog.get('path', 'backlog')} states {stated} epics; the package holds {epics}")
+    return findings
+
+
+def precheck(args) -> int:
+    """Run the mechanical pre-review check; nothing is written."""
+    docs = docs_root(args.docs)
+    try:
+        with stage_package.candidate_session(), experience_validation_session():
+            record, _errors = collect(docs, review_inputs=True)
+    except RuntimeError as exc:
+        print(json.dumps({"ok": False, "findings": [str(exc)]}, indent=2, ensure_ascii=False))
+        return 1
+    findings = precheck_findings(record)
+    print(json.dumps({"ok": not findings, "findings": findings}, indent=2, ensure_ascii=False))
+    return 1 if findings else 0
+
+
 def check(args) -> int:
     docs = docs_root(args.docs)
     try:
@@ -4354,7 +4533,8 @@ def review_pin_findings(record: dict, docs: Path, pin: dict,
 
     registry = process_policy.load_registry()
     switches = sorted(switch for switch, entry in registry.items()
-                      if BACKLOG_FLOW in (entry["spec"].get("flows") or []))
+                      if BACKLOG_FLOW in (entry["spec"].get("flows") or [])
+                      and process_policy.binds_work(entry))
     values = process_policy.effective_values(docs)[0]
     findings = []
     reviews = [latest(record["backlog_reviews"])] + [latest(epic["reviews"])
@@ -4817,7 +4997,8 @@ def pending_review_policy_matches(docs: Path, props: dict, pin: dict) -> bool:
     return all((ran[switch]["value"], ran[switch].get("parameters"))
                == (current[switch]["value"], current[switch].get("parameters"))
                for switch, entry in registry.items()
-               if BACKLOG_FLOW in (entry["spec"].get("flows") or []))
+               if BACKLOG_FLOW in (entry["spec"].get("flows") or [])
+               and process_policy.binds_work(entry))
 
 
 def stub_review(docs: Path, slug: str | None = None) -> int:
@@ -5538,6 +5719,9 @@ def main(argv=None) -> int:
     command.add_argument("--render", action="store_true")
     command.add_argument("--json", action="store_true")
     command.set_defaults(func=check)
+    command = sub.add_parser("precheck", help="Mechanical pre-review check; run before a review manifest")
+    command.add_argument("--docs", default=None)
+    command.set_defaults(func=precheck)
     command = sub.add_parser("status")
     command.add_argument("--docs", default=None)
     command.add_argument("--json", action="store_true")

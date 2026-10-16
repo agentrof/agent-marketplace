@@ -1,0 +1,6 @@
+{
+  "summary": "Select repair-pass review lenses from the last reviewed candidate when its bindings and ancestry remain valid.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

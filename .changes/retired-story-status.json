@@ -1,0 +1,6 @@
+{
+  "summary": "Add the retired story status: a story the owner drops keeps its file with retired_at and retired_reason, so approved review history still resolves; it leaves ordering, coverage and Delivery planning, its historical reviews keep covering it, and a live story may not depend on it.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

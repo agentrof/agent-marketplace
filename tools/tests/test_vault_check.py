@@ -416,5 +416,30 @@ class VaultFileViewTests(unittest.TestCase):
             self.assertFalse((parent / "child.md").exists())
 
 
+class RetiredStoryPropertyTests(unittest.TestCase):
+    def test_a_retired_story_is_a_legal_story_lifecycle_with_typed_properties(self):
+        import backlog_compile
+        from tools.tests.backlog_fixture import make_approved_backlog
+        with tempfile.TemporaryDirectory() as temporary:
+            docs = Path(temporary) / "workspace" / "docs"
+            make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+            story = docs / "backlog/epics/delivery-fixture/stories/auth-02/story.md"
+
+            def story_findings(**changes):
+                props, body = backlog_compile.parse_front_matter(story)
+                story.write_text(backlog_compile.front_matter(props | changes, body), encoding="utf-8")
+                return [finding["message"] for finding in findings(docs)
+                        if finding["check"] == "frontmatter_props"
+                        and finding["path"].endswith("auth-02/story.md")]
+
+            self.assertEqual(story_findings(
+                status="retired", tags=["doc/story", "status/retired"],
+                retired_at="2026-10-16", retired_reason="The owner removed this scope."), [])
+            self.assertEqual(story_findings(retired_at="16 October"),
+                             ["'retired_at' does not match its vault-wide property type 'date'"])
+            self.assertEqual(story_findings(status="dropped", retired_at="2026-10-16"),
+                             ["status 'dropped' is not legal for type 'story'"])
+
+
 if __name__ == "__main__":
     unittest.main()

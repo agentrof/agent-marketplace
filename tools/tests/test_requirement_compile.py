@@ -214,6 +214,19 @@ class RequirementCompilerTests(unittest.TestCase):
         self.assertEqual(requirement_route.route(self.docs, "REQ-001")["actions"], ["inspect", "supersede"])
 
     @integration
+    def test_a_retired_story_needs_no_requirement_coverage_row(self):
+        requirement_compile.approve_requirement(self.complete_draft())
+        self.implementing_story()
+        retired = self.docs / "backlog/epics/access/stories/saml-logout/story.md"
+        retired.parent.mkdir(parents=True)
+        retired.write_text(
+            "---\ntype: story\ntitle: SAML logout\nstatus: retired\nid: ST-002\nimplements:\n"
+            '  - "[[requirements/req-001-saml-access|REQ-001]]"\naliases:\n  - ST-002\n---\n\n'
+            "# SAML logout\n", encoding="utf-8")
+        self.root_review(14, "approved", "| REQ-001 | ST-001 | covered |")
+        self.assertTrue(requirement_compile.requirement_incorporated(self.docs, "REQ-001"))
+
+    @integration
     def test_a_row_only_in_an_older_approved_round_does_not_incorporate(self):
         requirement_compile.approve_requirement(self.complete_draft())
         self.implementing_story()

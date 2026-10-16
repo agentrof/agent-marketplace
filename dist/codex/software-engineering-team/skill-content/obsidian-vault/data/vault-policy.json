@@ -490,6 +490,8 @@
     ,"primary_process_ref": "text"
     ,"related_process_refs": "multitext"
     ,"retired_at_utc": "datetime"
+    ,"retired_at": "date"
+    ,"retired_reason": "text"
     ,"component_ref": "text"
     ,"record_id": "text"
     ,"introduced_by": "multitext"
@@ -562,7 +564,9 @@
       "scenario_refs",
       "criterion_refs",
       "revision",
-      "approved_at_utc"
+      "approved_at_utc",
+      "retired_at",
+      "retired_reason"
     ],
     "requirements": ["request_kind", "urgency", "revision", "approved_at_utc", "source_hash"],
     "definition_of_done": ["revision", "approved_at_utc", "source_hash", "definition_of_done_source_hash", "definition_of_done_commit"],
@@ -692,7 +696,7 @@
     "backlog_review": ["draft", "changes_requested", "approved"],
     "epic": ["draft", "approved", "superseded"],
     "epic_review": ["draft", "changes_requested", "approved"],
-    "story": ["planned"],
+    "story": ["planned", "retired"],
     "test_plan": ["draft", "approved", "superseded", "retired"],
     "task": ["active", "delivered", "dropped"],
     "retrospective": ["final"],

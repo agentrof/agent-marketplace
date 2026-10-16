@@ -1336,5 +1336,96 @@ class ReviewRecordTests(unittest.TestCase):
         self.assertIn("is a draft", errors[0])
 
 
+class RetiredStoryTests(unittest.TestCase):
+    """A dropped story is retired in place so approved history keeps resolving."""
+
+    EPIC = "backlog/epics/delivery-fixture"
+
+    @contextmanager
+    def backlog(self):
+        with tempfile.TemporaryDirectory() as raw:
+            docs = Path(raw) / "workspace" / "docs"
+            make_approved_backlog(docs, "AUTH-01", "AUTH-02")
+            yield docs
+
+    def edit(self, path: Path, **changes):
+        props, body = backlog_compile.parse_front_matter(path)
+        for key, value in changes.items():
+            if value is None:
+                props.pop(key, None)
+            else:
+                props[key] = value
+        path.write_text(backlog_compile.front_matter(props, body), encoding="utf-8")
+
+    def retire(self, docs: Path, story: str = "auth-02", **overrides):
+        changes = {"status": "retired", "tags": ["doc/story", "status/retired"],
+                   "retired_at": "2026-10-16", "retired_reason": "The owner removed this scope."}
+        self.edit(docs / self.EPIC / "stories" / story / "story.md", **(changes | overrides))
+
+    def test_a_retired_story_keeps_its_file_and_leaves_the_live_story_set(self):
+        with self.backlog() as docs:
+            self.retire(docs)
+            record, errors = backlog_compile.collect(docs)
+            self.assertEqual(errors, [])
+            self.assertEqual([story["id"] for story in record["stories"]], ["AUTH-01"])
+            self.assertEqual([story["id"] for story in record["retired_stories"]], ["AUTH-02"])
+            self.assertIn(docs / self.EPIC / "stories/auth-02/story.md",
+                          backlog_compile.package_paths(record, docs))
+
+    def test_a_retired_story_needs_a_date_and_a_one_line_reason(self):
+        with self.backlog() as docs:
+            self.retire(docs, retired_at="16 October", retired_reason=None)
+            _record, errors = backlog_compile.collect(docs)
+            prefix = f"{self.EPIC}/stories/auth-02/story.md retired story needs"
+            self.assertIn(f"{prefix} retired_at as YYYY-MM-DD", errors)
+            self.assertIn(f"{prefix} a one-line retired_reason", errors)
+
+    def test_a_live_story_must_not_depend_on_a_retired_story(self):
+        with self.backlog() as docs:
+            self.retire(docs)
+            story = docs / self.EPIC / "stories/auth-01/story.md"
+            target = f"{self.EPIC}/stories/auth-02/story"
+            self.edit(story, depends_on=[f"[[{target}|AUTH-02]]"])
+            story.write_text(story.read_text(encoding="utf-8").replace(
+                "## Dependencies\n", f"## Dependencies\n\n- [[{target}|AUTH-02]]: needs the account.\n"),
+                encoding="utf-8")
+            _record, errors = backlog_compile.collect(docs)
+            self.assertIn("AUTH-01 depends on retired story AUTH-02; remove the dependency"
+                          " or point it at the replacing story", errors)
+
+    def test_a_retired_story_test_plan_may_be_retired_but_not_draft(self):
+        with self.backlog() as docs:
+            self.retire(docs)
+            plan = docs / self.EPIC / "stories/auth-02/test-plan.md"
+            self.edit(plan, status="retired", tags=["doc/test-plan", "status/retired"])
+            self.assertEqual(backlog_compile.collect(docs)[1], [])
+            self.edit(plan, status="draft", tags=["doc/test-plan", "status/draft"])
+            self.assertIn(f"{self.EPIC}/stories/auth-02/test-plan.md test plan of a retired story"
+                          " must be approved or retired", backlog_compile.collect(docs)[1])
+
+    def test_reviews_cover_a_retired_story_with_or_without_naming_it(self):
+        with self.backlog() as docs:
+            self.retire(docs)
+            review = docs / self.EPIC / "reviews/round-1-epic-review.md"
+            # The approved review still names the retired story and its scenario.
+            self.assertEqual(backlog_compile.collect(docs)[1], [])
+            # A later review need not name it.
+            self.edit(review, verifies=[
+                f"[[{self.EPIC}/stories/auth-01/story|AUTH-01]]",
+                f"[[{self.EPIC}/stories/auth-01/test-plan|AUTH-01-TP]]"],
+                scenario_refs=["AUTH-01-TS-001"])
+            self.assertEqual(backlog_compile.collect(docs)[1], [])
+            # A live story is still required.
+            self.edit(review, verifies=[f"[[{self.EPIC}/stories/auth-02/story|AUTH-02]]"])
+            self.assertIn(f"{self.EPIC}/reviews/round-1-epic-review.md verifies set does not"
+                          " exactly cover every story and test plan", backlog_compile.collect(docs)[1])
+
+    def test_a_retired_story_id_stays_reserved(self):
+        with self.backlog() as docs:
+            self.retire(docs)
+            self.edit(docs / self.EPIC / "stories/auth-01/story.md", id="AUTH-02")
+            self.assertIn("story ids must be unique across epics", backlog_compile.collect(docs)[1])
+
+
 if __name__ == "__main__":
     unittest.main()

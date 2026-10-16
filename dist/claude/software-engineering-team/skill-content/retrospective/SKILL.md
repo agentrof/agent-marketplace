@@ -1,6 +1,6 @@
 ---
 name: retrospective
-description: Reports fast-lane task times and cost, request-to-merge average, median and max against target, each task's steps and waits with their owner, the slowest tasks and numbered improvement proposals; acts on a proposal only on the user's approval.
+description: Reports fast-lane task times, cost and quality, request-to-merge average, median and max against target, each task's steps and waits with their owner, the slowest tasks and numbered improvement proposals; acts on a proposal only on the user's approval.
 exposure: entry
 ---
 
@@ -27,7 +27,7 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
 - `--deep` adds reading waste: files read 5 or more times and tool results
   over 200 KB.
 - `--export csv|json` also rebuilds `.agentrof/retrospective/tasks.<ext>`,
-  a derived, git-ignored file with the time and cost columns.
+  a derived, git-ignored file with the time, cost and quality columns.
 
 ## Procedure
 
@@ -50,6 +50,14 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
    and later runs read that row first, so cost survives the host's transcript
    cleanup. `--rescan` prices every task from the transcripts again and
    appends the result as its newest row; earlier rows stay.
+   Quality comes beside them: the review counts `merge --critical <n>
+   --non-critical <n> --filed <n>` writes into its pass comment; the CI first
+   pass and the red runs before green from the branch's workflow runs (one
+   `gh api` call per pull request; an external status check is not seen); an
+   escaped defect is each later task whose `fixes: TK-###` names the task; a
+   story's coverage is the share of its criteria the delivered tasks cover.
+   The findings and CI figures are kept once per merged task as a
+   `task_quality` history row and read first; `--rescan` reads them again.
 2. Return its text as it is:
    - task count; request-to-merge average, median and max against the target
      (15 minutes on average, 50 at most for a large task) and the previous
@@ -63,11 +71,17 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
      spawns per task, average startup context per spawn, dollars by model and
      by class (author, review, fix, security, main), the main-session share,
      and the previous retrospective's dollars and tokens per task;
+   - per task its quality: critical, non-critical and filed findings, CI first
+     pass with its red runs, the tasks that fixed it and its story coverage;
+     per kind critical and non-critical findings per task, the filed share,
+     the CI first-pass rate, red runs per task, the escaped defect rate and
+     coverage per story, and the previous retrospective's quality figures;
    - the slowest tasks with their largest step;
-   - up to 4 numbered proposals per kind, time and cost levers (startup
-     context, spawns per task, xhigh effort on review or fix, main-session
-     share) ranked together by the share of the task's minutes or dollars
-     they address, each with its evidence, cause owner (project, plugin, host
+   - up to 4 numbered proposals per kind, time, cost (startup context, spawns
+     per task, xhigh effort on review or fix, main-session share) and quality
+     levers (CI first pass under 80%, any escaped defect, critical findings on
+     over 20% of reviewed tasks) ranked together by the share of the task's
+     minutes, dollars or tasks they address, each with its evidence, cause owner (project, plugin, host
      tool, owner or process), expected gain and how to verify it.
    Add nothing it does not measure; an empty scope says so.
 3. For a Delivery scope the user may keep the summary: `--write-report` writes

@@ -23,7 +23,10 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   time, and ``session_cost.py`` reads each task's cost and active minutes from
   the host session transcripts, so every wait gets an owner; ``--deep`` adds reading waste.
   Cost is tokens and dollars per task, its spawns and their startup context,
-  priced by ``session_cost.load_prices``. Each run appends every
+  priced by ``session_cost.load_prices``. Quality is read beside them: the
+  review counts ``merge`` writes into its pass comment, CI first pass from the
+  branch's workflow runs, escaped defects from later tasks' ``fixes`` and story
+  coverage from the merged tasks' ``covers``. Each run appends every
   merged task's cost and waits to the history once, and later runs read that
   row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``;
   ``--write-report`` keeps a Delivery's summary under
@@ -45,6 +48,7 @@ import statistics
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 from ba_compile import parse_frontmatter
 
@@ -104,6 +108,22 @@ WAIT_LEVERS = {
             " the owner; resume dropped sessions at once and keep one task per worktree.",
 }
 REVIEW_MARK = "fast-lane review: pass"
+FINDINGS_RE = re.compile(r"findings: critical ([0-9]+), non-critical ([0-9]+), filed ([0-9]+)")
+RED_RUNS = {"failure", "timed_out", "startup_failure"}
+# Quality read from GitHub, kept in the history once per merged task.
+QUALITY_KEPT = ("critical", "non_critical", "filed", "ci_first_pass", "red_runs")
+# Thresholds are a judgement call, not a measured baseline: a CI first-pass rate under 80%,
+# any escaped defect, or critical findings on more than 20% of reviewed tasks earns a lever.
+FIRST_PASS_FLOOR = 0.8
+CRITICAL_CEILING = 0.2
+QUALITY_LEVERS = {
+    "ci": "Run the CI's test command for the touched suites and the vault gate before open-pr,"
+          " and reproduce a red check locally before pushing again.",
+    "escaped": "Turn each escaped defect into a criterion and a named test on the fixing task, and"
+               " have the reviewer check every criterion against a test in the diff.",
+    "critical": "Name each criterion's test before writing, and have the writer check the diff"
+                " against every criterion before open-pr.",
+}
 # step -> (start, end); CI and review run side by side after the PR opens.
 STEPS = {"define": ("requested_at", "approved_at"), "write": ("approved_at", "pr_opened"),
          "ci": ("pr_opened", "ci_green"), "review": ("pr_opened", "review"),
@@ -176,8 +196,9 @@ def proposed_rigor(request: str) -> tuple[str, list[str]]:
 
 def task_text(task: str, title: str, request: str, requested_at: str, delivery: str,
               rigor: str, epic: str = "", source_story: str = "", covers: list[int] | None = None,
-              kind: str = "build", size: str = "s") -> str:
+              kind: str = "build", size: str = "s", fixes: str = "") -> str:
     grouped = f"delivery: {delivery}\n" if delivery else ""
+    grouped += f"fixes: {fixes}\n" if fixes else ""
     if kind == "knowledge":
         # A knowledge task needs no separate approval: the owner's request is the approval.
         return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
@@ -238,6 +259,8 @@ def lint(path: Path) -> list[str]:
         errors.append("requested_at is required")
     if props.get("delivery") and not DELIVERY_RE.match(str(props["delivery"])):
         errors.append("delivery must be DLV-<number>")
+    if props.get("fixes") and not ID_RE.match(str(props["fixes"])):
+        errors.append("fixes must be TK-<number>")
     if props.get("epic") and not EPIC_RE.match(str(props["epic"])):
         errors.append("epic must be EP-<number>")
     if props.get("source_story") and not STORY_RE.match(str(props["source_story"])):
@@ -344,6 +367,43 @@ def review_at(comments: list[dict]) -> str | None:
     return min(times, key=parse_time) if times else None
 
 
+def findings(comments: list[dict]) -> dict:
+    """The review counts ``merge`` wrote into the latest review pass; None when it wrote none."""
+    for comment in reversed(comments):
+        body = comment.get("body") or ""
+        if REVIEW_MARK in body and (match := FINDINGS_RE.search(body)):
+            return dict(zip(("critical", "non_critical", "filed"), map(int, match.groups())))
+    return {"critical": None, "non_critical": None, "filed": None}
+
+
+def ci_runs(root: Path, branch: str) -> list[dict]:
+    """The branch's workflow runs, one gh call per pull request; none when the API refuses."""
+    if not branch:
+        return []
+    try:
+        out = run("gh", "api", f"repos/{{owner}}/{{repo}}/actions/runs?branch={quote(branch, safe='')}"
+                  "&per_page=100", cwd=root)
+    except Refused:
+        return []
+    return json.loads(out or "{}").get("workflow_runs") or []
+
+
+def first_pass(runs: list[dict], merged: str | None = None) -> dict:
+    """CI quality from the finished workflow runs up to the merge: green on the first pushed head
+    (no red run and no re-run on it), and the red runs before green, re-run attempts included.
+    shortcut: workflow runs stand in for required checks; an external status check is not seen."""
+    done = sorted((item for item in runs if item.get("conclusion") and item.get("created_at")
+                   and (not merged or parse_time(item["created_at"]) <= parse_time(merged))),
+                  key=lambda item: parse_time(item["created_at"]))
+    if not done:
+        return {"ci_first_pass": None, "red_runs": None}
+    attempts = [int(item.get("run_attempt") or 1) for item in done]
+    head = done[0].get("head_sha")
+    return {"ci_first_pass": all(item["conclusion"] not in RED_RUNS and attempt == 1
+                                 for item, attempt in zip(done, attempts) if item.get("head_sha") == head),
+            "red_runs": sum(item["conclusion"] in RED_RUNS for item in done) + sum(attempts) - len(done)}
+
+
 def pull_requests(root: Path) -> dict[str, dict]:
     """The newest task pull request of each task id."""
     listed = json.loads(run("gh", "pr", "list", "--state", "all", "--limit", "1000", "--json",
@@ -356,13 +416,16 @@ def pull_requests(root: Path) -> dict[str, dict]:
     return found
 
 
-def pr_times(root: Path, number) -> dict:
+def pr_times(root: Path, number, runs: bool = True) -> dict:
+    """Times, check minutes and quality of one pull request; ``runs`` adds the CI first pass."""
     data = json.loads(run("gh", "pr", "view", str(number), "--json",
-                          "createdAt,mergedAt,statusCheckRollup,comments", cwd=root))
+                          "createdAt,mergedAt,statusCheckRollup,comments,headRefName", cwd=root))
     checks = data.get("statusCheckRollup") or []
     return {"pr": str(number), "pr_opened": data.get("createdAt"),
             "ci_green": ci_green_at(checks), "review": review_at(data.get("comments") or []),
-            "merged": data.get("mergedAt"), "checks": check_minutes(checks)}
+            "merged": data.get("mergedAt"), "checks": check_minutes(checks),
+            **findings(data.get("comments") or []),
+            **(first_pass(ci_runs(root, data.get("headRefName") or ""), data.get("mergedAt")) if runs else {})}
 
 
 def repo_slug(root: Path) -> str:
@@ -396,7 +459,9 @@ def task_row(task: dict, pr: dict | None) -> dict:
     known = {step: value for step, value in steps.items() if value is not None}
     return {"task_id": task["id"], "title": task.get("title", ""), "size": task.get("size", ""),
             "rigor": task.get("rigor", "normal"), "delivery": task.get("delivery", ""),
-            "kind": task.get("task_kind", "build"),
+            "kind": task.get("task_kind", "build"), "story": task.get("source_story", ""),
+            "fixes": task.get("fixes", ""),
+            "quality": {key: (pr or {}).get(key) for key in QUALITY_KEPT},
             "pr": (pr or {}).get("pr", ""), **times,
             "total": minutes_between(times, "requested_at", "merged"), "steps": steps,
             "largest_step": max(known, key=known.get) if known else None,
@@ -630,10 +695,87 @@ def cost_proposals(rows: list[dict]) -> list[dict]:
     return found
 
 
+def link_quality(rows: list[dict], tasks: list[dict], stories: dict) -> None:
+    """Escaped defects and story coverage, derived from the task files on every run: each later
+    task naming ``fixes: <id>`` is an escaped defect of that task; a story's coverage is the share
+    of its criteria the delivered tasks cover (on the target branch a delivered task is merged)."""
+    fixers: dict[str, list[str]] = {}
+    for task in tasks:
+        if task.get("fixes"):
+            fixers.setdefault(str(task["fixes"]), []).append(str(task["id"]))
+    groups = {story: group for epic in board(stories, [task for task in tasks
+                                                       if task.get("status") == "delivered"], []).values()
+              for story, group in epic.items()}
+    for row in rows:
+        group = groups.get(row["story"]) or {}
+        row["quality"].update(fixed_by=sorted(fixers.get(row["task_id"], [])), story_coverage=round(
+            (group["criteria"] - len(group["missing"])) / group["criteria"], 2) if group.get("criteria") else None)
+
+
+def quality_summary(rows: list[dict]) -> dict | None:
+    """Review findings, CI first pass, escaped defects and story coverage over the rows."""
+    if not rows:
+        return None
+    reviewed = [row["quality"] for row in rows if row["quality"].get("critical") is not None]
+    checked = [row["quality"] for row in rows if row["quality"].get("ci_first_pass") is not None]
+    escaped = [row["task_id"] for row in rows if row["quality"].get("fixed_by")]
+    coverage = {row["story"]: row["quality"]["story_coverage"] for row in rows
+                if row["quality"].get("story_coverage") is not None}
+    minor = sum(item["non_critical"] for item in reviewed)
+    def mean(items, key, digits=2):
+        return round(statistics.mean(item[key] for item in items), digits) if items else None
+    return {"tasks": len(rows), "reviewed": len(reviewed), "critical_per_task": mean(reviewed, "critical"),
+            "critical_tasks": [row["task_id"] for row in rows if row["quality"].get("critical")],
+            "non_critical_per_task": mean(reviewed, "non_critical"),
+            "filed_share": round(sum(item["filed"] for item in reviewed) / minor, 2) if minor else None,
+            "ci_checked": len(checked), "first_pass_rate": mean(checked, "ci_first_pass"),
+            "red_runs_per_task": mean(checked, "red_runs", 1),
+            "escaped": {task: row["quality"]["fixed_by"] for row in rows
+                        if (task := row["task_id"]) in escaped},
+            "escaped_rate": round(len(escaped) / len(rows), 2), "coverage": coverage,
+            "coverage_average": round(statistics.mean(coverage.values()), 2) if coverage else None}
+
+
+def quality_proposals(rows: list[dict]) -> list[dict]:
+    """Quality levers, each weighted by the share of tasks it hits, so it ranks with time and cost."""
+    found, spec = [], quality_summary(rows)
+    if not spec:
+        return found
+    rate = spec["first_pass_rate"]
+    if rate is not None and rate < FIRST_PASS_FLOOR:
+        red = [row["task_id"] for row in rows if row["quality"].get("ci_first_pass") is False]
+        found.append({"id": "RETRO-QUALITY-CI-FIRST-PASS", "step": "quality:ci", "weight": 1 - rate,
+                      "evidence": f"CI first pass {round(rate * 100)}% over {spec['ci_checked']} tasks,"
+                                  f" {spec['red_runs_per_task']} red runs per task; red first: {', '.join(red[:10])}",
+                      "proposal": QUALITY_LEVERS["ci"], "cause_owner": "process",
+                      "expected_gain": f"up to {spec['red_runs_per_task']} fewer CI rounds per task",
+                      "verify": f"the next retrospective shows a CI first-pass rate of at least"
+                                f" {round(FIRST_PASS_FLOOR * 100)}%"})
+    if spec["escaped"]:
+        found.append({"id": "RETRO-QUALITY-ESCAPED", "step": "quality:escaped", "weight": spec["escaped_rate"],
+                      "evidence": f"{len(spec['escaped'])} of {spec['tasks']} tasks needed a later fix: "
+                                  + ", ".join(f"{task} (fixed by {', '.join(by)})"
+                                              for task, by in list(spec["escaped"].items())[:10]),
+                      "proposal": QUALITY_LEVERS["escaped"], "cause_owner": "process",
+                      "expected_gain": f"up to {len(spec['escaped'])} fix tasks fewer per {spec['tasks']} tasks",
+                      "verify": "no task of the next retrospective's scope gets a later fix task"})
+    share = len(spec["critical_tasks"]) / spec["reviewed"] if spec["reviewed"] else 0
+    if share > CRITICAL_CEILING:
+        found.append({"id": "RETRO-QUALITY-CRITICAL", "step": "quality:review", "weight": share,
+                      "evidence": f"critical findings on {len(spec['critical_tasks'])} of {spec['reviewed']}"
+                                  f" reviewed tasks, {spec['critical_per_task']} per task:"
+                                  f" {', '.join(spec['critical_tasks'][:10])}",
+                      "proposal": QUALITY_LEVERS["critical"], "cause_owner": "process",
+                      "expected_gain": "one fix and re-review round less per affected task",
+                      "verify": f"critical findings on at most {round(CRITICAL_CEILING * 100)}% of reviewed"
+                                " tasks in the next retrospective"})
+    return found
+
+
 def kind_proposals(rows: list[dict]) -> list[dict]:
     """Levers per task kind, the kind furthest over its average target first, at most four
-    per kind; time and cost levers rank together by the share of the task's minutes or
-    dollars they address; each names its kind and the gap to that target."""
+    per kind; time, cost and quality levers rank together by the share of the task's minutes,
+    dollars or tasks they address; each names its kind and the gap to that target."""
     found = []
     goals = targets(rows, [])
     kinds = {row.get("kind", "build") for row in rows}
@@ -644,7 +786,7 @@ def kind_proposals(rows: list[dict]) -> list[dict]:
         minutes = statistics.mean(done) if done else 0
         levers = [{**item, "weight": item["weight"] / minutes if minutes and item["weight"] > 0
                    else item["weight"]} for item in proposals(mine, keep_weight=True)]
-        levers = sorted(levers + cost_proposals(mine), key=lambda item: -item["weight"])
+        levers = sorted(levers + cost_proposals(mine) + quality_proposals(mine), key=lambda item: -item["weight"])
         for item in levers[:4]:
             item.pop("weight")
             versus = (f"; average {goal['average']} vs target {goal['average_target']} min"
@@ -672,7 +814,7 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
                         "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
                         "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over,
-                        "cost": cost_summary(done)}
+                        "cost": cost_summary(done), "quality": quality_summary(done)}
     return result
 
 
@@ -690,6 +832,7 @@ def report(rows: list[dict], scope: str, previous: dict | None = None,
                         for row in slowest],
             "targets": targets(rows, totals), "previous": previous,
             "cost": cost_summary([row for row in rows if row["total"] is not None]),
+            "quality": quality_summary([row for row in rows if row["total"] is not None]),
             "unattributed": unattributed,
             "proposals": kind_proposals(rows)}
 
@@ -707,6 +850,10 @@ def render(data: dict) -> str:
         lines.append(f"- {row['task_id']} ({row['size'] or '-'}, {row['rigor']}) PR"
                      f" {row['pr'] or '-'}: {steps}"
                      f" = {row['total'] if row['total'] is not None else 'open'}")
+    if data["per_task"]:
+        lines += ["", "Quality per task: findings critical / non-critical / filed; CI first pass (red runs);"
+                      " fixed by; story coverage"]
+        lines += [f"- {row['task_id']}: {task_quality_line(row)}" for row in data["per_task"]]
     if data.get("targets"):
         lines += ["", "By kind (min; average / median / max, then the average of each step):"]
     for kind, goal in (data.get("targets") or {}).items():
@@ -726,6 +873,9 @@ def render(data: dict) -> str:
             lines.append(f"Cost {kind}: {cost_line(goal['cost'])}")
     if data.get("cost"):
         lines.append(f"Cost all merged: {cost_line(data['cost'])}")
+    for kind, goal in (data.get("targets") or {}).items():
+        if goal.get("quality"):
+            lines.append(f"Quality {kind}: {quality_line(goal['quality'])}")
     if data.get("unattributed"):
         lines.append(f"Unattributed in the scanned window: ${data['unattributed']['usd']:.2f},"
                      f" tokens {tokens_line(data['unattributed']['tokens'])}")
@@ -734,7 +884,11 @@ def render(data: dict) -> str:
         lines.append(f"Previous retrospective ({before['at']}): {before['merged']} merged, average"
                      f" {before['average']}, median {before['median']}, max {before['max']} min"
                      + (f"; ${before['usd_per_task']:.2f} and {before['tokens_per_task']} tokens per task"
-                        if before.get("usd_per_task") is not None else ""))
+                        if before.get("usd_per_task") is not None else "")
+                     + (f"; critical {dash(before['quality']['critical_per_task'])} per task, CI first pass"
+                        f" {percent(before['quality']['first_pass_rate'])}, escaped"
+                        f" {percent(before['quality']['escaped_rate'])}, coverage"
+                        f" {percent(before['quality']['coverage_average'])}" if before.get("quality") else ""))
     waits = [row for row in data["per_task"] if row.get("waits")]
     if waits:
         lines += ["", "Waits (min): agent_work / ci_wait / review_wait / owner_wait / idle; cost"]
@@ -768,6 +922,33 @@ def render(data: dict) -> str:
     return "\n".join(lines)
 
 
+def dash(value) -> str:
+    return "-" if value is None else str(value)
+
+
+def percent(value) -> str:
+    return "-" if value is None else f"{round(value * 100)}%"
+
+
+def task_quality_line(row: dict) -> str:
+    item = row["quality"]
+    first = {True: "yes", False: "no", None: "-"}[item.get("ci_first_pass")]
+    return (f"{dash(item.get('critical'))} / {dash(item.get('non_critical'))} / {dash(item.get('filed'))};"
+            f" CI first pass {first} ({dash(item.get('red_runs'))}); fixed by"
+            f" {', '.join(item.get('fixed_by') or []) or '-'}; "
+            + (f"{row['story']} {percent(item.get('story_coverage'))}" if row.get("story") else "-"))
+
+
+def quality_line(spec: dict) -> str:
+    return (f"critical {dash(spec['critical_per_task'])} and non-critical {dash(spec['non_critical_per_task'])}"
+            f" per task over {spec['reviewed']} reviewed, filed {percent(spec['filed_share'])};"
+            f" CI first pass {percent(spec['first_pass_rate'])} over {spec['ci_checked']}"
+            f" ({dash(spec['red_runs_per_task'])} red runs per task); escaped {len(spec['escaped'])}/{spec['tasks']}"
+            f" ({percent(spec['escaped_rate'])}){': ' + ', '.join(spec['escaped']) if spec['escaped'] else ''};"
+            f" coverage " + (", ".join(f"{story} {percent(value)}" for story, value in spec["coverage"].items())
+                             or "-"))
+
+
 def tokens_line(tokens: dict) -> str:
     return " / ".join(f"{key} {tokens[key]}" for key in COST_TOKENS)
 
@@ -789,14 +970,16 @@ def export(data: dict, fmt: str) -> str:
     fields = ["task_id", "title", "size", "rigor", "delivery", "pr", "requested_at",
               "approved_at", "pr_opened", "ci_green", "review", "merged", "total", *STEPS, *WAITS,
               "agents", "output_tokens", "usd", "input_tokens", "cache_write_tokens", "cache_read_tokens",
-              "spawns", "startup_context", "main_usd"]
+              "spawns", "startup_context", "main_usd", *QUALITY_KEPT, "fixes", "fixed_by", "story",
+              "story_coverage"]
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     for row in data["per_task"]:
         spent = sum(tokens["output"] for tokens in (row.get("cost") or {}).get("tokens_by_role", {}).values())
         cost = row.get("cost") or {}
         spawns = cost.get("spawns") or []
-        writer.writerow({**row, **row["steps"], **(row.get("waits") or {}),
+        writer.writerow({**row, **row["steps"], **(row.get("waits") or {}), **row["quality"],
+                         "fixed_by": " ".join(row["quality"].get("fixed_by") or []),
                          "agents": cost.get("agents", ""), "output_tokens": spent, "usd": cost.get("usd", ""),
                          **{f"{key}_tokens": (cost.get("tokens") or {}).get(key, "")
                             for key in ("input", "cache_write", "cache_read")},
@@ -830,12 +1013,20 @@ def kept_costs(root: Path) -> dict[str, dict]:
     return {item["task_id"]: item for item in history(root) if item.get("type") == "task_cost"}
 
 
+def kept_quality(root: Path) -> dict[str, dict]:
+    """Each merged task's latest saved GitHub quality (findings and CI first pass), by task id."""
+    return {item["task_id"]: item for item in history(root) if item.get("type") == "task_quality"}
+
+
 def remember(root: Path, data: dict, rescan: bool = False) -> None:
     """Append this run's summary, the next retrospective's comparison point, and once per merged
-    task its cost and waits, which outlive the host's transcripts (derived, git-ignored)."""
+    task its cost and waits, which outlive the host's transcripts, and its GitHub quality
+    (derived, git-ignored)."""
     total = data["request_to_merge_minutes"]
     spend = data.get("cost") or {}
+    spec = data.get("quality") or {}
     kept = {} if rescan else kept_costs(root)
+    graded = {} if rescan else kept_quality(root)
     path = root / HISTORY
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
@@ -843,11 +1034,18 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
                                  "average": total["average"], "median": total["median"],
                                  "max": total["max"], "usd_per_task": spend.get("usd_per_task"),
                                  "tokens_per_task": sum((spend.get("tokens_per_task") or {}).values())
-                                 if spend else None}) + "\n")
+                                 if spend else None,
+                                 "quality": {key: spec.get(key) for key in (
+                                     "critical_per_task", "first_pass_rate", "escaped_rate", "coverage_average")}
+                                 if spec else None}) + "\n")
         for row in data["per_task"]:
             if row["total"] is not None and row.get("cost") and row["task_id"] not in kept:
                 handle.write(json.dumps({"type": "task_cost", "at": now(), "task_id": row["task_id"],
                                          "cost": row["cost"], "waits": row.get("waits")}) + "\n")
+            if row["total"] is not None and row["task_id"] not in graded:
+                handle.write(json.dumps({"type": "task_quality", "at": now(), "task_id": row["task_id"],
+                                         "quality": {key: row["quality"].get(key) for key in QUALITY_KEPT}})
+                             + "\n")
 
 
 def gather(root: Path, args) -> dict:
@@ -856,8 +1054,13 @@ def gather(root: Path, args) -> dict:
         tasks.append({**task_props(path), "file": path.name})
     chosen = select(tasks, args.delivery, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
-    rows = [task_row(task, pr_times(root, prs[task["id"]]["number"]) if task["id"] in prs else None)
-            for task in chosen]
+    graded = {} if getattr(args, "rescan", False) else kept_quality(root)
+    rows = [task_row(task, pr_times(root, prs[task["id"]]["number"], runs=task["id"] not in graded)
+                     if task["id"] in prs else None) for task in chosen]
+    for row in rows:
+        if row["total"] is not None and row["task_id"] in graded:
+            row["quality"].update(graded[row["task_id"]]["quality"])
+    link_quality(rows, tasks, story_index(root) if any(task.get("source_story") for task in tasks) else {})
     unattributed = None
     kept = {} if getattr(args, "rescan", False) else kept_costs(root)
     deep = getattr(args, "deep", False)
@@ -1024,6 +1227,8 @@ def cmd_start(args, root: Path) -> dict:
     epic, covers = args.epic or "", []
     if args.epic and not EPIC_RE.match(args.epic):
         raise Refused("--epic must be EP-<number>")
+    if getattr(args, "fixes", None) and not ID_RE.match(args.fixes):
+        raise Refused("--fixes must be TK-<number>")
     if args.source_story:
         stories = story_index(root)
         if args.source_story not in stories:
@@ -1047,7 +1252,8 @@ def cmd_start(args, root: Path) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(task_text(task, args.title, request, requested_at, args.delivery or "",
                               rigor, epic, args.source_story or "", covers,
-                              "knowledge" if args.knowledge else "build", args.size), encoding="utf-8")
+                              "knowledge" if args.knowledge else "build", args.size,
+                              getattr(args, "fixes", None) or ""), encoding="utf-8")
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     return {"task_id": task, "branch": branch, "task": str(path.relative_to(root)),
             "proposed_rigor": rigor, "rigor_reasons": reasons}
@@ -1102,6 +1308,9 @@ def cmd_open_pr(args, root: Path) -> dict:
 def cmd_merge(args, root: Path) -> dict:
     rigor = task_props(task_path(root, args.task)).get("rigor", "normal")
     note = REVIEW_MARK + (f"\n\n{args.detail}" if args.detail else "")
+    counts = [getattr(args, key, None) for key in ("critical", "non_critical", "filed")]
+    if any(count is not None for count in counts):
+        note += "\n\nfindings: critical {}, non-critical {}, filed {}".format(*(count or 0 for count in counts))
     if rigor == "high":
         note += "\n\nRigor high: the owner merges this pull request."
     run("gh", "pr", "comment", args.pr, "--body", note, cwd=root)
@@ -1214,6 +1423,7 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--knowledge", action="store_true",
                        help="a knowledge task (documents only): the request is the approval, no criteria or reviewer")
     start.add_argument("--size", choices=SIZES, default="s")
+    start.add_argument("--fixes", help="the earlier task whose defect this task repairs, such as TK-007")
     criteria = sub.add_parser("criteria")
     criteria.add_argument("--story", required=True)
     criteria.add_argument("--base", default="main")
@@ -1235,6 +1445,9 @@ def main(argv: list[str] | None = None) -> int:
     merge.add_argument("--pr", required=True)
     merge.add_argument("--style", choices=("merge", "squash", "rebase"), default="merge")
     merge.add_argument("--detail")
+    for key in ("critical", "non-critical", "filed"):
+        merge.add_argument(f"--{key}", type=int, help=f"the review's {key} finding count"
+                           if key != "filed" else "the non-critical findings filed as issues")
     retro = sub.add_parser("report")
     retro.add_argument("--json", action="store_true")
     retro.add_argument("--export", choices=("csv", "json"))

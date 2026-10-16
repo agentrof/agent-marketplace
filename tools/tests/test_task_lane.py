@@ -906,6 +906,139 @@ class RetrospectiveDollarTests(unittest.TestCase):
         self.assertEqual(task_lane.kept_costs(root)["TK-001"]["cost"]["usd"], 1.5)
 
 
+class RetrospectiveQualityTests(unittest.TestCase):
+    """Review findings, CI first pass, escaped defects and story coverage beside time and cost."""
+
+    def row(self, task_id, quality=None, **task):
+        row = task_lane.task_row({**RetrospectiveTests.task, "id": task_id, **task},
+                                 {**pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z"),
+                                  **(quality or {})})
+        row["quality"].update(fixed_by=[], story_coverage=None)
+        return row
+
+    def test_merge_writes_the_review_counts_and_the_report_reads_them(self):
+        root = GitHubCommandTests.project(self, "normal")
+        calls = []
+        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
+            task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None,
+                                                critical=1, non_critical=3, filed=2), root)
+        note = calls[0][-1]
+        self.assertIn("findings: critical 1, non-critical 3, filed 2", note)
+        comments = [{"body": note}, {"body": "unrelated findings: critical 9, non-critical 9, filed 9"}]
+        self.assertEqual(task_lane.findings(comments), {"critical": 1, "non_critical": 3, "filed": 2})
+        self.assertEqual(task_lane.findings([{"body": task_lane.REVIEW_MARK}])["critical"], None)
+
+    def test_ci_first_pass_reads_the_first_head_and_counts_red_runs_before_the_merge(self):
+        def run(sha, minute, conclusion, attempt=1):
+            return {"head_sha": sha, "created_at": f"2026-10-16T10:{minute:02d}:00Z",
+                    "conclusion": conclusion, "run_attempt": attempt}
+        green = [run("a", 1, "success"), run("a", 1, "skipped")]
+        self.assertEqual(task_lane.first_pass(green), {"ci_first_pass": True, "red_runs": 0})
+        red = [run("a", 1, "failure"), run("b", 5, "success", attempt=2), run("b", 5, "cancelled"),
+               run("c", 30, "failure")]
+        self.assertEqual(task_lane.first_pass(red, "2026-10-16T10:20:00Z"),
+                         {"ci_first_pass": False, "red_runs": 2})
+        self.assertEqual(task_lane.first_pass([]), {"ci_first_pass": None, "red_runs": None})
+        with mock.patch.object(task_lane, "run", return_value=json.dumps({"workflow_runs": green})) as called:
+            self.assertEqual(task_lane.ci_runs(Path("."), "task/tk-004-x"), green)
+        self.assertIn("branch=task%2Ftk-004-x", called.call_args[0][2])
+        with mock.patch.object(task_lane, "run", side_effect=task_lane.Refused("no actions")):
+            self.assertEqual(task_lane.ci_runs(Path("."), "task/tk-004-x"), [])
+
+    def test_a_fixing_task_names_the_task_it_repairs_and_counts_as_its_escaped_defect(self):
+        path = Path(tempfile.mkdtemp()) / "tk-009-fix.md"
+        self.addCleanup(lambda: __import__("shutil").rmtree(path.parent))
+        path.write_text(task_lane.task_text("TK-009", "Fix export", "Fix it.", "2026-10-16T10:00:00Z", "",
+                                            "normal", kind="knowledge", fixes="TK-004"), encoding="utf-8")
+        self.assertEqual(task_lane.task_props(path)["fixes"], "TK-004")
+        self.assertEqual(task_lane.lint(path), [])
+        path.write_text(path.read_text(encoding="utf-8").replace("fixes: TK-004", "fixes: 4"), encoding="utf-8")
+        self.assertIn("fixes must be TK-<number>", task_lane.lint(path))
+        with self.assertRaises(task_lane.Refused):
+            task_lane.cmd_start(SimpleNamespace(delivery=None, at=None, request="r", request_file=None,
+                                                title="t", epic=None, source_story=None, covers=None,
+                                                fixes="TK-4"), Path("."))
+        rows = [task_lane.task_row({**RetrospectiveTests.task, "id": "TK-004"}, None)]
+        tasks = [{"id": "TK-004"}, {"id": "TK-009", "fixes": "TK-004"}, {"id": "TK-011", "fixes": "TK-004"}]
+        task_lane.link_quality(rows, tasks, {})
+        self.assertEqual(rows[0]["quality"]["fixed_by"], ["TK-009", "TK-011"])
+
+    def test_story_coverage_is_the_share_of_criteria_the_delivered_tasks_cover(self):
+        stories = task_lane.story_index(TaskLinkTests.project(self))
+        tasks = [{"id": "TK-001", "status": "delivered", "source_story": "ST-012", "covers": ["1", "2"]},
+                 {"id": "TK-002", "status": "active", "source_story": "ST-012", "covers": ["3"]}]
+        rows = [task_lane.task_row({**RetrospectiveTests.task, **task}, None) for task in tasks]
+        task_lane.link_quality(rows, tasks, stories)
+        self.assertEqual([row["quality"]["story_coverage"] for row in rows], [0.67, 0.67])
+
+    def test_the_report_shows_quality_per_task_and_kind_and_ranks_its_levers(self):
+        rows = [self.row("TK-001", {"critical": 1, "non_critical": 2, "filed": 2, "ci_first_pass": False,
+                                    "red_runs": 2}),
+                self.row("TK-002", {"critical": 0, "non_critical": 0, "filed": 0, "ci_first_pass": True,
+                                    "red_runs": 0}, source_story="ST-012")]
+        rows[0]["quality"]["fixed_by"] = ["TK-005"]
+        rows[1]["quality"]["story_coverage"] = 0.67
+        data = task_lane.report(rows, "latest 20")
+        spec = data["targets"]["build"]["quality"]
+        self.assertEqual((spec["critical_per_task"], spec["filed_share"], spec["first_pass_rate"],
+                          spec["red_runs_per_task"], spec["escaped_rate"], spec["coverage"]),
+                         (0.5, 1.0, 0.5, 1.0, 0.5, {"ST-012": 0.67}))
+        ids = [item["id"] for item in data["proposals"]]
+        for lever in ("CI-FIRST-PASS", "ESCAPED", "CRITICAL"):
+            self.assertIn(f"RETRO-BUILD-QUALITY-{lever}", ids)
+        for item in data["proposals"]:
+            for key in ("evidence", "cause_owner", "expected_gain", "verify", "proposal"):
+                self.assertTrue(item[key], (item["id"], key))
+        text = task_lane.render(data)
+        self.assertIn("- TK-001: 1 / 2 / 2; CI first pass no (2); fixed by TK-005; -", text)
+        self.assertIn("- TK-002: 0 / 0 / 0; CI first pass yes (0); fixed by -; ST-012 67%", text)
+        self.assertIn("Quality build: critical 0.5 and non-critical 1 per task over 2 reviewed, filed 100%;"
+                      " CI first pass 50% over 2 (1 red runs per task); escaped 1/2 (50%): TK-001;"
+                      " coverage ST-012 67%", text)
+        lines = task_lane.export(data, "csv").splitlines()
+        header = lines[0].split(",")
+        self.assertTrue({"critical", "non_critical", "filed", "ci_first_pass", "red_runs", "fixes", "fixed_by",
+                         "story_coverage"} <= set(header))
+        self.assertEqual(lines[1].split(",")[header.index("fixed_by")], "TK-005")
+        clean = task_lane.report([self.row("TK-003", {"critical": 0, "non_critical": 0, "filed": 0,
+                                                      "ci_first_pass": True, "red_runs": 0})], "latest 20")
+        self.assertFalse([item for item in clean["proposals"] if "QUALITY" in item["id"]])
+
+    def test_quality_is_kept_once_compared_with_the_previous_run_and_recomputed_on_rescan(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        quality = {"critical": 1, "non_critical": 0, "filed": 0, "ci_first_pass": False, "red_runs": 3}
+        data = task_lane.report([self.row("TK-001", quality)], "latest 20")
+        task_lane.remember(root, data)
+        task_lane.remember(root, data)
+        self.assertEqual(task_lane.kept_quality(root)["TK-001"]["quality"], quality)
+        self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_quality"), 1)
+        before = task_lane.previous_run(root, "latest 20")
+        self.assertEqual(before["quality"]["first_pass_rate"], 0.0)
+        self.assertIn("critical 1 per task, CI first pass 0%, escaped 0%, coverage -",
+                      task_lane.render(task_lane.report(data["per_task"], "latest 20", before)))
+        tasks = root / task_lane.TASKS
+        tasks.mkdir(parents=True)
+        (tasks / "tk-001-a.md").write_text(TASK.replace("TK-004", "TK-001"), encoding="utf-8")
+        later = (tasks / "tk-002-b.md")
+        later.write_text(TASK.replace("TK-004", "TK-002").replace("rigor: normal\n", "rigor: normal\nfixes: TK-001\n"),
+                         encoding="utf-8")
+        args = SimpleNamespace(delivery=None, since=None, recent=20, deep=False, no_sessions=True)
+        seen = []
+
+        def times(_root, number, runs=True):
+            seen.append(runs)
+            return pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")
+        with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "pr_times", side_effect=times):
+            again = task_lane.gather(root, args)
+            self.assertEqual(seen, [False])
+            self.assertEqual(again["per_task"][0]["quality"]["red_runs"], 3)
+            self.assertEqual(again["per_task"][0]["quality"]["fixed_by"], ["TK-002"])
+            task_lane.gather(root, SimpleNamespace(**{**vars(args), "rescan": True}))
+        self.assertEqual(seen, [False, True])
+
+
 class GovernedRenameTests(unittest.TestCase):
     OLD = __import__("re").compile(r"/deliver(?= DLV-| \{)|--entry deliver(?![-\w])|entry=\"deliver\"")
 

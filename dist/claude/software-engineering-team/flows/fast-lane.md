@@ -135,6 +135,9 @@ The task's `rigor` sets the verification:
    owner: report the pull request and stop.
 8. Report the task, the pull request and its merge state. `/retrospective`
    reads the times later.
+   Pass the review's counts to `merge` as `--critical <n> --non-critical <n>
+   --filed <n>`, and start a task that repairs a defect an earlier task let
+   through with `--fixes TK-###`; `/retrospective` reads both as quality.
 
 The task is done when its pull request is merged. The task file on the target
 branch is the durable task record.

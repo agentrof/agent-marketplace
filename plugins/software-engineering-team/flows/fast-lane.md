@@ -82,6 +82,23 @@ The task's `rigor` sets the verification:
 | `normal` (default) | one `code-reviewer` | only when the change really affects a live group | auto-merge on green CI |
 | `high` | the `code-reviewer` and a second one with the security and data-loss lens | every affected live group, always | the owner merges |
 
+Role routing pulls a team role into a task only where it adds value.
+`start` and `approve` match the task's kind, size, named files and words
+against `skill-content/deliver/data/role-routing.json` (a project replaces
+or adds a rule in `.agentrof/role-routing.json`) and write the hits to the
+task's `roles` field as `<role>:<mode>:<step>`; the main session may add one
+by hand. The software architect is `require` for a build task that changes a
+data model, schema or migration, makes a structural change (new module,
+service, package or app, a public interface or contract, a cross-component
+dependency) or is size `l`; the other roles are `suggest`. Spawn each routed
+role in the foreground with the task, the plan and only the architecture or
+solution notes it rests on, within the rule's `time_budget_minutes`, and give
+it the rule's `ask`. Record its answer with `role-check --task <id> --role
+<role> --verdict go|changes --note "<reasons>"`; apply a `changes` verdict
+before writing, and file a finding that is not critical as an issue.
+`open-pr` refuses while a `require` role, routed by the task or by the files
+its diff changes, has no verdict; a `suggest` role never blocks.
+
 1. Request. Run `start --title "<short title>" --request-file <file>` from
    the project checkout, with the user's request verbatim in the file, and
    `--delivery DLV-###` when the user groups tasks under a Delivery label.
@@ -103,6 +120,7 @@ The task's `rigor` sets the verification:
    design stage and no review panel reads the task. A request that needs
    more than 8 criteria is two tasks: say so and start the second after
    the first.
+   Then run the role checks `approve` lists under `roles` (Role routing above).
 3. Write. Spawn the owning developer role in the foreground with the task,
    the branch and the files it names. It writes the change and its tests on
    the branch, commits, and runs the project's test command for the suites it

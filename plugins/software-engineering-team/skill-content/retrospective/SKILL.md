@@ -76,6 +76,8 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
      per kind critical and non-critical findings per task, the filed share,
      the CI first-pass rate, red runs per task, the escaped defect rate and
      coverage per story, and the previous retrospective's quality figures;
+   - per kind the role checks: how many, on how many tasks, and their minutes
+     inside the write step, each counted from approval or the previous check;
    - the slowest tasks with their largest step;
    - up to 4 numbered proposals per kind, time, cost (startup context, spawns
      per task, xhigh effort on review or fix, main-session share) and quality

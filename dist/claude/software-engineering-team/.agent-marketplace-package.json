@@ -125,7 +125,7 @@
       "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
     ,
     "flows/fast-lane.md":
-      "83e2104ec507341d435502729d77dffb83b5c18e0f10eb14e683a2a18272b64d"
+      "7a3040a84993eece61c6a2643ba31b125021a7ff1e79a8c0f00e86740edfa8a7"
     ,
     "flows/operation.md":
       "2a48be3a2321e14a3f154494c812d245e3f3b2ee5061ac28e2d8e7025e53cb06"
@@ -302,7 +302,7 @@
       "4e4dac8ad7f01dec7f3e2d86f02746ff67297617789555d2211c3ab722b961b0"
     ,
     "scripts/task_lane.py":
-      "e43f9ec969dff7ec6c30b6f8ff6940a09b3288066178332bccc3cb96440a49ec"
+      "dd4a33e4fe43750ccd4b519343cbfa143c62b080d25c589c8f4b82feb7d4d2db"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -535,6 +535,9 @@
     "skill-content/deliver/data/owner-decision-classes.json":
       "ce9f4eb4c264c77cc1e80f949b6ba36444dd508f86d95edbbc30aa60e3e00495"
     ,
+    "skill-content/deliver/data/role-routing.json":
+      "2c4761c26218bf034f0b2b588a73882ce0884d5fe916157e50d2b35c9d6962f0"
+    ,
     "skill-content/deliver/data/targets.json":
       "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
     ,
@@ -572,7 +575,7 @@
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
     "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "85c5695a6fcd5a7575b96bacc68173e3d7dcafb34361ef79c33da325045da087"
+      "a2ab0fc1cd284ceed0c0e0e234040ce3e6c060ba5227577a93add11011e2c7b5"
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
       "ddc02ad48cbf5b91a33557b97363f6a2dfdc83245a4e71f3109bd93e5e612b45"
@@ -866,7 +869,7 @@
       "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
     ,
     "skill-content/retrospective/SKILL.md":
-      "828223f2218661181d14fe95707726fec5240acb231451e8c5c1672876b8faec"
+      "222d53e07253195ca6cf4eb8e556dbdfd76c8c488a0f7920a0fed89fcceaf586"
     ,
     "skill-content/retrospective/data/pricing.json":
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"

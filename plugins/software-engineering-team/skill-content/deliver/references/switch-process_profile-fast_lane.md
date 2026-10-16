@@ -32,6 +32,9 @@ a story (source_story, covers) or stand alone.
 - A task may name `epic` (EP-###), and `source_story` (ST-###) with `covers`,
   the numbers of that story's criteria the task delivers. Links point from
   the task to the story only; no story, epic or test plan is edited.
+- A task's `roles` field lists the team roles routed to it as
+  `<role>:require|suggest:pre_check|author`, and its `## Role Checks` section
+  holds each recorded verdict as `- <time> <role> go|changes: <note>`.
 - A task with no story is standalone, for fixes, docs, configuration and
   technical debt; it may still name an epic.
 - `task_lane.py board` derives the board on every run: tasks grouped by epic

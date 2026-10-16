@@ -11,7 +11,13 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   and a test list. ``approve`` lints it and writes ``approved_at``.
 - ``overlap`` warns, never refuses, when an open pull request touches the
   same files as this branch.
-- ``open-pr`` marks the task delivered, pushes the branch and opens the PR.
+- ``start`` and ``approve`` also route roles: each rule in
+  ``skill-content/deliver/data/role-routing.json`` (and the project's
+  ``.agentrof/role-routing.json``) that matches the task's kind, size, named
+  files or keywords lands in its ``roles`` field; ``role-check`` records a
+  role's verdict in the task's ``## Role Checks`` section.
+- ``open-pr`` marks the task delivered, pushes the branch and opens the PR; it
+  refuses while a ``require`` role, routed by the task or its diff, has no verdict.
 - ``merge`` posts the reviewers' pass on the PR and, at rigor ``normal``,
   turns on auto-merge; at rigor ``high`` the owner merges.
 - ``criteria`` lists a backlog story's numbered criteria, its open linked tasks
@@ -41,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
 import io
 import json
 import re
@@ -77,6 +84,15 @@ TARGETS_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "deliv
 # Request to merge targets in minutes per kind: s, m, l, max and the average.
 TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
 TARGET_MINUTES = TARGETS["build"]["average"]
+ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
+PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
+ROLE_MODES = ("require", "suggest", "off")
+ROLE_STEPS = ("pre_check", "author")
+VERDICTS = ("go", "changes")
+ROLE_RE = re.compile(r"^[a-z][a-z0-9-]*:(require|suggest):(pre_check|author)$")
+CHECK_RE = re.compile(r"^- (\S+) ([a-z][a-z0-9-]*) (go|changes)(?:: (.*))?$")
+# A token with a slash or a file extension is a file the text names.
+PATH_RE = re.compile(r"[\w.*-]*/[\w./*-]*|[\w-]+\.[A-Za-z][\w]*")
 HISTORY = EXPORT / "history.jsonl"
 COST_TOKENS = ("input", "cache_write", "cache_read", "output")
 COST_LEVERS = {
@@ -194,6 +210,94 @@ def proposed_rigor(request: str) -> tuple[str, list[str]]:
     return ("high" if hits else "normal"), hits
 
 
+def role_rules(root: Path | None = None) -> list[dict]:
+    """Packaged rules, a project's .agentrof/role-routing.json rule replacing the one of its role."""
+    rules = {rule["role"]: rule for rule in json.loads(ROUTING_FILE.read_text(encoding="utf-8"))["rules"]}
+    own = root / PROJECT_ROUTING if root else None
+    if own and own.is_file():
+        rules.update({rule["role"]: rule for rule in json.loads(own.read_text(encoding="utf-8"))["rules"]})
+    for rule in rules.values():
+        if rule.get("mode") not in ROLE_MODES or rule.get("step") not in ROLE_STEPS:
+            raise Refused(f"role rule {rule['role']}: mode must be one of {', '.join(ROLE_MODES)}"
+                          f" and step one of {', '.join(ROLE_STEPS)}")
+    return [rule for rule in rules.values() if rule["mode"] != "off"]
+
+
+def named_files(text: str) -> set[str]:
+    return {token.rstrip(".") for token in PATH_RE.findall(text) if token.rstrip(".")}
+
+
+def route(rules: list[dict], text: str, kind: str, size: str, files: set[str]) -> list[dict]:
+    """The rules a task hits, each with the triggers that matched as its reasons."""
+    found = []
+    for rule in rules:
+        if kind not in rule.get("kinds", KINDS):
+            continue
+        reasons = [f"size {size}"] if size in rule.get("sizes", []) else []
+        reasons += [f"file {name} matches {glob}" for glob in rule.get("path_globs", [])
+                    for name in sorted(files) if fnmatch.fnmatch(name, glob)]
+        reasons += [f"keyword {word}" for word in rule.get("keywords", [])
+                    if re.search(rf"\b{re.escape(word)}(?:s|es)?\b", text, re.IGNORECASE)]
+        if reasons:
+            found.append({key: rule.get(key) for key in ("role", "mode", "step", "time_budget_minutes", "ask")}
+                         | {"reasons": reasons})
+    return found
+
+
+def task_roles(props: dict) -> dict[str, dict]:
+    """The roles field: role -> mode and step, as start, approve or the main session wrote it."""
+    items = [item.strip() for item in str(props.get("roles") or "").split(",") if item.strip()]
+    return {role: {"role": role, "mode": mode, "step": step}
+            for role, mode, step in (item.split(":") for item in items if ROLE_RE.match(item))}
+
+
+def roles_value(roles: list[dict]) -> str:
+    return ", ".join(f"{item['role']}:{item['mode']}:{item['step']}" for item in roles)
+
+
+def role_checks(path: Path) -> list[dict]:
+    body = path.read_text(encoding="utf-8").split("\n---\n", 1)[-1]
+    return [{"at": match.group(1), "role": match.group(2), "verdict": match.group(3),
+             "note": match.group(4) or ""}
+            for line in section(body, "Role Checks") if (match := CHECK_RE.match(line))]
+
+
+def routed_roles(root: Path | None, path: Path, files: set[str] = frozenset()) -> tuple[list[dict], list[str]]:
+    """Every role the task routes to now (its roles field, then the rules its text, size and the
+    given changed files hit), and the require roles that have no recorded verdict yet."""
+    props = task_props(path)
+    # The navigation and the recorded verdicts are not the task's own words.
+    body = re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks",
+                    path.read_text(encoding="utf-8").split("\n---\n", 1)[-1])[0]
+    text = f"{props.get('title', '')}\n{body}"
+    roles = task_roles(props)
+    for item in route(role_rules(root), text, props.get("task_kind", "build"), props.get("size", "s"),
+                      named_files(body) | set(files)):
+        roles.setdefault(item["role"], item)
+        if item["mode"] == "require":
+            roles[item["role"]] |= {"mode": "require"}
+    done = {check["role"] for check in role_checks(path)}
+    return list(roles.values()), [item["role"] for item in roles.values()
+                                  if item["mode"] == "require" and item["role"] not in done]
+
+
+def missing_message(task: str, missing: list[str]) -> str:
+    return "; ".join(f"{role} has no recorded verdict; run task_lane.py role-check --task {task}"
+                     f" --role {role} --verdict go|changes --note \"<reason>\"" for role in missing)
+
+
+def role_minutes(task: dict) -> dict:
+    """Role checks of one task and their minutes: each check from approval or the previous check."""
+    checks = sorted(task.get("role_checks") or [], key=lambda check: parse_time(check["at"]))
+    start = task.get("approved_at") or task.get("requested_at")
+    minutes = 0.0
+    for check in checks:
+        if start:
+            minutes += max(0.0, (parse_time(check["at"]) - parse_time(start)).total_seconds() / 60)
+        start = check["at"]
+    return {"checks": len(checks), "minutes": round(minutes, 1)}
+
+
 def task_text(task: str, title: str, request: str, requested_at: str, delivery: str,
               rigor: str, epic: str = "", source_story: str = "", covers: list[int] | None = None,
               kind: str = "build", size: str = "s", fixes: str = "") -> str:
@@ -212,7 +316,7 @@ def task_text(task: str, title: str, request: str, requested_at: str, delivery: 
         grouped += f"source_story: {source_story}\ncovers:\n" + "".join(
             f"  - {number}\n" for number in covers or [])
     return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
-            f"requested_at: {requested_at}\nsize: s\nrigor: {rigor}\n{grouped}"
+            f"requested_at: {requested_at}\nsize: {size}\nrigor: {rigor}\n{grouped}"
             f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
             f"# {title}\n\n## Request\n\n{request.strip()}\n\n## Acceptance Criteria\n\n"
             "1. \n2. \n3. \n\n## Tests\n\n- \n\n<!-- sec: nav -->\n## Navigation\n\n"
@@ -274,6 +378,12 @@ def lint(path: Path) -> list[str]:
         errors.append("covers items must be positive criterion numbers")
     if not section(body, "Request"):
         errors.append("Request section is empty")
+    bad = [item.strip() for item in str(props.get("roles") or "").split(",")
+           if item.strip() and not ROLE_RE.match(item.strip())]
+    if bad:
+        errors.append("roles items must be <role>:require|suggest:pre_check|author, found " + ", ".join(bad))
+    if any(not CHECK_RE.match(line) for line in section(body, "Role Checks")):
+        errors.append("Role Checks lines must be '- <time> <role> go|changes: <note>'")
     if props.get("task_kind") == "knowledge":
         return errors
     criteria = [line for line in section(body, "Acceptance Criteria")
@@ -460,7 +570,7 @@ def task_row(task: dict, pr: dict | None) -> dict:
     return {"task_id": task["id"], "title": task.get("title", ""), "size": task.get("size", ""),
             "rigor": task.get("rigor", "normal"), "delivery": task.get("delivery", ""),
             "kind": task.get("task_kind", "build"), "story": task.get("source_story", ""),
-            "fixes": task.get("fixes", ""),
+            "fixes": task.get("fixes", ""), "role_checks": role_minutes(task),
             "quality": {key: (pr or {}).get(key) for key in QUALITY_KEPT},
             "pr": (pr or {}).get("pr", ""), **times,
             "total": minutes_between(times, "requested_at", "merged"), "steps": steps,
@@ -814,8 +924,15 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
                         "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
                         "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over,
-                        "cost": cost_summary(done), "quality": quality_summary(done)}
+                        "cost": cost_summary(done), "quality": quality_summary(done),
+                        "role_checks": role_summary(done)}
     return result
+
+
+def role_summary(rows: list[dict]) -> dict:
+    spent = [row.get("role_checks") or {"checks": 0, "minutes": 0.0} for row in rows]
+    return {"tasks": sum(1 for item in spent if item["checks"]), "checks": sum(item["checks"] for item in spent),
+            "minutes": round(sum(item["minutes"] for item in spent), 1)}
 
 
 def report(rows: list[dict], scope: str, previous: dict | None = None,
@@ -868,6 +985,11 @@ def render(data: dict) -> str:
                      f" ({'met' if goal['average_met'] else 'missed'}), max {goal['max']} vs"
                      f" {goal['max_target']} ({'met' if goal['max_met'] else 'missed'}), s/m/l {sizes};"
                      f" over size target: {', '.join(goal['over_size_target']) or 'none'}")
+    for kind, goal in (data.get("targets") or {}).items():
+        spent = goal.get("role_checks")
+        if spent and spent["checks"]:
+            lines.append(f"Role checks {kind}: {spent['checks']} on {spent['tasks']} of {goal['tasks']} tasks,"
+                         f" {spent['minutes']} min inside the write step")
     for kind, goal in (data.get("targets") or {}).items():
         if goal.get("cost"):
             lines.append(f"Cost {kind}: {cost_line(goal['cost'])}")
@@ -1051,7 +1173,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
 def gather(root: Path, args) -> dict:
     tasks = []
     for path in sorted((root / TASKS).glob("tk-*.md")):
-        tasks.append({**task_props(path), "file": path.name})
+        tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path)})
     chosen = select(tasks, args.delivery, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
     graded = {} if getattr(args, "rescan", False) else kept_quality(root)
@@ -1243,6 +1365,8 @@ def cmd_start(args, root: Path) -> dict:
         epic = epic or story_epic
     elif args.covers:
         raise Refused("--covers needs --source-story")
+    kind = "knowledge" if args.knowledge else "build"
+    roles = route(role_rules(root), f"{args.title}\n{request}", kind, args.size, named_files(request))
     run("git", "fetch", "--prune", "origin", cwd=root)
     task = next_id(taken_names(root, args.base))
     slug = slugify(args.title)
@@ -1252,17 +1376,20 @@ def cmd_start(args, root: Path) -> dict:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(task_text(task, args.title, request, requested_at, args.delivery or "",
                               rigor, epic, args.source_story or "", covers,
-                              "knowledge" if args.knowledge else "build", args.size,
-                              getattr(args, "fixes", None) or ""), encoding="utf-8")
+                              kind, args.size, getattr(args, "fixes", None) or ""), encoding="utf-8")
+    if roles:
+        set_field(path, "roles", roles_value(roles))
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     return {"task_id": task, "branch": branch, "task": str(path.relative_to(root)),
-            "proposed_rigor": rigor, "rigor_reasons": reasons}
+            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles}
 
 
 def cmd_lint(args, root: Path) -> dict:
     path = Path(args.file) if args.file else task_path(root, args.task)
     errors = lint(path)
-    return {"ok": not errors, "task": str(path), "errors": errors}
+    _, missing = ([], []) if errors else routed_roles(root, path)
+    return {"ok": not errors, "task": str(path), "errors": errors,
+            "warnings": [missing_message(task_props(path).get("id", args.task), missing)] if missing else []}
 
 
 def cmd_approve(args, root: Path) -> dict:
@@ -1272,9 +1399,34 @@ def cmd_approve(args, root: Path) -> dict:
         raise Refused("task lint failed: " + "; ".join(errors))
     if not task_props(path).get("approved_at"):
         set_field(path, "approved_at", args.at or now())
+    roles, missing = routed_roles(root, path)
+    if roles:
+        set_field(path, "roles", roles_value(roles))
     props = task_props(path)
     return {"ok": True, "task_id": args.task, "approved_at": props["approved_at"],
-            "rigor": props.get("rigor", "normal")}
+            "rigor": props.get("rigor", "normal"), "roles": roles, "pending_roles": missing}
+
+
+def cmd_role_check(args, root: Path) -> dict:
+    """Record one role's verdict in the task's Role Checks section, with its time."""
+    path = task_path(root, args.task)
+    at = args.at or now()
+    parse_time(at)
+    line = f"- {at} {args.role} {args.verdict}: {' '.join((args.note or '-').split())}"
+    if not CHECK_RE.match(line):
+        raise Refused("--role must be a plugin agent id such as software-architect")
+    text = path.read_text(encoding="utf-8")
+    found = re.search(r"(?ms)^## Role Checks\s*$\n.*?(?=^## |^<!-- sec:|\Z)", text)
+    if found:
+        text = text[:found.end()].rstrip("\n") + f"\n{line}\n\n" + text[found.end():]
+    else:
+        nav = text.find("<!-- sec: nav -->")
+        block = f"## Role Checks\n\n{line}\n\n"
+        text = text[:nav] + block + text[nav:] if nav >= 0 else text.rstrip("\n") + "\n\n" + block
+    path.write_text(text, encoding="utf-8")
+    _, missing = routed_roles(root, path)
+    return {"ok": True, "task_id": args.task, "role": args.role, "verdict": args.verdict, "at": at,
+            "pending_roles": missing}
 
 
 def cmd_overlap(args, root: Path) -> dict:
@@ -1286,6 +1438,10 @@ def cmd_open_pr(args, root: Path) -> dict:
     errors = lint(path)
     if not task_props(path).get("approved_at"):
         errors.append("approved_at is missing; run approve first")
+    if not errors:
+        _, missing = routed_roles(root, path, changed_files(root, args.base))
+        if missing:
+            errors.append(missing_message(args.task, missing))
     if errors:
         raise Refused("task is not ready: " + "; ".join(errors))
     if task_props(path).get("status") == "active":
@@ -1436,6 +1592,12 @@ def main(argv: list[str] | None = None) -> int:
     approve = sub.add_parser("approve")
     approve.add_argument("--task", required=True)
     approve.add_argument("--at")
+    checked = sub.add_parser("role-check", help="record a routed role's verdict on the task")
+    checked.add_argument("--task", required=True)
+    checked.add_argument("--role", required=True, help="the plugin agent id, such as software-architect")
+    checked.add_argument("--verdict", choices=VERDICTS, required=True)
+    checked.add_argument("--note", help="the reasons, one line")
+    checked.add_argument("--at")
     sub.add_parser("overlap").add_argument("--base", default="main")
     opened = sub.add_parser("open-pr")
     opened.add_argument("--task", required=True)
@@ -1468,7 +1630,8 @@ def main(argv: list[str] | None = None) -> int:
     handlers = {"start": cmd_start, "lint": cmd_lint, "approve": cmd_approve,
                 "overlap": cmd_overlap, "open-pr": cmd_open_pr, "merge": cmd_merge,
                 "report": cmd_report, "file-issues": cmd_file_issues,
-                "criteria": cmd_criteria, "board": cmd_board}
+                "criteria": cmd_criteria, "board": cmd_board,
+                "role-check": cmd_role_check}
     try:
         if args.command == "lint" and not (args.file or args.task):
             raise Refused("lint needs --file or --task")

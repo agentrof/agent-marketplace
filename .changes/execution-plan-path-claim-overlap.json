@@ -1,0 +1,6 @@
+{
+  "summary": "Execution planning now states that overlapping path claims of unfinished Items are refused whatever their execution order, matching the compiler.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

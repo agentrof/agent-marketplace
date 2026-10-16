@@ -2026,8 +2026,20 @@ def approved_git_sync_authority(project: Path) -> tuple[str, str]:
     branch = delivery_git.resolve_target_branch(
         project, "origin", recorded=delivery_git.open_target_branch(project, "origin"))
     target = git_sync_remote_oid(project, executable, "refs/heads/" + branch)
-    if values["Mode"] != "open" or values["Target"] != target:
+    if values["Mode"] != "open":
         raise ValueError("approved Git target has not completed its handoff")
+    if values["Target"] != target:
+        # Later ordinary merges may advance the target past the handoff; they
+        # stay authorized only while the approved Experience tree is unchanged.
+        prefix = "workspace/docs/experience-design"
+        try:
+            sync_git(project, executable, "merge-base", "--is-ancestor", values["Target"], target)
+            same = (sync_git(project, executable, "rev-parse", values["Target"] + ":" + prefix)
+                    == sync_git(project, executable, "rev-parse", target + ":" + prefix))
+        except ValueError:
+            same = False
+        if not same:
+            raise ValueError("approved Git target has not completed its handoff")
     return fence_oid, target
 
 

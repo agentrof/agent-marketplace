@@ -17,6 +17,7 @@ PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
 # process_policy.REGISTRY; the catalog reads it without importing the compiler.
 SWITCH_REGISTRY = "skill-content/configure/data/process-switches.json"
+CLASS_MAP = "templates/model-classes.json"
 # Entries whose tasks author what an execution approval then pins: the scope,
 # the Item topology and the Operation contracts a plan revises.
 PLANNING_ENTRIES = frozenset({"delivery-plan", "execution-plan", "configure"})
@@ -464,22 +465,32 @@ def identity(root: Path, paths) -> list[dict]:
 
 
 def agent_variants(package: Path) -> dict[str, str]:
-    """Return each generated agent variant the switch registry declares, with its base role.
+    """Return each generated agent variant the switch registry or class map declares, with its base.
 
     A build writes the variants beside their base agents, but a task always
     runs as the base role, so the role catalog leaves the variants out.
     """
+    variants = {}
     path = package / SWITCH_REGISTRY
-    if not path.is_file():
-        return {}
-    try:
-        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
-        return {f"{agent}-{variant['suffix']}": agent
-                for _switch, spec in sorted(switches.items())
-                for _value, variant in sorted((spec.get("agent_variants") or {}).items())
-                for agent in variant["agents"]}
-    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
-        raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+    if path.is_file():
+        try:
+            switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
+            variants = {f"{agent}-{variant['suffix']}": agent
+                        for _switch, spec in sorted(switches.items())
+                        for _value, variant in sorted((spec.get("agent_variants") or {}).items())
+                        for agent in variant["agents"]}
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+            raise ValueError(f"process switch registry cannot be read: {exc}") from exc
+    # A host that cannot set a model at spawn time ships escalated and purpose variants.
+    path = package / CLASS_MAP
+    if path.is_file():
+        try:
+            hosts = json.loads(path.read_text(encoding="utf-8"))["hosts"]
+            variants.update({name: variant["agent"] for host in hosts.values()
+                             for name, variant in host["variants"].items()})
+        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
+            raise ValueError(f"class map cannot be read: {exc}") from exc
+    return variants
 
 
 def catalog(package: Path = PACKAGE) -> dict:

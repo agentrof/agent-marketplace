@@ -476,9 +476,11 @@ class CheckTests(unittest.TestCase):
         self.fx.choose((SWITCH, "propose_split"), limits={"acceptance_criteria": 5})
         budgeted = stubbed("budgeted", "ST-004")
         self.assertEqual(list(budgeted), list(released))
+        self.assertFalse([key for key in budgeted if re.search(r"size|estimate|budget|point", key)])
+        # The only size-like vault property is the fast-lane task's own size (#602).
         policy = json.loads(read("skill-content/obsidian-vault/data/vault-policy.json"))
-        self.assertFalse([key for key in policy["property_types"]
-                          if re.search(r"size|estimate|budget|point", key)])
+        self.assertEqual([key for key in policy["property_types"]
+                          if re.search(r"size|estimate|budget|point", key)], ["size"])
 
 
 def over_budget_before_approval(fixture: Project) -> None:

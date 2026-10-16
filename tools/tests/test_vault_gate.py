@@ -214,10 +214,7 @@ class PortableVaultGateTests(unittest.TestCase):
                           envelope["observations"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
+@integration
 class FastLaneScopeTests(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(PLUGIN / "scripts"))
@@ -248,3 +245,7 @@ class FastLaneScopeTests(unittest.TestCase):
     def test_an_unreadable_policy_reads_governed(self):
         with tempfile.TemporaryDirectory() as temporary:
             self.assertEqual(self.gate.process_profile(PLUGIN / "scripts", Path(temporary)), "governed")
+
+
+if __name__ == "__main__":
+    unittest.main()

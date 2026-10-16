@@ -170,7 +170,7 @@
       "8e68ac8581dd0f54c77bca49f45fa05ad583ea8f191b717f0b9d76209bf734a6"
     ,
     "constitution.md":
-      "84df1f5975660898023262b49e424e253fe85c93920c59ea664b5896c6f24313"
+      "67bd2b8cac8ead82129171c81607249a00e415f3a6bfc1002c388c4b3176548d"
     ,
     "flows/backlog-planning.md":
       "353c25d5cacab85d815b00aa110306737f30b0a8ad928ab045c558ea44d43d5f"
@@ -377,10 +377,10 @@
       "9074dc24c1eb57a0c0b7ef9dde98a17bd5b79ea553233a600a54cbcb32a865c5"
     ,
     "scripts/task_inputs.py":
-      "9266a30246986d2911024a918315c00232bb9c89ba1ad74af6cb3bc9c6efde44"
+      "558130072c8195299922a7e1c41a46a0ba151a8b0d016fa2bf4192f3a0c1a0df"
     ,
     "scripts/task_lane.py":
-      "42fe108919f635ae86ebaeba470861d38676f646d76e6b21739b8b0152343ca0"
+      "b67e700ae33e88b5e4cd4a887068d94bc07fcf6242c915f604e0c1044bf81464"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -404,7 +404,7 @@
       "14bab75a4fa06b6a5d2faec37a18a661e7bc352ba5f3455ff8c94c89a8379f6e"
     ,
     "skill-content/autopilot/SKILL.md":
-      "fabb21fddb2ea9d0c6b388b65a87f3cb3279e81be2fb140ff4e820ff58d0144f"
+      "2dc65f45c97ee20af622e5fe9e420833bfcf14e2670753f051131c572e90db77"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
       "e32aa7a9c6611c11a1933c2c6e9ec99c7b0199d09440865b155a6ba30e2f702e"
@@ -425,7 +425,7 @@
       "05b57df14c4d46d311129887b9a4537c68dfcc5ee96f26e54f5862cf01b8946e"
     ,
     "skill-content/backlog-plan/SKILL.md":
-      "e24f40b8f5de60a99a518a9cf70a805884bb9eb053a718f96f2e768c2ddd60c5"
+      "d2840e479bb5f412fca3efbe8627eddf2ecd9da0515c8106209dd4e0bd77cec3"
     ,
     "skill-content/backlog-plan/data/light-backlog-path.json":
       "ae308dd202b208bfa17dae2bc95ae785a22d4f9876ddddde0933578bacf9bc7f"

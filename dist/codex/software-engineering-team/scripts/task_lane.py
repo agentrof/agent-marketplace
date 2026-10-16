@@ -451,7 +451,7 @@ def set_field(path: Path, key: str, value: str) -> None:
         head = re.sub(r"(?m)^(requested_at:.*)$", rf"\1\n{key}: {value}", head, count=1)
     if key == "status":
         head = re.sub(r"(?m)^  - status/.*$", f"  - status/{value}", head, count=1)
-    path.write_text("---\n" + head + sep + body, encoding="utf-8")
+    path.write_bytes(("---\n" + head + sep + body).encode("utf-8"))
 
 
 # --- GitHub ----------------------------------------------------------------
@@ -1213,8 +1213,8 @@ def write_lessons(root: Path, rework: dict, causes: dict) -> dict:
     for key in closed[:max(0, len(closed) - settings["max_open"])]:
         del entries[key]
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(head.rstrip("\n") + "\n\n" + "".join(block.rstrip("\n") + "\n\n" for block in entries.values())
-                    .rstrip("\n") + "\n", encoding="utf-8")
+    path.write_bytes((head.rstrip("\n") + "\n\n" + "".join(block.rstrip("\n") + "\n\n" for block in entries.values())
+                    .rstrip("\n") + "\n").encode("utf-8"))
     return {"path": settings["path"], "added": added, "fixed": fixed, "over_cap": skipped,
             "open": sum(value == "open" for key, value in status.items() if key in entries)}
 
@@ -1557,7 +1557,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
     reworked = {} if rescan else kept_rework(root)
     path = root / HISTORY
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps({"at": now(), "scope": data["scope"], "merged": data["merged"],
                                  "average": total["average"], "median": total["median"],
                                  "max": total["max"], "usd_per_task": spend.get("usd_per_task"),
@@ -1751,7 +1751,7 @@ def cmd_board(args, root: Path):
     text = render_board(board(stories, merged, opened), stories, warnings)
     if args.write:
         (root / BOARD).parent.mkdir(parents=True, exist_ok=True)
-        (root / BOARD).write_text(text, encoding="utf-8")
+        (root / BOARD).write_bytes(text.encode("utf-8"))
         text += f"\nWrote {BOARD.as_posix()}"
     return text
 
@@ -1794,9 +1794,9 @@ def cmd_start(args, root: Path) -> dict:
     run("git", "switch", "-c", branch, f"origin/{args.base}", cwd=root)
     path = root / TASKS / f"{task.lower()}-{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(task_text(task, args.title, request, requested_at, args.delivery or "",
+    path.write_bytes((task_text(task, args.title, request, requested_at, args.delivery or "",
                               rigor, epic, args.source_story or "", covers,
-                              kind, args.size, getattr(args, "fixes", None) or ""), encoding="utf-8")
+                              kind, args.size, getattr(args, "fixes", None) or "")).encode("utf-8"))
     if roles:
         set_field(path, "roles", roles_value(roles))
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
@@ -1851,7 +1851,7 @@ def add_line(path: Path, title: str, line: str) -> None:
         nav = text.find("<!-- sec: nav -->")
         block = f"## {title}\n\n{line}\n\n"
         text = text[:nav] + block + text[nav:] if nav >= 0 else text.rstrip("\n") + "\n\n" + block
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
 
 
 def cmd_rework(args, root: Path) -> dict:
@@ -1935,7 +1935,7 @@ def cmd_report(args, root: Path):
     if args.export:
         target = root / EXPORT / f"tasks.{args.export}"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(export(data, args.export), encoding="utf-8")
+        target.write_bytes(export(data, args.export).encode("utf-8"))
         written.append(str(target.relative_to(root)))
     if getattr(args, "write_lessons", False):
         lessons = write_lessons(root, data["rework"], rework_causes(root))
@@ -1946,7 +1946,7 @@ def cmd_report(args, root: Path):
             raise Refused("--write-report needs a Delivery scope, such as DLV-007")
         target = root / RETROSPECTIVES / f"{args.delivery.lower()}-retrospective.md"
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(retrospective_note(data, args.delivery), encoding="utf-8")
+        target.write_bytes(retrospective_note(data, args.delivery).encode("utf-8"))
         written.append(str(target.relative_to(root)))
     if args.json:
         return {**data, "written": written}
@@ -2005,7 +2005,7 @@ def pending_upstream(root: Path, proposal_id: str, item: dict) -> dict:
         return {"id": proposal_id, "path": str(LEDGER), "added": False}
     head, tail = text.split(PENDING_UPSTREAM, 1)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(head + PENDING_UPSTREAM + tail.rstrip("\n") + "\n" + row + "\n", encoding="utf-8")
+    path.write_bytes((head + PENDING_UPSTREAM + tail.rstrip("\n") + "\n" + row + "\n").encode("utf-8"))
     return {"id": proposal_id, "path": str(LEDGER), "added": True}
 
 

@@ -82,17 +82,16 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    review placeholders do not block their own first reader. Once reviews are
    authored, require the full `backlog_compile.py check --render` and scoped
    Obsidian vault check before approval. Initialization reconciles the backlog
-   property/graph fragment and renders
-   the map and backlog navigation. Outgoing wikilinks provide graph and
-   backlink relations without rewriting approved upstream notes. Challenge the
-   whole package through fresh read-only backlog reviewers. Only the exact
-   metadata-recovery exception in `flows/backlog-planning.md` may reuse existing
-   epic reviews after a complete unchanged-source proof and a fresh root review.
-   Historical review, story and test-plan bytes remain exact; epic authored
-   source and approval stamps/hashes remain exact. Only renderer-owned epic
-   inverse-relation blocks may change for the new root review, with the full
-   vault gate proving the exact projection and unchanged authored relation,
-   dependency, coverage and scenario sets.
+   property/graph fragment and renders the map and backlog navigation. Outgoing
+   wikilinks provide graph and backlink relations without rewriting approved
+   upstream notes. Challenge the whole package through fresh read-only backlog
+   reviewers. Only the exact metadata-recovery exception in
+   `flows/backlog-planning.md` may reuse existing epic reviews after a complete
+   unchanged-source proof and a fresh root review. Historical review, story and
+   test-plan bytes remain exact; epic authored source and approval stamps/hashes
+   remain exact. Only renderer-owned epic inverse-relation blocks may change for
+   the new root review, with the full vault gate proving the exact projection
+   and unchanged authored relation, dependency, coverage and scenario sets.
    Derive each reviewer's input with `backlog_review_inputs.py` as specified
    in the flow. Epic input includes the root backlog, its exact child story
    and test-plan set, dependency closure and shared contract/source context.

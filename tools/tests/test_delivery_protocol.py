@@ -65,6 +65,7 @@ COORDINATOR_COMMANDS = {
     "finish-plan-revision",
     "abort-plan-revision",
     "provisional-claim",
+    "amend-path-claims",
     "withdraw-provisional-claim",
     "quiesce-upgrade",
     "upgrade-target-merge",

@@ -27,6 +27,11 @@ import process_policy  # noqa: E402
 import task_lane  # noqa: E402
 import vault_check  # noqa: E402
 
+try:
+    from tools.tests.levels import integration
+except ImportError:
+    from levels import integration
+
 TASK = """---
 type: task
 title: "Export invoices"
@@ -429,6 +434,7 @@ class RoleRoutingTests(unittest.TestCase):
         self.assertIn("Role checks build: 2 on 1 of 1 tasks, 3.5 min", task_lane.render(data))
 
 
+@integration
 class LocalProofTests(unittest.TestCase):
     """Switch `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
 

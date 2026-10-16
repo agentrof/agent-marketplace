@@ -200,7 +200,7 @@
       "ca8c4554468e952fdfaf5e31ad96fde3d0ad64aaa485ed7d7bc948ab80fc539b"
     ,
     "scripts/delivery_verification.py":
-      "194f2508abab1ea259acc631cebebf89623b9653f1bac40abb17d0c0948ce92d"
+      "6df2adde47b0f76bae2a84c8159fbc386321620a0d45ec9639eb77df69cb983e"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -242,7 +242,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/operation_compile.py":
-      "b5440e618eebe93176c57ba7daabe5139d49c8c64786a4dc7b0a352703faf419"
+      "f64f79225db441e6d09f5b3a68caa68a17d0307e07a10e5d44f0a9efb08e146b"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
@@ -662,7 +662,7 @@
       "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
     ,
     "skill-content/obsidian-vault/data/vault-policy.json":
-      "e8023ae6dfc03d990f72b9f4e294604cfef70d1f385ae4f5ba7d0af267cf8d63"
+      "9e468d917d1132384ca5cd405e14bcf6fe8451125c123aead71bbfd2f4305c1b"
     ,
     "skill-content/obsidian-vault/references/graph.md":
       "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
@@ -743,7 +743,7 @@
       "086c02917f1fcff3f89481d42b3d0422ee95235439b0873bd73b0b8cce70f601"
     ,
     "skill-content/qa-verification/references/runtime-protocol.md":
-      "92c5f40b09b1129b51ab0a6c4690276ca8049ee975a1e97f74508f4bcce325a4"
+      "d0d2c0eb1d15ee5dc59720bf87211e9b710df83fd9e29aa8702bddc261d680a4"
     ,
     "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md":
       "549947c59c6a87988af1fc6a646414d85177c1f68c8249a05d9522bd99f47b74"
@@ -1157,7 +1157,7 @@
       "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
     ,
     "templates/vault/.obsidian/types.json":
-      "d31b895c5f4f214bc72d7d6b3fe2cee8ae009ed8dece7f70fadf5da6475fddf3"
+      "dfc4e3977496c716f3876a2be2db3d45cbfb49feb2ad52f3b081aee6558a892a"
     ,
     "templates/vault/home.md":
       "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"

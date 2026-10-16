@@ -32,6 +32,20 @@ TABLE = """# Verification Contract
 
 
 class PlanTests(unittest.TestCase):
+    def test_logs_waits_only_the_remaining_declared_steady_state_window(self):
+        events = [{"verb": "up", "exit_code": 0, "completed_at": 90},
+                  {"verb": "seed", "exit_code": 0, "completed_at": 100}]
+        self.assertEqual(verification.steady_state_wait({"steady_state_seconds": 60}, events, 144), 16)
+        self.assertEqual(verification.steady_state_wait({"steady_state_seconds": 60}, events, 161), 0)
+        self.assertEqual(verification.steady_state_wait({"steady_state_seconds": 60}, events, 80), 60)
+        self.assertEqual(verification.steady_state_wait({}, events, 144), 0)
+        self.assertEqual(verification.steady_state_wait({"steady_state_seconds": 60}, [], 144), 0)
+        events.append({"verb": "seed", "exit_code": 1, "completed_at": 140})
+        self.assertEqual(verification.steady_state_wait({"steady_state_seconds": 60}, events, 144), 16)
+        for invalid in (-1, True, 1.5, "60"):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ValueError, "non-negative whole"):
+                verification.steady_state_wait({"steady_state_seconds": invalid}, events, 144)
+
     def test_rehearsal_plan_is_optional_but_validates_every_declared_target(self):
         props = {"live_groups": ["smoke"], "live_diagnostic_command": "run {group}"}
         rows, errors = operation_compile.verification_rehearsals(props, TABLE)
@@ -175,6 +189,28 @@ class RehearsalTests(unittest.TestCase):
             evidence = {"event_hashes": [event["evidence_hash"] for event in missing["runtime"]["events"]]}
             with self.assertRaisesRegex(RuntimeError, "final log check after"):
                 verification.require_runtime_evidence(self.root, missing, evidence)
+
+    def test_environment_logs_waits_before_launch_and_keeps_the_attempt_passing(self):
+        self.declare(runtime=True)
+        path = "workspace/docs/operation/environment-contract.md"
+        props, body = delivery.split_note(self.root / path)
+        props["steady_state_seconds"] = 60
+        self.write(path, delivery.frontmatter(props, body))
+        self.commit()
+        self.freeze()
+        with mock.patch.object(verification.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "runtime must be up"):
+                verification.run_environment(self.root, "logs")
+            sleep.assert_not_called()
+            for verb, value in (("down", None), ("up", None), ("seed", "baseline")):
+                verification.run_environment(self.root, verb, value)
+            seeded = verification.read_session(self.root)["runtime"]["events"][-1]["completed_at"]
+            with mock.patch.object(verification.time, "time", return_value=seeded + 44):
+                result = verification.run_environment(self.root, "logs")
+            sleep.assert_called_once_with(16)
+            self.assertEqual(result["steady_state_wait_seconds"], 16)
+            verification.run_environment(self.root, "down")
+            self.assertFalse(verification.fresh_runtime_problem(verification.read_session(self.root)))
 
 
     def approve(self, events):

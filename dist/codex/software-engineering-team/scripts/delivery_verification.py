@@ -4514,6 +4514,14 @@ def runtime_lifecycle_policy(root: Path, delivery_id: str) -> tuple[str, list[st
     return state["value"], state.get("parameters", {}).get("environment_paths") or []
 
 
+def steady_state_wait(contract: dict, events: list[dict], now: float) -> float:
+    """The remaining contract window after the latest successful bring-up or seed."""
+    window = operation_compile.steady_state_seconds(contract)
+    ready = [event["completed_at"] for event in events
+             if event["verb"] in {"up", "seed"} and event["exit_code"] == 0]
+    return max(0.0, min(window, ready[-1] + window - now)) if ready and window else 0.0
+
+
 def fresh_runtime_problem(session: dict, evidence: dict | None = None) -> bool:
     """Whether the session's recorded runtime events miss the fresh down/up/seed/logs/down shape."""
     state = session.get("runtime", {})
@@ -4642,6 +4650,7 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 raise RuntimeError("fresh runtime requires a successful down before up")
             if verb in {"seed", "logs", "url"} and not state["active"]:
                 raise RuntimeError("runtime must be up before seed, logs or url")
+            delay = steady_state_wait(contract, state["events"], time.time()) if verb == "logs" else 0.0
             # Every attempt of this Item runs in one kept checkout path, because
             # a project environment may bind an Item instance to the checkout
             # that created it. Each attempt's first command re-pins it to that
@@ -4697,6 +4706,9 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
             command = command + " " + verb + (" " + value if value else "")
         started = time.monotonic()
         with host_awake(host_guard(root)["keep_awake"]) as awake:
+            if delay:
+                print(f"waiting {delay:g} s for steady state", file=sys.stderr, flush=True)
+                time.sleep(delay)
             completed = subprocess.run(command, cwd=workdir, env=command_environment(root, current), shell=True,
                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False)
         with locked(root):
@@ -4727,6 +4739,8 @@ def run_environment(root: Path, verb: str, value: str | None = None) -> dict:
                 event["checkout_difference"] = difference
             if awake:
                 event["host_awake"] = awake
+            if delay:
+                event["steady_state_wait_seconds"] = delay
             event["evidence_hash"] = digest(event)
             state["events"].append(event)
             state.pop("pending", None)

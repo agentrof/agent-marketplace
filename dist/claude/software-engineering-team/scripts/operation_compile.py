@@ -530,6 +530,13 @@ def review_record_findings(docs: Path, kind: str, props: dict, body: str) -> lis
                                                            loop=loop)
 
 
+def steady_state_seconds(props: dict) -> int:
+    seconds = props.get("steady_state_seconds", 0)
+    if type(seconds) is not int or seconds < 0:
+        raise ValueError("steady_state_seconds must be a non-negative whole number")
+    return seconds
+
+
 def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict, list[str]]:
     """Check the contract file, or ``text`` as its content before it is written."""
     path = contract_path(docs, kind)
@@ -612,6 +619,10 @@ def check_contract(docs: Path, kind: str, text: str | None = None) -> tuple[dict
         elif provider:
             errors.append("pull_request_check_provider is declared only with pull_request_check_source external")
     else:
+        try:
+            steady_state_seconds(props)
+        except ValueError as exc:
+            errors.append(str(exc))
         if props.get("status") == "approved" and (not isinstance(refs, list) or not refs):
             errors.append("approved contract must cite at least one accepted Solution decision in constrained_by")
         if props.get("status") == "approved" and (not isinstance(props.get("env_command"), str) or not props["env_command"].strip()):

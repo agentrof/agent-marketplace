@@ -615,6 +615,34 @@ class RemediationBookkeepingTests(unittest.TestCase):
         self.assertEqual(result["report"]["preservation"]["violations"],
                          [f"{approved} is an approved review the candidate holds; it is immutable"])
 
+    def test_single_pass_rechecks_only_a_pass_that_fixes_a_critical(self):
+        # A writer pass of only major or minor fixes is the round single_pass removes.
+        self.choose("compiler")
+        policy(self.docs, "begin-revision")
+        policy(self.docs, "set", "--switch", "review_rounds", "--value", "single_pass")
+        policy(self.docs, "approve")
+        path = self.docs / self.REVIEW
+        props, body = backlog.parse_front_matter(path)
+        cited = self.PLAN.replace("|", "\\|")
+        returned = "\n".join(["## Returned Findings", "", "| finding | severity | description |",
+                              "|---|---|---|",
+                              f"| F-1 | major | {cited} misses the lockout boundary. |",
+                              f"| F-2 | critical | {cited} contradicts the approved rule. |", "", ""])
+        path.write_text(backlog.front_matter(props, body.replace("## Verdict", returned + "## Verdict", 1)),
+                        encoding="utf-8")
+        commit_all(self.root)
+        self.candidate = self.head()
+        self.write_closures({})
+        code, result = self.record()
+        self.assertEqual(code, 1)
+        self.assertIn(f"{self.REVIEW} records rechecks of F-1 without a critical finding among them;"
+                      f" {backlog.SINGLE_PASS_RULE}", result["errors"])
+        self.write_closures({}, {"finding": "F-2"})
+        code, result = self.record()
+        self.assertEqual(code, 0, result)
+        props, review_body = backlog.parse_front_matter(path)
+        self.assertEqual(backlog.recheck_closure_record(self.docs, review_body, self.REVIEW, props), [])
+
     def test_at_writer_a_recheck_section_is_authored_text(self):
         self.candidate = self.head()
         path = self.docs / self.REVIEW

@@ -1,0 +1,6 @@
+{
+  "summary": "Add process switch pass_carry_over: at per_item the runner keeps every pass record the approved test or live command writes, failed passes included, in the Item's carry-over record and names it to the next pass in AGENTROF_CARRY_OVER_RECORD.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

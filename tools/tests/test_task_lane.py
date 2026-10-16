@@ -1378,6 +1378,31 @@ class RetrospectiveReworkTests(unittest.TestCase):
         self.assertEqual(seen["revisions"], [{"sha": "bbbbbbb", "at": "2026-10-16T10:09:00Z", "subject": "fix"}])
         self.assertEqual(len(seen["red"]), 6)
 
+    def test_a_pr_opened_on_a_local_proof_is_green_when_it_opens_and_its_ci_step_is_the_proofs_minutes(self):
+        record = {"head": "a" * 40, "commands": [
+            {"command": "make test", "seconds": 110.2, "finished_at": "2026-10-16T09:58:00+00:00"},
+            {"command": "python3 gate.pyz check", "seconds": 9.8, "finished_at": "2026-10-16T09:59:00+00:00"}]}
+        view = {"createdAt": "2026-10-16T10:00:00Z", "mergedAt": "2026-10-16T10:20:00Z", "headRefName": "task/tk-4-x",
+                "statusCheckRollup": [], "commits": [],
+                "comments": [{"createdAt": "2026-10-16T10:12:00Z", "body": task_lane.REVIEW_MARK}],
+                "body": "Summary\n" + task_lane.proof_section(record) + "\n## Live evidence\n\nnone\n"}
+        with mock.patch.object(task_lane, "run", return_value=json.dumps(view)):
+            seen = task_lane.pr_times(Path("."), 9, runs=False)
+        self.assertEqual((seen["ci_green"], seen["proof_minutes"]), ("2026-10-16T10:00:00Z", 2.0))
+        row = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-004"}, seen)
+        self.assertEqual((row["steps"]["ci"], row["steps"]["merge_wait"]), (2.0, 8.0))
+        # A PR whose checks ran keeps its CI times, whatever its body says.
+        checked = {**view, "statusCheckRollup": [{"name": "tests", "conclusion": "SUCCESS",
+                                                  "startedAt": "2026-10-16T10:00:00Z",
+                                                  "completedAt": "2026-10-16T10:05:00Z"}]}
+        with mock.patch.object(task_lane, "run", return_value=json.dumps(checked)):
+            seen = task_lane.pr_times(Path("."), 9, runs=False)
+        self.assertEqual(seen["ci_green"], "2026-10-16T10:05:00Z")
+        self.assertNotIn("proof_minutes", seen)
+        # A body with no proof section leaves the CI step unknown, as before.
+        with mock.patch.object(task_lane, "run", return_value=json.dumps({**view, "body": "Summary"})):
+            self.assertIsNone(task_lane.pr_times(Path("."), 9, runs=False)["ci_green"])
+
     def test_only_unexplained_commits_after_the_pr_opened_are_revision_events(self):
         task = {**RetrospectiveTests.task, "role_checks": [
             {"at": "2026-10-16T10:04:00Z", "role": "software-architect", "verdict": "changes", "note": "split the module"},

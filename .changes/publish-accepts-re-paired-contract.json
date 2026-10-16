@@ -1,0 +1,4 @@
+{
+  "summary": "Let publish-execution-plan take a Verification Contract that re-pair restamped at the same revision for a later Environment Contract.",
+  "components": {"software-engineering-team": "patch"}
+}

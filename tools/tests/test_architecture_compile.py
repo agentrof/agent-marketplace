@@ -101,6 +101,26 @@ class ArchitectureCompilerTests(unittest.TestCase):
             root_record = docs / "system-architecture/architecture.md"
             self.assertIn("revision: 1", root_record.read_text(encoding="utf-8"))
 
+    def test_stamp_reads_claimed_stub_kinds_as_record_types(self):
+        sys.path.insert(0, str(COMPILER.parent))
+        import architecture_compile
+        for kinds, expected in ((["interface"], 0), (["data"], 1)):
+            with self.subTest(kinds=kinds), tempfile.TemporaryDirectory() as raw:
+                docs = Path(raw) / "workspace/docs"
+                self.prepare(docs)
+                architecture_compile.rewrite(
+                    docs / "delivery/deliveries/dlv-001-test/items/auth-01/item.md",
+                    {"architecture_impact": "required", "architecture_components": ["orders-api"],
+                     "architecture_record_kinds": ["system-architecture", "architecture-component", *kinds]})
+                self.run_cli("init-root", "--docs", docs, "--item-ref", "AUTH-01")
+                self.run_cli("init-component", "--docs", docs, "--component-ref", "orders-api", "--item-ref", "AUTH-01")
+                self.run_cli("stub", "--docs", docs, "--item-ref", "AUTH-01", "--kind", "interface",
+                             "--component", "orders-api", "--record-id", "IFC-001", "--slug", "orders")
+                self.run_cli("render", "--docs", docs)
+                result = self.run_cli("stamp-item", "--docs", docs, "--item-ref", "AUTH-01", expected=expected)
+                if expected:
+                    self.assertIn("exceeds claimed record kinds", result.stdout)
+
     def test_stamp_enforces_shared_affected_scopes_before_sealing(self):
         sys.path.insert(0, str(COMPILER.parent))
         import architecture_compile

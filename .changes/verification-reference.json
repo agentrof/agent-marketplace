@@ -1,0 +1,6 @@
+{
+  "summary": "Generate a current verification-command and refusal reference for planning and review inputs.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

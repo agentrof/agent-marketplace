@@ -379,7 +379,7 @@ def parse_frontmatter(path: Path) -> tuple[dict[str, str], str]:
     return fields, text[match.end():]
 
 
-def skill_metadata(path: Path) -> tuple[str, str, str, str]:
+def skill_metadata(path: Path) -> tuple[str, str, str, str, dict]:
     fields, _ = parse_frontmatter(path)
     name = fields.get("name", "")
     description = fields.get("description", "")
@@ -393,15 +393,26 @@ def skill_metadata(path: Path) -> tuple[str, str, str, str]:
         raise ValueError(f"{path}: project_scope must be project or external")
     if project_scope == "external" and exposure != "entry":
         raise ValueError(f"{path}: only entry skills may be external")
+    # Entry invocation flags: model_invocable lets agents call an entry, such as a
+    # report; user_invocable false hides a retired entry from the user's menu.
+    flags = {}
+    for key, default in (("model_invocable", False), ("user_invocable", True)):
+        raw = fields.get(key, str(default).lower())
+        if raw not in {"true", "false", True, False}:
+            raise ValueError(f"{path}: {key} must be true or false")
+        flags[key] = raw in {"true", True}
+        if flags[key] != default and exposure != "entry":
+            raise ValueError(f"{path}: only entry skills may set {key}")
     unexpected = set(fields) - {
-        "name", "description", "exposure", "project_scope"
+        "name", "description", "exposure", "project_scope", "model_invocable",
+        "user_invocable"
     }
     if unexpected:
         raise ValueError(
             f"{path}: canonical frontmatter has host or unknown fields: "
             + ", ".join(sorted(unexpected))
         )
-    return name, description, exposure, project_scope
+    return name, description, exposure, project_scope, flags
 
 
 def copy_canonical(source: Path, target: Path) -> None:

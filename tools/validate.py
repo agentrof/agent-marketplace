@@ -54,7 +54,7 @@ AGENT_OUTPUT_CONTRACT_ENUM = {"prose", "structured"}
 AGENT_OPTIONAL_KEYS = {"tools"}
 AGENT_READONLY_TOOLS = {"Read", "Grep", "Glob"}
 SKILL_REQUIRED_KEYS = {"name", "description", "exposure"}
-SKILL_OPTIONAL_KEYS = {"project_scope"}
+SKILL_OPTIONAL_KEYS = {"project_scope", "model_invocable", "user_invocable"}
 SKILL_EXPOSURE_ENUM = {"entry", "internal"}
 SKILL_PROJECT_SCOPE_ENUM = {"project", "external"}
 
@@ -412,7 +412,7 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                     "error", rel(tree, skill_md), 1, "frontmatter_shape",
                     f"skill frontmatter has unsupported keys: {sorted(extra)}",
                     "remove them; allowed keys are name, description, exposure"
-                    " and optional project_scope",
+                    " and optional project_scope, model_invocable and user_invocable",
                 ))
             project_scope = fm.get("project_scope", "project")
             if project_scope not in SKILL_PROJECT_SCOPE_ENUM:

@@ -1088,10 +1088,17 @@ def check_alias_ownership(vault: Vault, findings: list[Finding]) -> None:
                     " re-render the space if the registry is stale"))
 
 
+def navigated(vault: Vault) -> list[Note]:
+    """Authored notes the map graph must reach; a type the policy exempts, such
+    as a fast-lane story card that Git and the story clock index, is left out."""
+    exempt = set(vault.policy.get("navigation_exempt_types", []))
+    return [note for note in authored(vault) if note.fm.get("type") not in exempt]
+
+
 def check_orphans(vault: Vault, findings: list[Finding]) -> None:
     policy = vault.policy
     home = policy["home_file"]
-    for note in authored(vault):
+    for note in navigated(vault):
         if note.rel == home:
             continue  # the navigation root is exempt by definition
         if not vault.inbound.get(note.rel):
@@ -1121,7 +1128,7 @@ def check_moc_coverage(vault: Vault, findings: list[Finding]) -> None:
         targets.extend(t for (_, t) in note.fm_targets if t)
         for target in targets:
             frontier.append(f"{target}.md")
-    for note in authored(vault):
+    for note in navigated(vault):
         if note.rel not in reachable:
             findings.append(Finding(
                 "error", note.rel, 1, "moc_coverage",

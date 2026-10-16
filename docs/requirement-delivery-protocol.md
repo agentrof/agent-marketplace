@@ -15,10 +15,8 @@ invocation and choice gates.
 /solution-design
 /design-system
 /experience-design
-/backlog-plan
-/delivery-plan
-/execution-plan
-/deliver
+/story
+/retrospective
 /demo
 /sketch
 /organize-docs
@@ -42,6 +40,18 @@ every other Delivery keeps the standard path:
 ```text
 standard: /delivery-plan -> scope gate -> /execution-plan DLV-### -> execution gate -> /deliver DLV-###
 light:    /delivery-plan -> one gate: scope, topology, reused contract receipts -> /deliver DLV-###
+```
+
+`/backlog-plan`, `/delivery-plan`, `/execution-plan` and `/deliver` are
+entries the user's menu hides (`user_invocable: false`): the orchestrating
+session still loads them for a Delivery opened under `process_profile`
+`standard`, and at `fast_lane` they refuse and point to `/story` or
+`/requirement`. At `fast_lane` the public path is:
+
+```text
+/setup -> /story                      one change: card -> owner approval -> PR -> merge
+/setup -> /requirement -> stages -> several /story cards in parallel
+/retrospective [DLV-### | --since 7d]  times, steps and proposals
 ```
 
 Entry skills are the only user-facing commands. Coordinator verbs such as

@@ -98,10 +98,10 @@
       "9ab4dd0b8df2fde66c82556e9a743a347294034035a73e6746f4bb12292ff00b"
     ,
     "flows/backlog-planning.md":
-      "49aa99e4b68616fdc7d8a4642c464a312965f493740ba138e8f65737f7b313ec"
+      "1f56017bc62fd58aefb3f83a51e0bc5ea8d630737692e639af035d6a0848f788"
     ,
     "flows/business-analysis.md":
-      "3880f09e1ac8cd8b65f3823d417d67f938201c76ee1cd8b3962b098a0a97d8b3"
+      "54ef05c725ac845e4b546bec335234f2b710e6a6a3495f93faa34b8393275585"
     ,
     "flows/delivery-execution.md":
       "2d526037c7d19a73036c1b59c912ca47a124a35c8f19654bbd5e796b508dfbf8"
@@ -113,7 +113,7 @@
       "4d8eb69023a0724ec9e280e0e880d60c410f62444df9826d011c7c032448670d"
     ,
     "flows/design-system.md":
-      "cb39724ec8500861f6614fd98607094340d4d2508036839a620c9a637990f4a2"
+      "cc5260ea62a0485a53760f2bb144a8acd4c7fcf918833b640de3c4df3ac39e89"
     ,
     "flows/design.md":
       "fe5af168a850e2d931b241616ac88095c092780acd4b786bec108c88ba5ed36d"
@@ -122,16 +122,19 @@
       "84e5ab6461af23461e758db1bc0adabf7fe680aa093992f2c34941ad5d94dcaa"
     ,
     "flows/experience-design.md":
-      "c964a5acf445e6bed890365402d24888188cd2c4ee21dc5d169cfeea622bb512"
+      "4d2f4cd438b0b668959c4cde17c9d6e95bf1bc144e52ceabfce346aa53e67473"
     ,
     "flows/operation.md":
       "2a48be3a2321e14a3f154494c812d245e3f3b2ee5061ac28e2d8e7025e53cb06"
     ,
     "flows/requirement.md":
-      "7528573f9fa14f3fc724d7a12972ad3b548409d1085a95c2c2e2024b4a46d04c"
+      "d2fa1975f003f9468d1c444d61f5b4789b7a49eae87dbefc052b283b2cb7bec5"
     ,
     "flows/solution-design.md":
-      "8e84b0aff71e5da4c399d17abcc944ccf97f84b4429844e58bd9635b674f7f64"
+      "0253450b17b70db9087476c33505c9f81980780fc3b2244138e68b836f886e7c"
+    ,
+    "flows/story.md":
+      "cd80d60968d351bb40f97ee73f3064a90d255975763ed3971ad7bc310974ba87"
     ,
     "hooks/hooks.json":
       "c9c89e9b225215bcc6b9681111d83a70151214968c2bee4e5234d82e79c8be7a"
@@ -143,7 +146,7 @@
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
     ,
     "scripts/architecture_compile.py":
-      "720d25722734c13660e79b7abf4aeeb4828971711ea357cf00c34ee7589b3a84"
+      "c47a8f877284be11c9fb114c8ee6943fa6d4424d1486ae561e6420a7d7b1b370"
     ,
     "scripts/artifact_check.py":
       "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860"
@@ -254,7 +257,7 @@
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/process_policy.py":
-      "dcb7a089eed087d240272473b34192e5d4dd80c0a86cc1dc9d06bec70f9d4f02"
+      "812d6e00659a42cfd9a4a143432f4feaea8e947c28aae3c3e3e07137d52de6f0"
     ,
     "scripts/project_config.py":
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
@@ -292,6 +295,9 @@
     "scripts/step_timing.py":
       "9074dc24c1eb57a0c0b7ef9dde98a17bd5b79ea553233a600a54cbcb32a865c5"
     ,
+    "scripts/story_lane.py":
+      "e1264ad883f44baae941169c2c80ef868f35d0fbb9b2dccffd46b0d6400ffb51"
+    ,
     "scripts/task_inputs.py":
       "d225fadc117b7a4cf0d7b6413b783fc214df7aca53dcb8b69ea1485a4cc2a4b6"
     ,
@@ -299,7 +305,7 @@
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
     ,
     "scripts/vault_check.py":
-      "3bd52e5d5159562c8b44a21791c433f04721e81fee3b9932c9fb176d85ebe8cb"
+      "52a0287f84f4a2f463c94dbff10c2a1bbc333549b1e6f53ee3429561235045d6"
     ,
     "scripts/vault_gate.py":
       "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
@@ -335,7 +341,7 @@
       "ce09b658b99f436ccb0b0f65402f4c7449b3f1079cfc6f02cf882b6281ead3d6"
     ,
     "skill-content/backlog-plan/SKILL.md":
-      "f4314b20877593f179f92b726b93dc88e82e33781603599db0af98fe43349643"
+      "e24f40b8f5de60a99a518a9cf70a805884bb9eb053a718f96f2e768c2ddd60c5"
     ,
     "skill-content/backlog-plan/data/light-backlog-path.json":
       "ae308dd202b208bfa17dae2bc95ae785a22d4f9876ddddde0933578bacf9bc7f"
@@ -473,7 +479,7 @@
       "2ebe77507909c77c0792977c0a78c73eb91908b1054d791cf85b9aec80c9089f"
     ,
     "skill-content/configure/data/process-switches.json":
-      "33e809d91907f89647271a8501c94db1b60bb6fb43a21a995025580a56d86f89"
+      "4545c9fde3c7080fc3be482140a387f610c1216d9c5557f0bfe47fcaca6153c7"
     ,
     "skill-content/configure/data/step-baseline.json":
       "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
@@ -494,7 +500,7 @@
       "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
     ,
     "skill-content/deliver/SKILL.md":
-      "a64b55510cc9df7995f9fdfff650257c6a1305c15a0f0a6fa58dcf61e879a470"
+      "5134b60df39f6740bdcb3512296bbc083d37aec1274e68b38b4935c0f6b20659"
     ,
     "skill-content/deliver/data/assertion-kinds.json":
       "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
@@ -575,7 +581,7 @@
       "8bc78970e33ae960d0f02dcf92c512396897e8f62d7ef7de2beae7cda2f04044"
     ,
     "skill-content/delivery-plan/SKILL.md":
-      "a91d0e03cf11bc2b4613d9769554306ddc988d2c90c121a8d0183a3e38c802a2"
+      "6d4cbbb74f9529e82d2fa736d68a970105893676967a7d6b203ad5289d25bc79"
     ,
     "skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md":
       "ad333a9d7dd2c15d0f1b4ac9630686386bc9cd0a6751ffce060147ed42799798"
@@ -608,7 +614,7 @@
       "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
     ,
     "skill-content/execution-plan/SKILL.md":
-      "8d19930ea054d8dae4fe49eb3189dd2b37bc57c9aad30fe8bdee9b793f7184aa"
+      "5de1ea8d2c50e7b42c158c6540d7d4f5812bc67176bca4e6283cc7561b062e83"
     ,
     "skill-content/execution-plan/data/fact-ownership.json":
       "119a6b31a052c0771671456b19b75d98a14a321773b8469b7d5678b0d142dc10"
@@ -677,7 +683,7 @@
       "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
     ,
     "skill-content/obsidian-vault/data/vault-policy.json":
-      "e8023ae6dfc03d990f72b9f4e294604cfef70d1f385ae4f5ba7d0af267cf8d63"
+      "3f19f01e58f5a5d0d30156fd2711e540a9ae84a5d74dd058926a98d5e1e9c151"
     ,
     "skill-content/obsidian-vault/references/graph.md":
       "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
@@ -847,6 +853,9 @@
     "skill-content/requirements-analysis/references/switch-calculation_examples-required.md":
       "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
     ,
+    "skill-content/retrospective/SKILL.md":
+      "0e0d250b0fa374fc8cd4aa12272d7f1aa6e6d2a32040c4045ae05d7245b394c7"
+    ,
     "skill-content/setup/SKILL.md":
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
     ,
@@ -937,6 +946,12 @@
     "skill-content/sql-database-design/references/review-checklist.md":
       "2a883309e014134ae221cc510074ddd4f115396ed042d95a3ff0db0447efdf8e"
     ,
+    "skill-content/story/SKILL.md":
+      "a4b5c9f05d6281952b7dbdd6c5c7fd355cd394f5c68b90634e349104ec571dd8"
+    ,
+    "skill-content/story/references/switch-process_profile-fast_lane.md":
+      "aab7c925903379260fe13c800a82ec5c3436a7b4a6a6eb0cb4d4df8027c5bc5e"
+    ,
     "skill-content/ui-ux-design/SKILL.md":
       "8ade23b6f3103035b9958a23aa476446d537c9d44af9674f97aa50a8e32980b0"
     ,
@@ -1001,7 +1016,7 @@
       "a5dcc6580d922703865523a9cba7a36faab24b0334413a51807197a2693b1e86"
     ,
     "skills/backlog-plan/SKILL.md":
-      "7573cb68c96395d629c5a0b90cd80c00f0961312f54e492cc791e3952959d517"
+      "8fbd75651e221bb30b2929789facec58535da0674e42071f0d8d62cd9c391ee2"
     ,
     "skills/business-analysis/SKILL.md":
       "5a8db8475d4ded91218859f045fdd8459b3bc434eaeba17b3ad1b99d0fd2e2db"
@@ -1016,10 +1031,10 @@
       "28daeda7bc85d3fb416a51581f7217b1f74b42679841de53bf38124216702dda"
     ,
     "skills/deliver/SKILL.md":
-      "c08615ec5403a96531696d933ff8ca7be899cb2c84cc9ab01e46ad489145adfd"
+      "69d0ff4f15200d834c382bbb57d3f63f4225d58b8c96956a63c42ab3c3af9335"
     ,
     "skills/delivery-plan/SKILL.md":
-      "52a03dfec419951bfbaa6bd5eee427420fa7201e14acef7ca970e86b485e57bd"
+      "4323f9cd16bebe04dde4a3eb626e0545c9d87367a20452919c14af591ed3b340"
     ,
     "skills/demo/SKILL.md":
       "16beee1812cda07bf39e114b9fbdbc619e7d4add2fec66bc80fd979f3c46586b"
@@ -1031,7 +1046,7 @@
       "dbfcad827496b0c3d9f3223fc45fde3eee0088e0fb09fa26afd92b18cd0144ea"
     ,
     "skills/execution-plan/SKILL.md":
-      "75d340d66a2e127d59e06630cc96fa7524002df15d4e604ddf0a7b0fb198cf16"
+      "ba1070fa42940336091042bd222e2e01564e0810374201ae3b08efe27f8a0642"
     ,
     "skills/experience-design/SKILL.md":
       "e2ada88fd2dc3bf76335a0abb2e99e973c5c72c4a5e2dc1056df5cb13661dee6"
@@ -1069,6 +1084,9 @@
     "skills/requirements-analysis/SKILL.md":
       "8e41405635a3ce8d75b6eb8ea25deaeedbd1f2dee9890df928948d0447337b16"
     ,
+    "skills/retrospective/SKILL.md":
+      "6e6f6825adb005f0efc00043a312e571bf30e87dc831221d0b5e110128a6ac86"
+    ,
     "skills/setup/SKILL.md":
       "82ebd6a99718e7da6c63b8b9b5879b100c3b06040a43384cf7575dcb3a717c50"
     ,
@@ -1086,6 +1104,9 @@
     ,
     "skills/sql-database-design/SKILL.md":
       "0ba5223bd69fd790f0b61553dcc0f6e9a4559b1506c959701f7994e002a11a1d"
+    ,
+    "skills/story/SKILL.md":
+      "4f5c91cb3d06cd132a900b2c1eb9b1e0eb1e976bcdc533b4e45f39d1e4302f80"
     ,
     "skills/ui-ux-design/SKILL.md":
       "edb0497f761c3d4092d16fdbac0d0e5ae6872972b8a5b39c401ed68dfbf1d11a"
@@ -1139,7 +1160,7 @@
       "a1e14667ea11bd2989b2ed59055ed4a37da59b20411a4af60f6dc84ad5e3c03a"
     ,
     "templates/task-input-policy.json":
-      "a388f65395aa5d8b62c12b82fc2635e8efd37fac9cb28718293874af330fff69"
+      "b0a162e52f44cc65f39ec6cc0a8804ba5906839e7bd9ec2ae3ecfc1a6163df71"
     ,
     "templates/tier-map.json":
       "7520a0d1c1627d0d8c16c6b540ca3090bd889ffcdfe891bbc7e5081f04bf6c9f"
@@ -1160,7 +1181,7 @@
       "81afebcd42fe23baf54427e809ab4521be53884cc07085ee136f9c62e8187f36"
     ,
     "templates/vault/.obsidian/graph.json":
-      "e2c33e1614ba56db8ec6bfacdc1d7c9b1bf7c7e11f0aad136e1d6c43ab9004c6"
+      "535f3b7f7bf2e707d3cb376288f29429eb81b35805394ccc6078f320967fc4e4"
     ,
     "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/LICENSE":
       "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
@@ -1178,7 +1199,7 @@
       "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
     ,
     "templates/vault/.obsidian/types.json":
-      "d31b895c5f4f214bc72d7d6b3fe2cee8ae009ed8dece7f70fadf5da6475fddf3"
+      "896eadb2267ffb62a5fd568db093be2f00363ecb8dc383caaa938c7d835d5c82"
     ,
     "templates/vault/home.md":
       "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"

@@ -2,6 +2,7 @@
 name: deliver
 description: Resume one exact Delivery, execute its approved Items and close one Delivery Review.
 exposure: entry
+user_invocable: false
 ---
 
 # Deliver
@@ -9,6 +10,11 @@ exposure: entry
 Before delegating a role, follow the packaged `templates/task-input-contract.md`
 and derive its inputs with `scripts/task_inputs.py --entry deliver`.
 Use the owning compiler's exact scope and source bindings.
+
+At Process Policy `process_profile` `fast_lane` this entry starts no new
+work: tell the user the fast lane is on and to use `/story` or
+`/requirement`, and stop. A Delivery opened before the switch finishes
+under the values it pinned.
 
 ## When to Use
 

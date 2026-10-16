@@ -2,6 +2,7 @@
 name: backlog-plan
 description: User-gated planning entry that turns either an approved Requirement chain or a manual approved BA, solution, design-system, Experience application and process receipt set into a project-local nested Markdown backlog with epic reviews, story test plans and reproducible coverage views.
 exposure: entry
+user_invocable: false
 ---
 
 # Backlog Plan

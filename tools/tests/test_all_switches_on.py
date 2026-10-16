@@ -165,7 +165,8 @@ EVERY_FLOW = tuple(READING + name for name in (
 FANOUT_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",
                   "execution-plan", "experience-design", "solution-design")
 LEVEL_ENTRIES = ("backlog-plan", "configure", "execution-plan")
-FLOWLESS_ENTRIES = ("issue-report", "organize-docs", "setup")
+# The story flow is owned only by process_profile, so no every-flow switch binds it.
+FLOWLESS_ENTRIES = ("issue-report", "organize-docs", "setup", "story")
 EXPECTED = {key: sorted([
     *value,
     *(EVERY_FLOW if key.split(":")[0] not in FLOWLESS_ENTRIES else ()),
@@ -188,6 +189,10 @@ EXPECTED = {key: sorted([*value, key.split(":")[0] + "/" + REBIND])
             for key, value in EXPECTED.items()}
 EXPECTED = {key: sorted([*value, "deliver/references/switch-regression_plan_revision-current_approved.md"])
             if key.startswith("deliver:") else value for key, value in EXPECTED.items()}
+# process_profile binds its fast-lane reference, held by the story skill, to story tasks.
+EXPECTED.update({f"story:{role}": ["story/references/switch-process_profile-fast_lane.md"]
+                 for role in ("backend-developer", "code-reviewer", "devops-engineer",
+                              "frontend-developer")})
 WORKFLOW = ("on:\n  pull_request:\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n"
             "      - run: make test\n")
 

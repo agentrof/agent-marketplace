@@ -104,6 +104,25 @@ def delivery_id(package: Path) -> str:
     return (prefix.group(0) if prefix else package.name).upper()
 
 
+def story_card(docs: Path, item_ref: str) -> tuple[Path, dict, str] | None:
+    """At process_profile fast_lane, a story card owns its architecture delta."""
+    if not re.fullmatch(r"FL-[0-9]{3,}", item_ref):
+        return None
+    try:
+        import process_policy
+    except ImportError:  # a gate bundle without the policy reader runs the standard path
+        return None
+    if process_policy.process_profile(docs) != "fast_lane":
+        return None
+    cards = sorted((docs / "backlog" / "cards").glob(f"{item_ref.lower()}-*.md"))
+    if len(cards) != 1:
+        raise ValueError(f"item_ref must resolve to exactly one story card: {item_ref}")
+    props, _line, error = parse_frontmatter(cards[0].read_text(encoding="utf-8"))
+    if error or props.get("type") != "story-card" or props.get("status") not in {"active", "delivered"}:
+        raise ValueError("System Architecture changes require an active or delivered story card")
+    return cards[0], props, item_ref
+
+
 def item_context(docs: Path, item_ref: str) -> tuple[Path, dict, str]:
     """Resolve an Item by story id, Item id or ``<Delivery id>:<story id>``.
 
@@ -114,6 +133,9 @@ def item_context(docs: Path, item_ref: str) -> tuple[Path, dict, str]:
     if not item_ref:
         # An Item without an id property would otherwise match the empty ref.
         raise ValueError("item_ref is required")
+    card = story_card(docs, item_ref)
+    if card is not None:
+        return card
     candidates: list[tuple[Path, dict, str]] = []
     deliveries: dict[Path, str] = {}
     for path in sorted((docs / "delivery" / "deliveries").glob("*/items/*/item.md")):
@@ -667,6 +689,13 @@ def stamp_item(docs: Path, item_ref: str) -> int:
         return 1
     delta = item_delta(root, item_ref)
     digest = item_delta_hash(delta)
+    if item_props.get("type") == "story-card":
+        # A fast-lane card keeps no Item receipt; the ledger delta is its record.
+        target = root / "_ledger" / "item-deltas" / f"{item_ref}.json"
+        atomic(target, json.dumps({**delta, "architecture_delta_hash": digest}, indent=2,
+                                  sort_keys=True) + "\n")
+        print(json.dumps({"item_ref": item_ref, "architecture_delta_hash": digest}, sort_keys=True))
+        return 0
     # The Item belongs to Delivery: stamp only its receipt scalars, retaining
     # approved topology and authored bytes rather than reserializing the note.
     from delivery_compile import content_hash, split_note

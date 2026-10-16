@@ -1,0 +1,6 @@
+{
+  "summary": "Add process switch process_profile with a fast_lane value: the story entry turns a request into one story card, one branch and one pull request verified by CI and one reviewer (two at rigor high) with auto-merge; the retrospective entry reports story times from the cards and GitHub and files approved proposals as issues; backlog-plan, delivery-plan, execution-plan and deliver leave the user's menu.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

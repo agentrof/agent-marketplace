@@ -1,5 +1,7 @@
 # Solution Design Flow
 
+Switch `process_profile`: at `fast_lane`, follow `skill-content/story/references/switch-process_profile-fast_lane.md`.
+
 Spawn template: paste `{{constitution}}`, the exact BA receipt, tree paths,
 decision-status lens and `SELF-CHECK` into every reviewer prompt.
 

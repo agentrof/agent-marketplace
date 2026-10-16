@@ -42,8 +42,13 @@ def model_version(model_id: str) -> tuple[str, tuple[int, ...]] | None:
 
 
 def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, str, str]) -> list[tuple[str, str]]:
-    name, description, exposure, project_scope = metadata
-    policy = "disable-model-invocation: true\n" if exposure == "entry" else "user-invocable: false\n"
+    name, description, exposure, project_scope, flags = metadata
+    # A hidden entry renders exactly like an internal skill: off the user's menu,
+    # still loadable, and its canonical text refuses at the fast lane.
+    if exposure != "entry" or not flags["user_invocable"]:
+        policy = "user-invocable: false\n"
+    else:
+        policy = "" if flags["model_invocable"] else "disable-model-invocation: true\n"
     gate = (
         " Before changing a project, confirm the workspace config and local docs "
         "contract are present; setup is the only entry that may create them."

@@ -319,6 +319,24 @@
         "roles": []
       },
       "next_transition": "Return the external issue-report result from conversation evidence; no project transition is authorized."
+    },
+    "story": {
+      "flows": [
+        "story"
+      ],
+      "roles": [
+        "backend-developer",
+        "frontend-developer",
+        "devops-engineer",
+        "code-reviewer"
+      ],
+      "scope_kind": "story",
+      "project_state": true,
+      "write_scope": {
+        "resolver": "unresolved",
+        "roles": []
+      },
+      "next_transition": "The story is done when its pull request merges on green CI after one reviewer pass; the card and the clock rows are its record."
     }
   },
   "read_only_roles": [
@@ -411,6 +429,9 @@
       "backlog-reviewer",
       "business-analyst",
       "qa-engineer"
+    ],
+    "story": [
+      "code-reviewer"
     ]
   },
   "technology_method_skills": [
@@ -421,7 +442,8 @@
     "nosql-database-design"
   ],
   "session_entries": [
-    "autopilot"
+    "autopilot",
+    "retrospective"
   ],
   "pass_kinds": {
     "apply_findings": {

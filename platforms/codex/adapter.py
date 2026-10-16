@@ -49,8 +49,8 @@ def model_version(model_id: str) -> tuple[str, tuple[int, ...]] | None:
 
 
 def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, str, str]) -> list[tuple[str, str]]:
-    name, description, exposure, project_scope = metadata
-    if exposure != "entry":
+    name, description, exposure, project_scope, flags = metadata
+    if exposure != "entry" or not flags["user_invocable"]:
         return []
     gate = (
         " Before any workflow step inside a Git repository, confirm the "

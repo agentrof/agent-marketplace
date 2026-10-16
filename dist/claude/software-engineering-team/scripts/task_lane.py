@@ -99,8 +99,8 @@ LEVERS = {
             " tests by file and approve it at once.",
     "write": "Split tasks whose write step runs long, or run backend and frontend"
              " writers side by side on disjoint files.",
-    "ci": "Run only the suites the diff touches on the PR and move the rest to a"
-          " nightly run on main; cache dependencies in CI.",
+    "ci": "Run only the checks the diff touches (skip unit suites for document-only changes,"
+          " scope the vault gate to the changed trees) and cache dependencies in CI.",
     "review": "Give the reviewer the diff and the task only, single pass, with a"
               " time budget; file non-critical findings as issues.",
     "merge_wait": "Remove the slower of CI and review from the merge path, or drop a"
@@ -542,6 +542,22 @@ def proposals(rows: list[dict]) -> list[dict]:
     return found[:5]
 
 
+def kind_proposals(rows: list[dict]) -> list[dict]:
+    """Levers per task kind, the kind furthest over its average target first, at most three
+    per kind; each names its kind and the gap to that target."""
+    found = []
+    goals = targets(rows, [])
+    kinds = {row.get("kind", "build") for row in rows}
+    for kind in sorted(kinds, key=lambda name: goals.get(name, {}).get("target_gap", 0), reverse=True):
+        goal = goals.get(kind)
+        for item in proposals([row for row in rows if row.get("kind", "build") == kind])[:3]:
+            versus = (f"; average {goal['average']} vs target {goal['average_target']} min"
+                      f" ({'+' if goal['target_gap'] > 0 else ''}{goal['target_gap']})") if goal else ""
+            found.append({**item, "id": item["id"].replace("RETRO-", f"RETRO-{kind.upper()}-", 1),
+                          "kind": kind, "evidence": f"{kind}: {item['evidence']}{versus}"})
+    return found
+
+
 def targets(rows: list[dict], totals: list[float]) -> dict:
     """Per kind: the average against its average target, and each merged task against the
     target of its own size and the kind's maximum."""
@@ -553,6 +569,10 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
         average = round(statistics.mean(row["total"] for row in done), 1)
         over = [row["task_id"] for row in done if row["total"] > goal.get(row["size"] or "s", goal["max"])]
         result[kind] = {"tasks": len(done), "average": average, "average_target": goal["average"],
+                        "target_gap": round(average - goal["average"], 1),
+                        "total": summary([row["total"] for row in done]),
+                        "steps": {step: summary([row["steps"][step] for row in done
+                                                 if row["steps"][step] is not None]) for step in STEPS},
                         "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
                         "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over}
@@ -571,7 +591,7 @@ def report(rows: list[dict], scope: str, previous: dict | None = None) -> dict:
                          "largest_minutes": row["steps"].get(row["largest_step"])}
                         for row in slowest],
             "targets": targets(rows, totals), "previous": previous,
-            "proposals": proposals(rows)}
+            "proposals": kind_proposals(rows)}
 
 
 def render(data: dict) -> str:
@@ -587,6 +607,14 @@ def render(data: dict) -> str:
         lines.append(f"- {row['task_id']} ({row['size'] or '-'}, {row['rigor']}) PR"
                      f" {row['pr'] or '-'}: {steps}"
                      f" = {row['total'] if row['total'] is not None else 'open'}")
+    if data.get("targets"):
+        lines += ["", "By kind (min; average / median / max, then the average of each step):"]
+    for kind, goal in (data.get("targets") or {}).items():
+        total = goal["total"]
+        lines.append(f"- {kind} ({goal['tasks']} merged): total {total['average']} / {total['median']} /"
+                     f" {total['max']}; " + " / ".join(
+                         f"{step} {goal['steps'][step]['average'] if goal['steps'][step]['average'] is not None else '-'}"
+                         for step in STEPS))
     for kind, goal in (data.get("targets") or {}).items():
         sizes = "/".join(str(goal["size_targets"][size]) for size in SIZES)
         lines.append(f"Target {kind} ({goal['tasks']}): average {goal['average']} vs {goal['average_target']} min"

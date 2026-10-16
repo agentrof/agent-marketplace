@@ -180,7 +180,7 @@ class RetrospectiveTests(unittest.TestCase):
         data = task_lane.report([task_lane.task_row(self.task, None)], "latest 20")
         self.assertIsNone(data["per_task"][0]["total"])
         self.assertEqual(data["request_to_merge_minutes"]["count"], 0)
-        self.assertIn("RETRO-OPEN-TASKS", [item["id"] for item in data["proposals"]])
+        self.assertIn("RETRO-BUILD-OPEN-TASKS", [item["id"] for item in data["proposals"]])
 
     def test_report_ranks_proposals_by_measured_minutes(self):
         rows = [task_lane.task_row({**self.task, "id": f"TK-00{n}"},
@@ -192,12 +192,12 @@ class RetrospectiveTests(unittest.TestCase):
         self.assertEqual(data["request_to_merge_minutes"],
                          {"count": 3, "average": 23.0, "median": 23.0, "max": 24.0})
         ids = [item["id"] for item in data["proposals"]]
-        self.assertEqual(ids[0], "RETRO-CI")
-        self.assertIn("RETRO-CHECK-TESTS", ids)
+        self.assertEqual(ids[0], "RETRO-BUILD-CI")
+        self.assertIn("RETRO-BUILD-CHECK-TESTS", ids)
         self.assertLessEqual(len(ids), 5)
         self.assertEqual(data["slowest"][0]["task_id"], "TK-003")
         text = task_lane.render(data)
-        self.assertIn("1. [RETRO-CI]", text)
+        self.assertIn("1. [RETRO-BUILD-CI]", text)
         self.assertIn("Request to merge: average 23.0, median 23.0, max 24.0 min", text)
         self.assertEqual(task_lane.export(data, "csv").splitlines()[0].split(",")[:3],
                          ["task_id", "title", "size"])
@@ -633,6 +633,21 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
         self.assertEqual((props["task_kind"], props["approved_at"]), ("knowledge", props["requested_at"]))
+
+    def test_the_report_sums_each_kind_and_ranks_its_levers_by_the_target_gap(self):
+        build = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001"},
+                                   pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:40:00Z"))
+        knowledge = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-002", "task_kind": "knowledge"},
+                                       pr("2026-10-16T10:01:00Z", None, None, "2026-10-16T10:04:00Z"))
+        data = task_lane.report([build, knowledge], "latest 20")
+        self.assertEqual(set(data["targets"]), {"build", "knowledge"})
+        self.assertEqual(data["targets"]["build"]["total"]["average"], 40.0)
+        self.assertIn("define", data["targets"]["knowledge"]["steps"])
+        self.assertTrue(data["proposals"][0]["id"].startswith("RETRO-BUILD-"))
+        self.assertIn("vs target 15 min", data["proposals"][0]["evidence"])
+        text = task_lane.render(data)
+        self.assertIn("- build (1 merged): total 40.0 / 40.0 / 40.0;", text)
+        self.assertIn("- knowledge (1 merged): total 4.0 / 4.0 / 4.0;", text)
 
     def test_targets_and_the_previous_run_are_compared(self):
         rows = [task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001", "size": "l"},

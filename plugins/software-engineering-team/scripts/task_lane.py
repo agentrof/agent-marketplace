@@ -18,6 +18,9 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   role's verdict in the task's ``## Role Checks`` section.
 - ``open-pr`` marks the task delivered, pushes the branch and opens the PR; it
   refuses while a ``require`` role, routed by the task or its diff, has no verdict.
+- ``prove`` runs the project's local proof commands on HEAD and records each
+  one's exit code and time; at switch ``pr_proof`` ``local_record`` ``open-pr``
+  refuses without a green record of a clean HEAD and adds it to the PR body.
 - ``merge`` posts the reviewers' pass on the PR and, at rigor ``normal``,
   turns on auto-merge; at rigor ``high`` the owner merges.
 - ``criteria`` lists a backlog story's numbered criteria, its open linked tasks
@@ -61,6 +64,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
+import process_policy
 from ba_compile import parse_frontmatter
 
 TASKS = Path("workspace") / "docs" / "backlog" / "tasks"
@@ -90,6 +94,12 @@ TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
 TARGET_MINUTES = TARGETS["build"]["average"]
 ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
 PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
+# The project's local proof commands; {base} is the target branch. Without the file
+# the proof runs the test command the flow names and the vault gate setup installs.
+PROJECT_PROOF = Path(".agentrof") / "local-proof.json"
+PROOF_COMMANDS = ("make test",
+                  "python3 .github/agentrof/vault-gate.pyz check --project-root . --changed-from origin/{base} --json")
+PROOFS = Path(".agentrof") / "agent-marketplace" / ".runtime" / "proof"
 ROLE_MODES = ("require", "suggest", "off")
 ROLE_STEPS = ("pre_check", "author")
 VERDICTS = ("go", "changes")
@@ -1877,6 +1887,81 @@ def cmd_overlap(args, root: Path) -> dict:
     return {"ok": True, "advisory": True, "overlaps": overlap(root, args.base)}
 
 
+def pr_proof(root: Path) -> str:
+    """The ``pr_proof`` value in force; the default when the policy cannot be read."""
+    try:
+        return process_policy.effective_values(root / "workspace" / "docs")[0]["pr_proof"]["value"]
+    except (KeyError, OSError, ValueError):
+        return "remote_ci"
+
+
+def proof_commands(root: Path, base: str) -> list[str]:
+    path = root / PROJECT_PROOF
+    commands = json.loads(path.read_text(encoding="utf-8"))["commands"] if path.is_file() else PROOF_COMMANDS
+    if not commands or not all(isinstance(item, str) and item.strip() for item in commands):
+        raise Refused(f"{PROJECT_PROOF.as_posix()} must list at least one command under commands")
+    return [item.replace("{base}", base) for item in commands]
+
+
+def head_state(root: Path) -> tuple[str, bool]:
+    """HEAD and whether no tracked file differs from it."""
+    return (run("git", "rev-parse", "HEAD", cwd=root),
+            not run("git", "status", "--porcelain", "--untracked-files=no", cwd=root))
+
+
+def proof_path(root: Path, task: str) -> Path:
+    if not ID_RE.match(task):
+        raise Refused("--task must be TK-<number>")
+    return root / PROOFS / f"{task}.json"
+
+
+def cmd_prove(args, root: Path) -> dict:
+    """Run every local proof command on HEAD and record each exit code and time."""
+    path = proof_path(root, args.task)
+    head, clean = head_state(root)
+    results = []
+    for command in proof_commands(root, args.base):
+        started, clock = now(), datetime.now(timezone.utc)
+        done = subprocess.run(command, shell=True, cwd=root, capture_output=True, text=True)
+        results.append({"command": command, "exit_code": done.returncode,
+                        "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 1),
+                        "started_at": started, "finished_at": now(),
+                        "tail": "" if done.returncode == 0 else scrub((done.stdout + done.stderr)[-2000:], 400)})
+    record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
+              "ok": clean and all(item["exit_code"] == 0 for item in results), "commands": results}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    return {**record, "record": str(path.relative_to(root))}
+
+
+def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
+    """Why the local proof does not cover HEAD, and the record."""
+    path = proof_path(root, task)
+    if not path.is_file():
+        return [f"no local proof record; run prove --task {task}"], {}
+    record = json.loads(path.read_text(encoding="utf-8"))
+    head, clean = head_state(root)
+    problems = []
+    if record.get("head") != head:
+        problems.append(f"the proof ran on {str(record.get('head'))[:12]}, HEAD is {head[:12]}; run prove again")
+    if not record.get("tree_clean"):
+        problems.append("the proof ran on a tree with uncommitted changes; commit and run prove again")
+    if not clean:
+        problems.append("tracked files changed since HEAD; commit and run prove again")
+    problems += [f"`{item['command']}` exited {item['exit_code']}" for item in record.get("commands", [])
+                 if item.get("exit_code") != 0]
+    if not record.get("commands"):
+        problems.append("the proof record holds no command")
+    return problems, record
+
+
+def proof_section(record: dict) -> str:
+    rows = "\n".join(f"| `{item['command']}` | pass | {item['seconds']} |" for item in record["commands"])
+    finished = record["commands"][-1]["finished_at"]
+    return (f"\n\n## Local proof\n\nEvery check passed on HEAD `{record['head']}` with a clean tree,"
+            f" finished {finished}.\n\n| Command | Result | Seconds |\n|---|---|---|\n{rows}\n")
+
+
 def cmd_open_pr(args, root: Path) -> dict:
     path = task_path(root, args.task)
     errors = lint(path)
@@ -1888,6 +1973,12 @@ def cmd_open_pr(args, root: Path) -> dict:
             errors.append(missing_message(args.task, missing))
     if errors:
         raise Refused("task is not ready: " + "; ".join(errors))
+    record = None
+    if pr_proof(root) == "local_record":
+        # Checked before the delivered-status commit, the only change open-pr adds.
+        problems, record = proof_problems(root, args.task)
+        if problems:
+            raise Refused("no local proof for this HEAD (switch pr_proof is local_record): " + "; ".join(problems))
     if task_props(path).get("status") == "active":
         set_field(path, "status", "delivered")
     run("git", "add", str(path), cwd=root)
@@ -1896,6 +1987,8 @@ def cmd_open_pr(args, root: Path) -> dict:
     warnings = overlap(root, args.base)
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     body = path.read_text(encoding="utf-8").split("\n---\n", 1)[-1]
+    if record:
+        body += proof_section(record)
     if warnings:
         body += "\n\nAdvisory overlap with open pull requests: " + "; ".join(
             f"#{item['pr']} ({', '.join(item['files'])})" for item in warnings)
@@ -2050,6 +2143,9 @@ def main(argv: list[str] | None = None) -> int:
     opened = sub.add_parser("open-pr")
     opened.add_argument("--task", required=True)
     opened.add_argument("--base", default="main")
+    proved = sub.add_parser("prove", help="run the local proof commands on HEAD and record them")
+    proved.add_argument("--task", required=True)
+    proved.add_argument("--base", default="main")
     merge = sub.add_parser("merge")
     merge.add_argument("--task", required=True)
     merge.add_argument("--pr", required=True)
@@ -2084,7 +2180,7 @@ def main(argv: list[str] | None = None) -> int:
                             help="skip transcript cost and wait classification")
     args = parser.parse_args(argv)
     handlers = {"start": cmd_start, "lint": cmd_lint, "approve": cmd_approve,
-                "overlap": cmd_overlap, "open-pr": cmd_open_pr, "merge": cmd_merge,
+                "overlap": cmd_overlap, "open-pr": cmd_open_pr, "prove": cmd_prove, "merge": cmd_merge,
                 "report": cmd_report, "file-issues": cmd_file_issues,
                 "criteria": cmd_criteria, "board": cmd_board,
                 "role-check": cmd_role_check, "rework": cmd_rework}

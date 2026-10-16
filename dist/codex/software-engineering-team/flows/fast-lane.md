@@ -138,7 +138,10 @@ its diff changes, has no verdict; a `suggest` role never blocks.
    and run on demand through the project's live command.
 5. Pull request. Run `overlap` and pass its warnings on; they never block.
    Run `open-pr --task <id>`. It marks the task delivered, pushes the
-   branch and opens the pull request.
+   branch and opens the pull request. Switch `pr_proof`: at `local_record`,
+   run `prove --task <id>` first; `open-pr` refuses without its green record
+   of a clean HEAD, as
+   `skill-content/deliver/references/switch-pr_proof-local_record.md` defines.
 6. Review. Spawn one `code-reviewer` in the foreground with the task and
    the output of `gh pr diff <pr>`. It checks each acceptance criterion
    against the diff and its tests and returns findings with severities. At

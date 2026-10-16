@@ -190,6 +190,7 @@ EXPECTED = {key: sorted([*value, "deliver/references/switch-regression_plan_revi
             if key.startswith("deliver-governed:") else value for key, value in EXPECTED.items()}
 # process_profile binds its fast-lane reference, held by the deliver skill, to deliver tasks.
 EXPECTED.update({f"deliver:{role}": sorted(["deliver/references/switch-process_profile-fast_lane.md",
+                                             "deliver/references/switch-pr_proof-local_record.md",
                                              *EVERY_FLOW])
                  for role in ("backend-developer", "code-reviewer", "devops-engineer",
                               "frontend-developer")})

@@ -538,6 +538,7 @@ RELEASED_DEFAULTS = {
     "own_target_reuse": "off",
     "pass_carry_over": "off",
     "process_profile": "governed",
+    "pr_proof": "remote_ci",
     "owner_gates": "per_step",
     "pre_handoff_regression": "off",
     "regression_plan_revision": "integrated",
@@ -580,6 +581,12 @@ SAFETY_RULES = {
         f"{SKILLS}/deliver/references/switch-process_profile-fast_lane.md": (
             "Only a critical finding blocks",
             "every affected live group runs and the owner merges",
+        ),
+    },
+    "pr_proof": {
+        f"{SKILLS}/deliver/references/switch-pr_proof-local_record.md": (
+            "`open-pr` refuses before it pushes",
+            "never edit the record",
         ),
     },
     "pass_carry_over": {

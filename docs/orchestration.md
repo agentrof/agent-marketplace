@@ -155,6 +155,13 @@ merges), and auto-merge. The steps are in `flows/fast-lane.md` and
 `deliver/references/switch-process_profile-fast_lane.md`. Contracts, the Definition of Done and Governance then change by
 plain pull request, with no stamp, pairing, citation or hash pin.
 
+Process switch `pr_proof` leaves a fast-lane task's proof to the project's CI
+at `remote_ci`. At `local_record`, `task_lane.py prove` runs the project's
+declared proof commands on HEAD and records each exit code and duration with
+the HEAD commit and a clean-tree flag, and `open-pr` refuses before pushing
+unless that record is green for the clean HEAD; the steps are in
+`deliver/references/switch-pr_proof-local_record.md`.
+
 Process switch `pass_carry_over` keeps nothing between passes at `off`. At
 `per_item`, the runner adds every pass record the approved test or live
 command writes to the Item's carry-over record, failed passes included, and

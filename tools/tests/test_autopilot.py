@@ -496,10 +496,31 @@ class LifecycleTests(unittest.TestCase):
                           entry["recommendation"], entry["blocks"], entry["time"]),
                          ("queued", ["release"], ["Publish", "Hold"], "Hold", "release notes",
                           stamp(NOW + timedelta(minutes=2))))
-        # Doubt queues a question, so an allowed class is queued too and said to be.
         code, out, err = self.queue("choice")
         self.assertEqual(code, 0, err)
-        self.assertIn("in doubt", out)
+        self.assertIn("decided: Hold", out)
+        self.assertEqual(self.p.events()[-1]["event"], "decision")
+        self.assertEqual(self.p.events()[-1]["choice"], "Hold")
+
+    def test_allowed_queue_decides_unless_held_or_any_effect_is_not_allowed(self):
+        self.p.run_verb("on")
+        base = ("queue", "--class", "choice", "--question", "Use the bounded option?",
+                "--options", "Use; Wait", "--recommendation", "Use")
+        code, out, err = self.p.run_verb(*base)
+        self.assertEqual(code, 0, err)
+        self.assertIn("decided: Use", out)
+        self.assertEqual(self.p.events()[-1]["event"], "decision")
+        for extra in (("--hold", "The input is ambiguous"), ("--class", "release"),
+                      ("--class", "security_settings")):
+            with self.subTest(extra=extra):
+                code, out, err = self.p.run_verb(*base, *extra)
+                self.assertEqual(code, 0, err)
+                self.assertIn("queued question", out)
+                self.assertEqual(self.p.events()[-1]["event"], "queued")
+        self.assertEqual(self.p.events()[-3]["hold"], "The input is ambiguous")
+        self.assertEqual(self.p.run_verb(*base, "--hold", " ")[0], 1)
+        report = json.loads(self.p.run_verb("report", "--json")[1])
+        self.assertEqual(report["counts"], {"decisions": 1, "queued": 3})
 
     def test_record_takes_every_class_a_decision_touches_and_refuses_one_not_allowed(self):
         self.p.run_verb("on")
@@ -1569,6 +1590,19 @@ class PhaseStartTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("class 'phase_start' is not allowed by grant", err)
         self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
+
+    def test_queued_phase_start_cannot_skip_its_readiness_check(self):
+        self.p.run_verb("on", "--allow", "phase_start")
+        self.p.delivery("scope_proposed")
+        args = ("queue", "--class", "phase_start", "--question", "Start execution?",
+                "--recommendation", "Start", "--entry", "execution-plan", "--after", "delivery:DLV-001")
+        self.assertEqual(self.p.run_verb(*args)[0], 0)
+        self.assertEqual(self.p.events()[-1]["event"], "queued")
+        self.p.delivery("scope_approved")
+        self.assertEqual(self.p.run_verb(*args)[0], 0)
+        event = self.p.events()[-1]
+        self.assertEqual((event["event"], event["entry"], event["after_state"]),
+                         ("decision", "execution-plan", "scope_approved"))
 
     def test_phase_start_is_recorded_with_the_state_it_read_once_the_prior_phase_closed(self):
         self.p.delivery("execution_approved")

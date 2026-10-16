@@ -300,7 +300,7 @@
   as usual:
   - Classify the question by every effect of its recommended option: any
     never effect makes it never, an excluded effect the grant does not allow
-    queues it, and doubt queues it. `check` and the denial list each allowed
+    queues it, and doubt queues it with `--hold "<reason>"`. `check` and the denial list each allowed
     class with its description.
   - For a question whose every class is allowed, take the recommended option,
     or for an open question the recommendation you would offer, run
@@ -310,7 +310,9 @@
     refuses one that is not allowed, and refuses once the grant has ended, its
     goal included; then ask as usual.
   - Otherwise run `autopilot.py queue` and continue the work that does not
-    depend on it. An at-once owner decision and the Software
+    depend on it. If it returns `decided`, write the logged decision into the
+    governing document and apply it. Keep independent excluded effects in
+    separate questions so they do not hold an allowed decision. An at-once owner decision and the Software
     Architect's escalation clause are never taken: queue them as
     `scope_or_rule` or as the never class they touch.
   - Stop only when every remaining task waits on a queued question, then end

@@ -656,6 +656,10 @@ option: the session records it with `autopilot.py record` first, then applies
 it and writes it where the flow records the user's answer, marked with the
 grant id. `record` and `queue` apply the grant's end conditions first, its goal
 included, and refuse once it has ended.
+An explicit `queue --hold "<reason>"` keeps an uncertain question pending.
+Without a hold, `queue` records an allowed recommendation as a decision, which
+the session writes into the governing document before applying it. Independent
+excluded effects stay in separate questions.
 Any other question is queued with `autopilot.py queue`, and the session
 continues the work that does not depend on it and stops only when every
 remaining task waits on a queued question. Roles are unaffected: they never

@@ -1,0 +1,6 @@
+{
+  "summary": "Take an allowed queued recommendation automatically unless the caller explicitly records a reason to hold it.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

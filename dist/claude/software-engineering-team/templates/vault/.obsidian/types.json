@@ -190,6 +190,8 @@
     "primary_process_ref": "text",
     "related_process_refs": "multitext",
     "retired_at_utc": "datetime",
+    "retired_at": "date",
+    "retired_reason": "text",
     "component_ref": "text",
     "record_id": "text",
     "introduced_by": "multitext",

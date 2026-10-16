@@ -1930,7 +1930,8 @@ def cmd_prove(args, root: Path) -> dict:
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
               "ok": clean and all(item["exit_code"] == 0 for item in results), "commands": results}
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8", newline="\n")
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(record, indent=2) + "\n")
     return {**record, "record": str(path.relative_to(root))}
 
 

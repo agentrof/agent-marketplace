@@ -8,6 +8,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -457,6 +458,14 @@ class FastLaneOwnershipTests(unittest.TestCase):
                                 generated=False)
         vault = SimpleNamespace(policy=policy, notes={task.rel: task, story.rel: story})
         self.assertEqual([note.rel for note in vault_check.navigated(vault)], [story.rel])
+
+    def test_every_field_the_lane_writes_is_a_registered_property(self):
+        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
+                            .read_text(encoding="utf-8"))
+        source = (TEAM / "scripts/task_lane.py").read_text(encoding="utf-8")
+        written = set(re.findall(r'set_field\(\w+, "([a-z_]+)"', source))
+        self.assertIn("roles", written)
+        self.assertEqual(sorted(written - set(policy["property_types"])), [])
 
     def test_the_task_type_is_registered_in_the_vault_policy(self):
         policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")

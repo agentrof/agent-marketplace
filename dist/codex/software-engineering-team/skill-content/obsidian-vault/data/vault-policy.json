@@ -295,6 +295,7 @@
     "requested_at": "datetime",
     "size": "text",
     "rigor": "text",
+    "roles": "text",
     "task_kind": "text",
     "epic": "text",
     "source_story": "text",

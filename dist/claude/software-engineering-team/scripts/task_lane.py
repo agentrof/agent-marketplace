@@ -1974,6 +1974,18 @@ def cmd_prove(args, root: Path) -> dict:
     return {**record, "record": str(path.relative_to(root))}
 
 
+def only_task_changed(root: Path, task: str, proved: str | None, head: str) -> bool:
+    """A commit after the proof that touches only the task's own record (a role check) changes no code it proved."""
+    if not proved:
+        return False
+    try:
+        changed = run("git", "diff", "--name-only", proved, head, cwd=root).splitlines()
+        own = task_path(root, task).relative_to(root).as_posix()
+    except Refused:
+        return False
+    return bool(changed) and all(path == own for path in changed) and not lint(root / own)
+
+
 def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
     """Why the local proof does not cover HEAD, and the record."""
     path = proof_path(root, task)
@@ -1982,7 +1994,7 @@ def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
     record = json.loads(path.read_text(encoding="utf-8"))
     head, clean = head_state(root)
     problems = []
-    if record.get("head") != head:
+    if record.get("head") != head and not only_task_changed(root, task, record.get("head"), head):
         problems.append(f"the proof ran on {str(record.get('head'))[:12]}, HEAD is {head[:12]}; run prove again")
     if not record.get("tree_clean"):
         problems.append("the proof ran on a tree with uncommitted changes; commit and run prove again")

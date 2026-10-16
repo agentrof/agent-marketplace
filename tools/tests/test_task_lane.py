@@ -767,6 +767,20 @@ class RetrospectiveDollarTests(unittest.TestCase):
             "input": 1, "cache_write": 0, "cache_read": 0, "output": 1}}, self.prices))
         self.assertIsNotNone(self.session_cost.rates("claude-opus-5-5[1m]", self.prices))
 
+    def test_a_fast_call_costs_its_multiplier_and_every_price_has_all_rates(self):
+        call = {"model": "claude-opus-5-5", "tokens": {"input": 1000, "cache_write": 0, "cache_read": 0, "output": 1000}}
+        self.assertAlmostEqual(self.session_cost.usd(call, self.prices), 0.024)
+        self.assertAlmostEqual(self.session_cost.usd({**call, "fast": True}, self.prices), 0.048)
+        self.assertAlmostEqual(self.session_cost.usd({**call, "model": "claude-sonnet-5-5", "fast": True}, self.prices),
+                               0.012)
+        rates = {"input", "cache_write_5m", "cache_write_1h", "cache_read", "output"}
+        for model, rate in self.prices.items():
+            self.assertLessEqual(rates, set(rate), model)
+            self.assertTrue(all(rate[key] > 0 for key in rates), model)
+            self.assertLess(rate["cache_read"], rate["input"], model)
+            if "long_context" in rate:
+                self.assertLessEqual(rates | {"above_prompt_tokens"}, set(rate["long_context"]), model)
+
     def test_a_project_price_file_overrides_a_model(self):
         (self.project / ".agentrof").mkdir()
         (self.project / ".agentrof" / "pricing.json").write_text(json.dumps({"models": {
@@ -776,7 +790,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         self.assertEqual(prices["claude-opus-5-5"]["output"], 1)
         self.assertEqual(prices["claude-sonnet-5-5"]["output"], 10)
 
-    def test_spawns_follow_their_task_id_branches_their_task_and_the_rest_splits_by_window(self):
+    def test_spawns_follow_their_task_id_branches_their_task_and_only_the_main_session_splits_by_window(self):
         (self.folder / "s1.jsonl").write_text("\n".join([
             self.call(5, "m1", output_tokens=10), self.call(25, "m2", output_tokens=20),
             self.call(50, "m3", output_tokens=40),
@@ -791,10 +805,14 @@ class RetrospectiveDollarTests(unittest.TestCase):
         rows = [task_lane.task_row(tasks[0], pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")),
                 task_lane.task_row(tasks[1], pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:30:00Z"))]
         rest = task_lane.attach_sessions(rows, tasks, self.scan(), False, 1e12, self.prices)
-        self.assertEqual([row["cost"]["tokens"]["output"] for row in rows], [205, 525])
-        self.assertEqual(rest["tokens"]["output"], 40)
+        # d2 names two tasks: other work, unattributed, never split into a task's startup context.
+        self.assertEqual([row["cost"]["tokens"]["output"] for row in rows], [105, 425])
+        self.assertEqual(rest["tokens"]["output"], 240)
         self.assertEqual(rows[0]["cost"]["main"]["tokens"]["output"], 5)
-        self.assertEqual(len(rows[0]["cost"]["spawns"]), 2)
+        self.assertEqual(len(rows[0]["cost"]["spawns"]), 1)
+        # Every scanned token lands exactly once: tasks plus the unattributed rest equal the scan.
+        self.assertEqual(sum(row["cost"]["tokens"]["output"] for row in rows) + rest["tokens"]["output"],
+                         self.session_cost.cost(self.scan(), self.prices)["tokens"]["output"])
 
     def test_codex_tokens_split_cached_and_written_input_and_name_their_branch(self):
         folder = self.home / "codex" / "2026" / "10" / "16"

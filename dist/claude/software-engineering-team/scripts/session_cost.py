@@ -6,8 +6,9 @@ tool event with its time, lane, role, model, effort, tokens and git branch. The
 retrospective attributes an event to a task by one rule (``belongs``): a subagent
 whose spawn description or first prompt names exactly one task id (``TK-###``)
 is that task's; else a record on a ``task/...`` branch is that branch's task;
-else (the main session on the base branch, or no branch) the event falls in
-every task window that holds it and its cost is split evenly between them.
+else a main-session event on the base branch falls in every task window that
+holds it and its cost is split evenly between them. A subagent with neither a
+task id nor a task branch is other work and stays unattributed.
 What matches no task is the unattributed remainder. Only times, counts, roles,
 models, task ids, spawn descriptions, file paths and result sizes are kept; no
 message text is stored.
@@ -16,7 +17,8 @@ message text is stored.
 matched exactly or by the longest id prefix; ``[1m]``-style suffixes ignored):
 input, cache write 5 minutes and 1 hour, cache read and output, with an
 optional ``long_context`` tier that applies to the whole call once its prompt
-(input plus cache tokens) passes ``above_prompt_tokens``. A model missing from
+(input plus cache tokens) passes ``above_prompt_tokens``, and a ``fast_multiplier``
+for a call Claude Code marks ``speed: fast``. A model missing from
 the table counts tokens but no dollars and is listed as unpriced. A spawn's
 startup context is the prompt of its first call: input plus cache write plus
 cache read tokens.
@@ -138,7 +140,8 @@ def claude_events(path: Path, role: str, purpose: str = "") -> list[dict]:
                 continue
             event = {**base, "kind": "call", "model": model,
                      "effort": str(record.get("effort") or record.get("perTurnEffort") or ""), "tokens": tokens,
-                     "cache_write_1h": split.get("ephemeral_1h_input_tokens") or 0}
+                     "cache_write_1h": split.get("ephemeral_1h_input_tokens") or 0,
+                     "fast": usage.get("speed") == "fast"}
             if key in calls:
                 calls[key].update(event)
             else:
@@ -218,12 +221,13 @@ def scan(project: Path, since: float = 0.0, claude_home: Path = CLAUDE_PROJECTS,
 
 
 def belongs(event: dict, branch: str, start: float, end: float, task: str = "") -> bool:
-    """A subagent naming a task id is that task's; else a task branch is its task's; else the window decides."""
+    """A subagent naming a task id is that task's; else a task branch is its task's; else the main session's
+    window decides. A subagent with neither belongs to no task: it is other work running at the same time."""
     if event.get("task"):
         return event["task"] == task
     if event["branch"].startswith("task/"):
         return event["branch"] == branch
-    return start <= event["at"] <= end
+    return event["role"] == "main" and start <= event["at"] <= end
 
 
 def load_prices(project: Path) -> dict:
@@ -255,9 +259,10 @@ def usd(call: dict, prices: dict) -> float | None:
     if tier and prompt_tokens(tokens) > tier["above_prompt_tokens"]:
         rate = {**rate, **tier}
     hour = min(call.get("cache_write_1h") or 0, tokens["cache_write"])
-    return (tokens["input"] * rate["input"] + (tokens["cache_write"] - hour) * rate["cache_write_5m"]
-            + hour * rate["cache_write_1h"] + tokens["cache_read"] * rate["cache_read"]
-            + tokens["output"] * rate["output"]) / 1e6
+    scale = rate.get("fast_multiplier", 1) if call.get("fast") else 1
+    return scale * (tokens["input"] * rate["input"] + (tokens["cache_write"] - hour) * rate["cache_write_5m"]
+                    + hour * rate["cache_write_1h"] + tokens["cache_read"] * rate["cache_read"]
+                    + tokens["output"] * rate["output"]) / 1e6
 
 
 def step_class(role: str, purpose: str) -> str:

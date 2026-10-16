@@ -20,7 +20,8 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   merged tasks cover every criterion, derived on every run.
 - ``report`` is the retrospective: the tasks hold the request and approval
   times, GitHub holds the PR, review, CI and merge times, read at report
-  time. ``--export`` rebuilds a derived file under ``.agentrof/``;
+  time, and ``session_cost.py`` reads each task's cost and active minutes from
+  the host session transcripts, so every wait gets an owner; ``--deep`` adds reading waste. ``--export`` rebuilds a derived file under ``.agentrof/``;
   ``--write-report`` keeps a Delivery's summary under
   ``workspace/docs/delivery/retrospectives/``. ``file-issues`` opens one
   issue per proposal the user approved, in the project's own repository.
@@ -63,6 +64,29 @@ BOARD = EXPORT / "board.md"
 DELIVERY_RE = re.compile(r"^DLV-[0-9]{3,}$")
 AC_RANGE = (3, 8)
 TARGET_MINUTES = 15
+# Request to merge targets in minutes: the average over every task, and the maximum
+# for a large (size l) task.
+TARGETS = {"average": 15, "large": 50}
+HISTORY = EXPORT / "history.jsonl"
+LEDGER = Path(".agentrof") / "plugin-ledger.md"
+PENDING_UPSTREAM = "## Pending upstream"
+WAITS = ("agent_work", "ci_wait", "review_wait", "owner_wait", "idle")
+# Who removes a loss: the project (its CI and rules), this plugin, the host tool
+# (GitHub) or the owner; plugin causes wait in the plugin ledger.
+STEP_OWNERS = {"define": "owner", "write": "process", "ci": "project", "review": "plugin",
+               "merge_wait": "host tool"}
+WAIT_OWNERS = {"ci_wait": "project", "review_wait": "plugin", "owner_wait": "owner",
+               "idle": "host tool"}
+WAIT_LEVERS = {
+    "ci_wait": "Cut the CI wait: run only the touched suites on the PR, cache setup, and start"
+               " the reviewer while CI runs.",
+    "review_wait": "Cut the review wait: start the reviewer as soon as the PR opens and give it"
+                   " the diff and the task only.",
+    "owner_wait": "Cut the owner wait: approve tasks from a short queue, or delegate approval of"
+                  " rigor normal tasks.",
+    "idle": "Remove idle time: no session was active while nothing waited on CI, a reviewer or"
+            " the owner; resume dropped sessions at once and keep one task per worktree.",
+}
 REVIEW_MARK = "fast-lane review: pass"
 # step -> (start, end); CI and review run side by side after the PR opens.
 STEPS = {"define": ("requested_at", "approved_at"), "write": ("approved_at", "pr_opened"),
@@ -349,6 +373,55 @@ def task_row(task: dict, pr: dict | None) -> dict:
             "checks": (pr or {}).get("checks", {})}
 
 
+def classify(times: dict, minutes: set[int], rigor: str, until: float) -> dict[str, float]:
+    """Minutes of one task by who it waited on: an active session is agent work; otherwise
+    the phase decides: before approval the owner, then idle until the PR opens, then CI
+    until green, the reviewer until it passed, and at rigor high the owner's merge."""
+    def at(key):
+        return parse_time(times[key]).timestamp() if times.get(key) else None
+    start, approved, opened = at("requested_at"), at("approved_at"), at("pr_opened")
+    green, reviewed, merged = at("ci_green"), at("review"), at("merged")
+    result = dict.fromkeys(WAITS, 0)
+    if start is None:
+        return {key: 0.0 for key in WAITS}
+    end = merged or until
+    for minute in range(int(start // 60), int(end // 60)):
+        moment = minute * 60
+        if minute in minutes:
+            kind = "agent_work"
+        elif approved is None or moment < approved:
+            kind = "owner_wait"
+        elif opened is None or moment < opened:
+            kind = "idle"
+        elif green is None or moment < green:
+            kind = "ci_wait"
+        elif reviewed is None or moment < reviewed:
+            kind = "review_wait"
+        else:
+            kind = "owner_wait" if rigor == "high" else "idle"
+        result[kind] += 1
+    return {key: float(value) for key, value in result.items()}
+
+
+def task_branch(task: dict) -> str:
+    return f"task/{Path(task.get('file', '')).stem}" if task.get("file") else ""
+
+
+def attach_sessions(rows: list[dict], tasks: list[dict], events: list[dict], deep: bool,
+                    until: float) -> None:
+    """Add each task's cost, wait split and, with --deep, its reading-waste signals."""
+    import session_cost
+    for row, task in zip(rows, tasks):
+        start = parse_time(row["requested_at"]).timestamp()
+        end = parse_time(row["merged"]).timestamp() if row.get("merged") else until
+        mine = [event for event in events
+                if session_cost.belongs(event, task_branch(task), start, end)]
+        row["cost"] = session_cost.cost(mine)
+        row["waits"] = classify(row, session_cost.active_minutes(mine), row["rigor"], until)
+        if deep:
+            row["reading"] = session_cost.reading(mine)
+
+
 def select(tasks: list[dict], delivery: str | None = None, since: str | None = None,
            recent: int | None = None, at: datetime | None = None) -> list[dict]:
     """The tasks in scope: one Delivery, a time window or the latest tasks."""
@@ -388,7 +461,39 @@ def proposals(rows: list[dict]) -> list[dict]:
         found.append({"id": f"RETRO-{step.upper().replace('_', '-')}", "step": step, "weight": median,
                       "evidence": f"{step} median {round(median, 1)} min over {len(values)}"
                                   f" tasks, max {worst[1]} min ({worst[0]})",
-                      "proposal": LEVERS[step]})
+                      "proposal": LEVERS[step], "cause_owner": STEP_OWNERS[step],
+                      "expected_gain": f"up to {round(median / 2, 1)} min per task (half the {step} median)",
+                      "verify": f"the next retrospective over at least 5 tasks shows a {step} median"
+                                f" at most {round(median / 2, 1)} min"})
+    for wait in WAITS[1:]:
+        values = [(row["task_id"], row["waits"][wait]) for row in rows
+                  if row.get("waits") and row["waits"][wait]]
+        if not values:
+            continue
+        median = statistics.median(value for _sid, value in values)
+        worst = max(values, key=lambda pair: pair[1])
+        found.append({"id": f"RETRO-WAIT-{wait.upper().replace('_', '-')}", "step": wait,
+                      "weight": median,
+                      "evidence": f"{wait} median {round(median, 1)} min over {len(values)} tasks,"
+                                  f" max {worst[1]} min ({worst[0]})",
+                      "proposal": WAIT_LEVERS[wait], "cause_owner": WAIT_OWNERS[wait],
+                      "expected_gain": f"up to {round(median, 1)} min per task",
+                      "verify": f"the next retrospective shows a {wait} median under"
+                                f" {round(median / 2, 1)} min"})
+    reads = [(row["task_id"], path, count) for row in rows
+             for path, count in (row.get("reading") or {}).get("repeated_reads", {}).items()]
+    large = sum((row.get("reading") or {}).get("results_over_200kb", 0) for row in rows)
+    if reads or large:
+        top = max(reads, key=lambda item: item[2]) if reads else None
+        found.append({"id": "RETRO-READING", "step": "reading", "weight": float(len(reads) + large),
+                      "evidence": f"{len(reads)} files read 5 or more times"
+                                  + (f", most {top[2]} times ({Path(top[1]).name}, {top[0]})" if top else "")
+                                  + f"; {large} tool results over 200 KB",
+                      "proposal": "Point roles to the section they need instead of whole files, and"
+                                  " cut tool outputs over 200 KB to a summary.",
+                      "cause_owner": "plugin", "expected_gain": "fewer tokens and shorter agent turns",
+                      "verify": "the next --deep retrospective shows no file read 5 or more times"
+                                " and no result over 200 KB"})
     checks: dict[str, list[float]] = {}
     for row in rows:
         for name, minutes in row["checks"].items():
@@ -401,21 +506,36 @@ def proposals(rows: list[dict]) -> list[dict]:
                       "evidence": f"required check '{name}' median {round(median, 1)} min,"
                                   f" max {max(values)} min over {len(values)} runs",
                       "proposal": f"Shorten check '{name}': run only what the diff touches,"
-                                  " cache its setup, or move it off the required set."})
+                                  " cache its setup, or move it off the required set.",
+                      "cause_owner": "project",
+                      "expected_gain": f"up to {round(median / 2, 1)} min per task",
+                      "verify": f"check '{name}' median at most {round(median / 2, 1)} min in the next"
+                                " retrospective"})
     open_rows = [row["task_id"] for row in rows if row["total"] is None]
     if open_rows:
         found.append({"id": "RETRO-OPEN-TASKS", "step": "open", "weight": -1.0,
                       "evidence": f"{len(open_rows)} tasks have no merge time:"
                                   f" {', '.join(open_rows[:10])}",
                       "proposal": "Finish or drop each open task; a stale pull request hides"
-                                  " the real request-to-merge time."})
+                                  " the real request-to-merge time.",
+                      "cause_owner": "process", "expected_gain": "a true request-to-merge time",
+                      "verify": "the next retrospective lists no open task older than a day"})
     found.sort(key=lambda item: -item["weight"])
     for item in found:
         item.pop("weight")
     return found[:5]
 
 
-def report(rows: list[dict], scope: str) -> dict:
+def targets(rows: list[dict], totals: list[float]) -> dict:
+    large = [row["total"] for row in rows if row["size"] == "l" and row["total"] is not None]
+    average = round(statistics.mean(totals), 1) if totals else None
+    return {"average_target": TARGETS["average"], "average": average,
+            "average_met": average is not None and average <= TARGETS["average"],
+            "large_target": TARGETS["large"], "large_max": max(large) if large else None,
+            "large_met": all(value <= TARGETS["large"] for value in large)}
+
+
+def report(rows: list[dict], scope: str, previous: dict | None = None) -> dict:
     totals = [row["total"] for row in rows if row["total"] is not None]
     slowest = sorted((row for row in rows if row["total"] is not None),
                      key=lambda row: -row["total"])[:3]
@@ -426,6 +546,7 @@ def report(rows: list[dict], scope: str) -> dict:
                          "largest_step": row["largest_step"],
                          "largest_minutes": row["steps"].get(row["largest_step"])}
                         for row in slowest],
+            "targets": targets(rows, totals), "previous": previous,
             "proposals": proposals(rows)}
 
 
@@ -442,13 +563,36 @@ def render(data: dict) -> str:
         lines.append(f"- {row['task_id']} ({row['size'] or '-'}, {row['rigor']}) PR"
                      f" {row['pr'] or '-'}: {steps}"
                      f" = {row['total'] if row['total'] is not None else 'open'}")
+    goal = data.get("targets") or {}
+    if goal and goal["average"] is not None:
+        lines.append(f"Target: average {goal['average_target']} min ({'met' if goal['average_met'] else 'missed'}),"
+                     f" large tasks at most {goal['large_target']} min (max {goal['large_max']},"
+                     f" {'met' if goal['large_met'] else 'missed'})")
+    if data.get("previous"):
+        before = data["previous"]
+        lines.append(f"Previous retrospective ({before['at']}): {before['merged']} merged, average"
+                     f" {before['average']}, median {before['median']}, max {before['max']} min")
+    waits = [row for row in data["per_task"] if row.get("waits")]
+    if waits:
+        lines += ["", "Waits (min): agent_work / ci_wait / review_wait / owner_wait / idle; cost"]
+        for row in waits:
+            spent = sum(tokens["output"] for tokens in row["cost"]["tokens_by_role"].values())
+            lines.append(f"- {row['task_id']}: " + " / ".join(str(row["waits"][key]) for key in WAITS)
+                         + f"; {row['cost']['agents']} agents, models {row['cost']['models']},"
+                         f" effort {row['cost']['efforts']}, output tokens {spent}")
+            for path, count in (row.get("reading") or {}).get("repeated_reads", {}).items():
+                lines.append(f"  - read {count} times: {path}")
+            if (row.get("reading") or {}).get("results_over_200kb"):
+                lines.append(f"  - tool results over 200 KB: {row['reading']['results_over_200kb']}")
     if data["slowest"]:
         lines += ["", "Slowest:"]
         lines += [f"- {item['task_id']}: {item['total']} min, largest step {item['largest_step']}"
                   f" ({item['largest_minutes']} min)" for item in data["slowest"]]
     if data["proposals"]:
         lines += ["", "Proposals (approve by number or id to file one issue each):"]
-        lines += [f"{number}. [{item['id']}] {item['proposal']} Evidence: {item['evidence']}"
+        lines += [f"{number}. [{item['id']}] {item['proposal']} Evidence: {item['evidence']}."
+                  f" Cause: {item['cause_owner']}. Expected gain: {item['expected_gain']}."
+                  f" Verify: {item['verify']}."
                   for number, item in enumerate(data["proposals"], 1)]
     if not data["tasks"]:
         lines.append("No task in scope.")
@@ -460,11 +604,14 @@ def export(data: dict, fmt: str) -> str:
         return json.dumps(data, indent=2) + "\n"
     buffer = io.StringIO()
     fields = ["task_id", "title", "size", "rigor", "delivery", "pr", "requested_at",
-              "approved_at", "pr_opened", "ci_green", "review", "merged", "total", *STEPS]
+              "approved_at", "pr_opened", "ci_green", "review", "merged", "total", *STEPS, *WAITS,
+              "agents", "output_tokens"]
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     for row in data["per_task"]:
-        writer.writerow({**row, **row["steps"]})
+        spent = sum(tokens["output"] for tokens in (row.get("cost") or {}).get("tokens_by_role", {}).values())
+        writer.writerow({**row, **row["steps"], **(row.get("waits") or {}),
+                         "agents": (row.get("cost") or {}).get("agents", ""), "output_tokens": spent})
     return buffer.getvalue()
 
 
@@ -476,14 +623,40 @@ def retrospective_note(data: dict, delivery: str) -> str:
             "- [[maps/delivery|Delivery]]\n")
 
 
+def previous_run(root: Path, scope: str) -> dict | None:
+    path = root / HISTORY
+    if not path.is_file():
+        return None
+    runs = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return next((item for item in reversed(runs) if item.get("scope") == scope), None)
+
+
+def remember(root: Path, data: dict) -> None:
+    """Append this run's summary, the next retrospective's comparison point (derived, git-ignored)."""
+    total = data["request_to_merge_minutes"]
+    path = root / HISTORY
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"at": now(), "scope": data["scope"], "merged": data["merged"],
+                                 "average": total["average"], "median": total["median"],
+                                 "max": total["max"]}) + "\n")
+
+
 def gather(root: Path, args) -> dict:
-    tasks = [task_props(path) for path in sorted((root / TASKS).glob("tk-*.md"))]
+    tasks = []
+    for path in sorted((root / TASKS).glob("tk-*.md")):
+        tasks.append({**task_props(path), "file": path.name})
     chosen = select(tasks, args.delivery, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
     rows = [task_row(task, pr_times(root, prs[task["id"]]["number"]) if task["id"] in prs else None)
             for task in chosen]
+    if chosen and not getattr(args, "no_sessions", False):
+        import session_cost
+        since = min(parse_time(task["requested_at"]).timestamp() for task in chosen)
+        attach_sessions(rows, chosen, session_cost.scan(root, since), getattr(args, "deep", False),
+                        datetime.now(timezone.utc).timestamp())
     scope = args.delivery or (f"since {args.since}" if args.since else f"latest {args.recent}")
-    return report(rows, scope)
+    return report(rows, scope, previous_run(root, scope))
 
 
 # --- story links and board -------------------------------------------------
@@ -725,6 +898,7 @@ def cmd_merge(args, root: Path) -> dict:
 
 def cmd_report(args, root: Path):
     data = gather(root, args)
+    remember(root, data)
     written = []
     if args.export:
         target = root / EXPORT / f"tasks.{args.export}"
@@ -751,19 +925,52 @@ def cmd_file_issues(args, root: Path) -> dict:
     unknown = [item for item in wanted if item not in by_id]
     if unknown:
         raise Refused(f"unknown proposals: {', '.join(unknown)}; run report again")
-    repo = repo_slug(root)
     total = data["request_to_merge_minutes"]
-    opened = []
+    repo = None
+    opened, commented, ledgered = [], [], []
     for proposal_id in dict.fromkeys(by_id[item]["id"] for item in wanted):
         item = by_id[proposal_id]
         body = (f"{item['proposal']}\n\nEvidence: {item['evidence']}\n\n"
+                f"Cause owner: {item['cause_owner']}. Expected gain: {item['expected_gain']}."
+                f" How to verify: {item['verify']}.\n\n"
                 f"Fast-lane retrospective ({data['scope']}): {data['merged']} merged tasks,"
                 f" request to merge average {total['average']}, median {total['median']}, max"
                 f" {total['max']} min (target {data['target_minutes']}).\n\nProposal id: {proposal_id}")
+        if item["cause_owner"] == "plugin":
+            # The plugin's own losses wait in the ledger until the owner sends them upstream.
+            ledgered.append(pending_upstream(root, proposal_id, item))
+            continue
+        repo = repo or repo_slug(root)
+        found = json.loads(run("gh", "issue", "list", "--repo", repo, "--state", "all", "--search",
+                               f'"Proposal id: {proposal_id}" in:body', "--json", "number,state,url",
+                               cwd=root) or "[]")
+        if found:
+            run("gh", "issue", "comment", str(found[0]["number"]), "--repo", repo, "--body",
+                "New evidence.\n\n" + body, cwd=root)
+            commented.append({"id": proposal_id, "url": found[0]["url"], "state": found[0]["state"]})
+            continue
         url = run("gh", "issue", "create", "--repo", repo, "--title",
                   f"Fast lane: {item['step']} - {proposal_id}", "--body", body, cwd=root)
         opened.append({"id": proposal_id, "url": url})
-    return {"ok": True, "repo": repo, "opened": opened}
+    return {"ok": True, "repo": repo, "opened": opened, "commented": commented,
+            "plugin_ledger": ledgered}
+
+
+def pending_upstream(root: Path, proposal_id: str, item: dict) -> dict:
+    """Append one plugin-caused proposal to the plugin ledger's pending upstream table, once."""
+    path = root / LEDGER
+    text = path.read_text(encoding="utf-8") if path.is_file() else "# Plugin ledger\n"
+    if PENDING_UPSTREAM not in text:
+        text = text.rstrip("\n") + (f"\n\n{PENDING_UPSTREAM}\n\n| Date | Proposal | Evidence | Expected gain"
+                                    " | Verify |\n|---|---|---|---|---|\n")
+    row = (f"| {now()[:10]} | {proposal_id}: {item['proposal']} | {item['evidence']} |"
+           f" {item['expected_gain']} | {item['verify']} |")
+    if f"| {proposal_id}: " in text.split(PENDING_UPSTREAM, 1)[1]:
+        return {"id": proposal_id, "path": str(LEDGER), "added": False}
+    head, tail = text.split(PENDING_UPSTREAM, 1)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(head + PENDING_UPSTREAM + tail.rstrip("\n") + "\n" + row + "\n", encoding="utf-8")
+    return {"id": proposal_id, "path": str(LEDGER), "added": True}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -806,12 +1013,16 @@ def main(argv: list[str] | None = None) -> int:
     retro.add_argument("--json", action="store_true")
     retro.add_argument("--export", choices=("csv", "json"))
     retro.add_argument("--write-report", action="store_true")
+    retro.add_argument("--deep", action="store_true",
+                       help="also report files read 5 or more times and tool results over 200 KB")
     issues = sub.add_parser("file-issues")
     issues.add_argument("--ids", required=True, help="comma-separated proposal numbers or ids")
     for scoped in (retro, issues):
         scoped.add_argument("--delivery")
         scoped.add_argument("--since")
         scoped.add_argument("--recent", type=int, default=20)
+        scoped.add_argument("--no-sessions", action="store_true",
+                            help="skip transcript cost and wait classification")
     args = parser.parse_args(argv)
     handlers = {"start": cmd_start, "lint": cmd_lint, "approve": cmd_approve,
                 "overlap": cmd_overlap, "open-pr": cmd_open_pr, "merge": cmd_merge,

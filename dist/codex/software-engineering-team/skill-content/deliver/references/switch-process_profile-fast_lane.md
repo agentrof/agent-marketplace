@@ -51,6 +51,21 @@ a story (source_story, covers) or stand alone.
   it never forces a Delivery's plan revision.
 - Vault, setup, configure, retrospective and autopilot entries are unchanged.
 
+## Contracts, Definition of Done and Governance
+
+- The Verification and Environment Contracts, the Definition of Done and
+  the Delivery Governance change by plain pull request; the file on the
+  target branch is in force. No revision number, `source_hash` or
+  `approved_at_utc` stamp, `constrained_by` citation or Verification to
+  Environment pairing is required, and approval never waits for a Delivery's
+  owner gates. The vault hook lets a task edit them directly.
+- The Definition of Done needs no fixed Commands, Evidence Rules or Quality
+  Gates headings.
+- Governance is optional: `governance.md` may be deleted, and without it
+  Items activate one at a time.
+- No Item, Delivery or runner pins a contract or Definition of Done hash; each
+  reads the text in force.
+
 ## Task path
 
 - A task lives under `workspace/docs/backlog/tasks/`, type `task`,

@@ -191,10 +191,10 @@
       "5b30c4906b6459555214d2bbc5fc5ce68598605fe86bbd4e9c65c2deae455bae"
     ,
     "scripts/delivery_compile.py":
-      "67d22bbfb8a4378c5cd63bc0f1fa112c06f16c816bb1e1e2eaef92829c0db80c"
+      "6fe82b7c72815ccf13a02d95f86f895b63d057ad4a4ac23ccdff3556583c76a1"
     ,
     "scripts/delivery_git.py":
-      "e7e5eb9311d6543f739a12581ae45eeea0970d96696d6344b2c1cc1a27b72dbf"
+      "a82375d15e5313a1dd1f1e9c14cd26d98940428103a0374710d158c3e937506a"
     ,
     "scripts/delivery_governance.py":
       "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
@@ -206,7 +206,7 @@
       "1ca45984c3c373674dc79e6272686847a89cd56366596c4cd3f836e3c8dc75d5"
     ,
     "scripts/delivery_verification.py":
-      "29f6a57bcd010a46432063790e11a7800a1061c6830b74abcb8370cd7e792505"
+      "443e51be1d67fe1d3bf750e72ebb6a79d35b072b210325d21a34794159074fdd"
     ,
     "scripts/design_system_compile.py":
       "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
@@ -251,13 +251,13 @@
       "6f2ab2233f9e5f8d85d06969be333fe8713294a6b9af6b6552ddf61ce5efa4bd"
     ,
     "scripts/operation_compile.py":
-      "b5440e618eebe93176c57ba7daabe5139d49c8c64786a4dc7b0a352703faf419"
+      "d125e95eea4a18ad5ac45a3c421434698a66cadfab3038f81038a93be8052190"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/process_policy.py":
-      "d562166d53c1889d6c5cf3340a3727a34e854350c9dd436ca6976dbf568fbd0c"
+      "155b3c52017cc5ab6de3767b351a9e1de483d6408eca4da17b400e9a5d97e629"
     ,
     "scripts/project_config.py":
       "3ec87e970e24b1b0e1de5837cb8907d136f99cca58ab665d523df88bdb7ce851"
@@ -283,6 +283,9 @@
     "scripts/runtime_floor.py":
       "511eaa656636b33440f7eb752c960934fc516d81deeeb06b1f009268128ce283"
     ,
+    "scripts/session_cost.py":
+      "10d61bb3885cae1ec45496de45595ef6aea80f0aef08acc0a32a25e58c0b10a6"
+    ,
     "scripts/setup_check.py":
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
@@ -299,7 +302,7 @@
       "4e4dac8ad7f01dec7f3e2d86f02746ff67297617789555d2211c3ab722b961b0"
     ,
     "scripts/task_lane.py":
-      "144e9c153ce18b37e2373ca25ab5f5a37e778f64ec23def551e3042a9a3d58ca"
+      "123718cf7209650f69b9bc2c4e8020fb4d5e025bbca7ea24d1a629b8aad86169"
     ,
     "scripts/team_guard.py":
       "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
@@ -311,7 +314,7 @@
       "5874e6fed717df6c29ad5d6888c8985690fca14ed83458b1f0e77af298e8da81"
     ,
     "scripts/vault_hook.py":
-      "f7f6b0a46d4daf1e1d0417677fa98d9b605b29f0e1e1b44398ad5df5b8984e0e"
+      "12b90877550235da4f0d72ffe200d0d01105c3857769934ecd66e44d5d530374"
     ,
     "scripts/vault_index.py":
       "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
@@ -566,7 +569,7 @@
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
     "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "f17e4e4d630b0dfea970f3277a4748c1934bedf2037ad46855cb01a8ee4ef1fd"
+      "6abc5e0ece8225ffc38cb98c1d4c6b7acd6550fb557691b7c1e247b0ee8d4cdd"
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
       "ddc02ad48cbf5b91a33557b97363f6a2dfdc83245a4e71f3109bd93e5e612b45"
@@ -860,7 +863,7 @@
       "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
     ,
     "skill-content/retrospective/SKILL.md":
-      "c3d99a01080ee205ceeddb3c329aa8d3cd7dc08ffec84d4f77fbbbe5b3b1e9c0"
+      "0fac857fd7bcb28643c67adfcae4f322b44c4c4bb73bb63fa0fdca1181f95623"
     ,
     "skill-content/setup/SKILL.md":
       "1f142fe5888849c6fc0eddfde7826782ba763ba6585f9414641ae0bee14de782"
@@ -1088,7 +1091,7 @@
       "8e41405635a3ce8d75b6eb8ea25deaeedbd1f2dee9890df928948d0447337b16"
     ,
     "skills/retrospective/SKILL.md":
-      "6e6f6825adb005f0efc00043a312e571bf30e87dc831221d0b5e110128a6ac86"
+      "432bbd7d6a482c2d660dd03cf4cb7d3717b10d4f1def04aeb9ff68e606ad48e7"
     ,
     "skills/setup/SKILL.md":
       "9e82bda800ca53c05417527211b5ebe47d4846d265be2067258449a66b0500e0"

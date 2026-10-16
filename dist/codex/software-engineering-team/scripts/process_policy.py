@@ -453,6 +453,12 @@ def process_profile(docs: Path | None, package: Path | None = None) -> str:
         return "governed"
 
 
+def fast_lane(docs: Path | None) -> bool:
+    """Whether the project runs process_profile fast_lane, where contract, Definition
+    of Done and Governance changes land by plain pull request without stamps or pins."""
+    return process_profile(docs) == "fast_lane"
+
+
 def resolved_values(rows: dict[str, str], parameters: dict[tuple[str, str], str],
                     registry: dict[str, dict]) -> dict[str, dict]:
     """Return every declared switch's value under a policy's rows and parameters."""

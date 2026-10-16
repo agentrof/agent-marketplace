@@ -152,7 +152,8 @@ every role in the foreground and no delivery coordinator: one task under
 `backlog/tasks/`, one branch and one pull request to the target branch, the
 project's CI plus one reviewer (two at task rigor `high`, where the owner
 merges), and auto-merge. The steps are in `flows/fast-lane.md` and
-`deliver/references/switch-process_profile-fast_lane.md`.
+`deliver/references/switch-process_profile-fast_lane.md`. Contracts, the Definition of Done and Governance then change by
+plain pull request, with no stamp, pairing, citation or hash pin.
 
 Process switch `pass_carry_over` keeps nothing between passes at `off`. At
 `per_item`, the runner adds every pass record the approved test or live

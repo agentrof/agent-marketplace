@@ -4103,6 +4103,11 @@ def governed_governance_hash(root: Path) -> str:
 
 def project_max_parallel(root: Path, expected_hash: str | None = None) -> int:
     receipt, errors = delivery_governance.status(root / "workspace" / "docs")
+    import process_policy
+    # At fast_lane Governance is optional: without it Items activate one at a time.
+    if (process_policy.fast_lane(root / "workspace" / "docs")
+            and any(error.startswith("missing delivery governance:") for error in errors)):
+        return 1
     if errors or not receipt.get("current"):
         raise RuntimeError("approved/current Delivery Governance is required before Item activation")
     value = receipt.get("max_parallel")

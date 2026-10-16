@@ -1275,6 +1275,18 @@ def in_autopilot_runtime(file_path: str) -> bool:
     return False
 
 
+def fast_lane_vault(file_path: str) -> bool:
+    """At process_profile fast_lane, contracts and Governance change by plain pull request."""
+    root = vault_root(file_path)
+    if root is None:
+        return False
+    try:
+        import process_policy
+        return process_policy.fast_lane(root)
+    except Exception:
+        return False  # a guard never takes the session down; the strict rule applies
+
+
 def pre_target(written: dict) -> int:
     file_path = str(written.get("file_path", ""))
     if file_path and in_autopilot_runtime(file_path):
@@ -1326,7 +1338,9 @@ def pre_target(written: dict) -> int:
                 "Design System status, revision, approval timestamp and hashes"
                 " are machine-managed; use design_system_compile.py"
             )
-    if rel.startswith("operation/") and rel.endswith(".md"):
+    plain_pull_request = ((rel.startswith("operation/") or rel == "delivery/governance/governance.md")
+                          and fast_lane_vault(file_path))
+    if rel.startswith("operation/") and rel.endswith(".md") and not plain_pull_request:
         path = Path(file_path).resolve()
         if path.is_file() and note_status(path) == "approved":
             return deny(
@@ -1339,7 +1353,7 @@ def pre_target(written: dict) -> int:
                 "Operation contract lifecycle fields are compiler-owned;"
                 " use operation_compile.py"
             )
-    if rel == "delivery/governance/governance.md":
+    if rel == "delivery/governance/governance.md" and not plain_pull_request:
         path = Path(file_path).resolve()
         if path.is_file() and note_status(path) == "approved":
             return deny(

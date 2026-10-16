@@ -19,6 +19,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 TEAM = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(TEAM / "scripts"))
+sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
 import architecture_compile  # noqa: E402
 import process_policy  # noqa: E402
@@ -280,7 +281,7 @@ class GitHubCommandTests(unittest.TestCase):
                 return "https://github.com/acme/shop/issues/1"
             return ""
 
-        args = SimpleNamespace(ids="1", delivery=None, since=None, recent=20)
+        args = SimpleNamespace(ids="1", delivery=None, since=None, recent=20, no_sessions=True)
         with mock.patch.object(task_lane, "run", side_effect=fake):
             result = task_lane.cmd_file_issues(args, root)
             with self.assertRaises(task_lane.Refused):
@@ -420,6 +421,239 @@ class TaskLinkTests(unittest.TestCase):
             self.assertEqual(policy["property_types"][key], kind)
         self.assertEqual(policy["type_path_patterns"]["task"],
                          ["^backlog/tasks/tk-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"])
+
+
+class FastLaneContractTests(unittest.TestCase):
+    """At fast_lane, contracts, the DoD and Governance change by plain pull request."""
+
+    def project(self, fast: bool) -> Path:
+        docs = Path(tempfile.mkdtemp()) / "workspace" / "docs"
+        self.addCleanup(lambda: __import__("shutil").rmtree(docs.parent.parent))
+        (docs / "delivery").mkdir(parents=True)
+        if fast:
+            run_policy(docs, "init")
+            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
+            run_policy(docs, "approve")
+        return docs
+
+    def edited_contract(self, docs: Path) -> None:
+        """A contract a pull request edited to approved, with no stamp, citation or revision."""
+        import operation_compile
+        with contextlib.redirect_stdout(io.StringIO()):
+            operation_compile.main(["init", "--docs", str(docs), "--kind", "verification"])
+        path = operation_compile.contract_path(docs, "verification")
+        props, body = operation_compile.parse(path)
+        props.update(status="approved", test_command="make test")
+        props.pop("revision")
+        path.write_text(operation_compile.render(props, body), encoding="utf-8")
+
+    def test_a_plain_pull_request_contract_is_in_force(self):
+        import operation_compile
+        for fast in (True, False):
+            docs = self.project(fast)
+            self.edited_contract(docs)
+            value, errors = operation_compile.check_contract(docs, "verification")
+            with self.subTest(fast=fast):
+                if fast:
+                    self.assertEqual(errors, [])
+                    self.assertTrue(value["current"])
+                    self.assertNotIn("paired_environment", value)
+                    self.assertEqual(operation_compile.pairing_findings(docs, value), [])
+                else:
+                    self.assertIn("approved contract source_hash is stale", errors)
+                    self.assertIn("revision must be a positive integer", errors)
+                    self.assertIn("approved contract must cite at least one accepted Solution decision"
+                                  " in constrained_by", errors)
+                props, body = operation_compile.parse(operation_compile.contract_path(docs, "verification"))
+                self.assertEqual(operation_compile.contract_in_force(docs, props, body), fast)
+
+    def test_between_gates_never_refuses_a_shared_document_in_the_fast_lane(self):
+        import delivery_compile
+        docs = self.project(True)
+        with mock.patch.object(delivery_compile, "delivery_dirs", side_effect=AssertionError("read")):
+            self.assertEqual(delivery_compile.between_gates_refusals(docs, "Verification Contract revision 2"), [])
+
+    def test_the_dod_needs_no_fixed_headings_or_stamp(self):
+        import delivery_compile
+        text = ("---\ntype: definition-of-done\nid: DOD\nstatus: approved\n---\n# Definition of Done\n\n"
+                "Tests pass in CI.\n\n<!-- sec: nav -->\n## Navigation\n\n- [[maps/delivery|Delivery]]\n")
+        for fast in (True, False):
+            docs = self.project(fast)
+            path = docs / "delivery" / "definition-of-done.md"
+            path.write_text(text, encoding="utf-8")
+            errors = delivery_compile.check_dod(path)
+            with self.subTest(fast=fast):
+                if fast:
+                    self.assertEqual(errors, [])
+                    snapshot, snapshot_errors = delivery_compile.approved_dod_source(docs)
+                    self.assertEqual(snapshot_errors, [])
+                    self.assertTrue(snapshot["definition_of_done_source_hash"].startswith("sha256:"))
+                else:
+                    self.assertIn("DoD missing sections: Commands, Evidence Rules, Quality Gates", errors)
+                    self.assertIn("approved DoD source_hash is stale", errors)
+
+    def test_item_contract_bindings_follow_the_contract_in_force(self):
+        import delivery_compile
+        docs = self.project(True)
+        self.edited_contract(docs)
+        stale = {"runtime_required": False, "verification_contract_ref": "operation/verification-contract",
+                 "verification_contract_hash": "sha256:old"}
+        self.assertEqual(delivery_compile.item_operation_findings(docs, stale), [])
+
+    def test_governance_is_optional_for_activation(self):
+        import delivery_git
+        docs = self.project(True)
+        self.assertEqual(delivery_git.project_max_parallel(docs.parent.parent, "none"), 1)
+        with self.assertRaises(RuntimeError):
+            delivery_git.project_max_parallel(self.project(False).parent.parent, "none")
+
+    def test_the_hook_lets_a_plain_pull_request_edit_contracts_and_governance(self):
+        sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
+        import vault_hook
+        for fast in (True, False):
+            docs = self.project(fast)
+            self.edited_contract(docs)
+            for rel in ("operation/verification-contract.md", "delivery/governance/governance.md"):
+                target = docs / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if not target.exists():
+                    target.write_text("---\ntype: delivery-governance\nstatus: approved\n---\n# G\n",
+                                      encoding="utf-8")
+                with self.subTest(fast=fast, rel=rel), contextlib.redirect_stdout(io.StringIO()), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    code = vault_hook.pre_target({"file_path": str(target), "old_string": "a",
+                                                  "new_string": "b"})
+                    self.assertEqual(code == 0, fast)
+
+
+class RetrospectiveCostTests(unittest.TestCase):
+    """Cost per task from transcripts, waits with an owner, reading waste, targets and history."""
+
+    def stamp(self, minute: int) -> str:
+        return f"2026-10-16T10:{minute:02d}:00+00:00"
+
+    def test_minutes_split_by_who_the_task_waited_on(self):
+        times = {"requested_at": self.stamp(0), "approved_at": self.stamp(3), "pr_opened": self.stamp(10),
+                 "ci_green": self.stamp(16), "review": self.stamp(18), "merged": self.stamp(20)}
+        base = int(datetime(2026, 10, 16, 10, tzinfo=timezone.utc).timestamp() // 60)
+        active = {base + minute for minute in (0, 1, 4, 5, 6, 7, 8, 9, 11)}
+        waits = task_lane.classify(times, active, "normal", 0)
+        self.assertEqual(waits, {"agent_work": 9.0, "ci_wait": 5.0, "review_wait": 2.0, "owner_wait": 1.0,
+                                 "idle": 3.0})
+        self.assertEqual(sum(waits.values()), 20.0)
+        high = task_lane.classify(times, active, "high", 0)
+        self.assertEqual((high["owner_wait"], high["idle"]), (3.0, 1.0))
+
+    def transcripts(self) -> tuple[Path, Path]:
+        home = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(home))
+        project = home / "work" / "shop"
+        project.mkdir(parents=True)
+        folder = home / "claude" / str(project.resolve()).replace("/", "-")
+        (folder / "s1" / "subagents").mkdir(parents=True)
+        def record(minute, kind, branch="task/tk-004-export", **extra):
+            return json.dumps({"type": kind, "timestamp": f"2026-10-16T10:{minute:02d}:00Z",
+                               "gitBranch": branch, **extra})
+        main = [record(1, "user", message={"content": "go"}),
+                record(2, "assistant", message={"id": "m1", "model": "claude-opus-5-5", "content": [
+                    {"type": "tool_use", "name": "Read", "input": {"file_path": "/x/big.md"}}],
+                    "usage": {"input_tokens": 10, "output_tokens": 5}}, effort="high"),
+                record(2, "assistant", message={"id": "m1", "model": "claude-opus-5-5", "content": [],
+                    "usage": {"input_tokens": 10, "output_tokens": 40}}, effort="high"),
+                record(3, "user", message={"content": [{"type": "tool_result", "content": "x" * 300000}]}),
+                record(4, "assistant", branch="task/tk-009-other",
+                       message={"id": "m2", "model": "claude-opus-5-5", "content": [],
+                                "usage": {"output_tokens": 7}})]
+        main += [record(5, "assistant", message={"id": f"r{n}", "model": "claude-opus-5-5", "content": [
+                    {"type": "tool_use", "name": "Read", "input": {"file_path": "/x/big.md"}}],
+                    "usage": {"output_tokens": 1}}) for n in range(4)]
+        (folder / "s1.jsonl").write_text("\n".join(main) + "\n", encoding="utf-8")
+        (folder / "s1" / "subagents" / "agent-a1.jsonl").write_text(
+            record(6, "assistant", message={"id": "a1", "model": "claude-sonnet-5", "content": [],
+                                            "usage": {"output_tokens": 100}}) + "\n", encoding="utf-8")
+        (folder / "s1" / "subagents" / "agent-a1.meta.json").write_text(
+            json.dumps({"agentType": "software-engineering-team:backend-developer"}), encoding="utf-8")
+        return home, project
+
+    def test_cost_and_reading_waste_come_from_the_task_branch(self):
+        import session_cost
+        home, project = self.transcripts()
+        events = session_cost.scan(project, 0, home / "claude", home / "codex")
+        mine = [event for event in events if session_cost.belongs(event, "task/tk-004-export", 0, 1e12)]
+        cost = session_cost.cost(mine)
+        self.assertEqual(cost["agents"], 1)
+        self.assertEqual(cost["models"], {"claude-opus-5-5": 5, "claude-sonnet-5": 1})
+        self.assertEqual(cost["tokens_by_role"]["main"]["output"], 44)
+        self.assertEqual(cost["tokens_by_role"]["backend-developer"]["output"], 100)
+        reading = session_cost.reading(mine)
+        self.assertEqual(reading, {"repeated_reads": {"/x/big.md": 5}, "results_over_200kb": 1})
+
+    def test_every_proposal_names_evidence_owner_gain_and_check(self):
+        row = task_lane.task_row(RetrospectiveTests.task, pr("2026-10-16T10:10:00Z", "2026-10-16T10:30:00Z",
+                                                             "2026-10-16T10:12:00Z", "2026-10-16T10:31:00Z"))
+        row["waits"] = {"agent_work": 10.0, "ci_wait": 15.0, "review_wait": 0.0, "owner_wait": 3.0, "idle": 3.0}
+        row["reading"] = {"repeated_reads": {"/x/big.md": 6}, "results_over_200kb": 2}
+        found = task_lane.proposals([row])
+        self.assertLessEqual(len(found), 5)
+        for item in found:
+            for key in ("evidence", "cause_owner", "expected_gain", "verify", "proposal"):
+                self.assertTrue(item[key], (item["id"], key))
+        owners = {item["id"]: item["cause_owner"] for item in task_lane.proposals([row])}
+        self.assertEqual(owners.get("RETRO-WAIT-CI-WAIT"), "project")
+
+    def test_targets_and_the_previous_run_are_compared(self):
+        rows = [task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001", "size": "l"},
+                                   pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T11:00:00Z")),
+                task_lane.task_row({**RetrospectiveTests.task, "id": "TK-002"},
+                                   pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:10:00Z"))]
+        goal = task_lane.targets(rows, [row["total"] for row in rows])
+        self.assertEqual((goal["average"], goal["average_met"]), (35.0, False))
+        self.assertEqual((goal["large_max"], goal["large_met"]), (60.0, False))
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        data = task_lane.report(rows, "latest 20")
+        self.assertIsNone(task_lane.previous_run(root, "latest 20"))
+        task_lane.remember(root, data)
+        before = task_lane.previous_run(root, "latest 20")
+        self.assertEqual((before["average"], before["merged"]), (35.0, 2))
+        text = task_lane.render(task_lane.report(rows, "latest 20", before))
+        self.assertIn("Target: average 15 min (missed), large tasks at most 50 min (max 60.0, missed)", text)
+        self.assertIn("Previous retrospective", text)
+
+    def test_plugin_causes_go_to_the_ledger_and_known_issues_get_a_comment(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        data = {"scope": "latest 20", "merged": 1, "target_minutes": 15,
+                "request_to_merge_minutes": {"average": 30, "median": 30, "max": 30},
+                "proposals": [{"id": "RETRO-REVIEW", "step": "review", "proposal": "p", "evidence": "e",
+                               "cause_owner": "plugin", "expected_gain": "g", "verify": "v"},
+                              {"id": "RETRO-CI", "step": "ci", "proposal": "p", "evidence": "e",
+                               "cause_owner": "project", "expected_gain": "g", "verify": "v"},
+                              {"id": "RETRO-WRITE", "step": "write", "proposal": "p", "evidence": "e",
+                               "cause_owner": "process", "expected_gain": "g", "verify": "v"}]}
+        calls = []
+
+        def fake(*args, **_kwargs):
+            calls.append(args)
+            if args[:3] == ("git", "remote", "get-url"):
+                return "https://github.com/acme/shop.git"
+            if args[:3] == ("gh", "issue", "list"):
+                return json.dumps([{"number": 7, "state": "CLOSED", "url": "u7"}]) \
+                    if "RETRO-CI" in " ".join(args) else "[]"
+            return "https://github.com/acme/shop/issues/8"
+
+        args = SimpleNamespace(ids="1,2,3", delivery=None, since=None, recent=20, no_sessions=True)
+        with mock.patch.object(task_lane, "gather", return_value=data), \
+                mock.patch.object(task_lane, "run", side_effect=fake):
+            result = task_lane.cmd_file_issues(args, root)
+            again = task_lane.cmd_file_issues(SimpleNamespace(**{**vars(args), "ids": "1"}), root)
+        self.assertEqual([item["id"] for item in result["plugin_ledger"]], ["RETRO-REVIEW"])
+        self.assertFalse(again["plugin_ledger"][0]["added"])
+        ledger = (root / task_lane.LEDGER).read_text(encoding="utf-8")
+        self.assertEqual(ledger.count("| RETRO-REVIEW: "), 1)
+        self.assertEqual(result["commented"], [{"id": "RETRO-CI", "url": "u7", "state": "CLOSED"}])
+        self.assertEqual([item["id"] for item in result["opened"]], ["RETRO-WRITE"])
+        self.assertFalse(any("RETRO-REVIEW" in " ".join(call) for call in calls if call[:2] == ("gh", "issue")))
 
 
 class GovernedRenameTests(unittest.TestCase):

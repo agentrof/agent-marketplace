@@ -799,6 +799,9 @@ class RetrospectiveDollarTests(unittest.TestCase):
                           self.call(40, "d1", output_tokens=100)], description="Developer")
         self.agent("d2", [self.record(9, "user", message={"content": "Compare TK-001 with TK-002."}),
                           self.call(10, "d2", output_tokens=200)])
+        # Started on the base branch; the checkout switched to a task branch under it.
+        self.agent("d3", [self.record(11, "user", message={"content": "Research."}),
+                          self.call(46, "d3", branch="task/tk-002-b", output_tokens=1000)])
         tasks = [{**RetrospectiveTests.task, "id": "TK-001", "file": "tk-001-a.md"},
                  {**RetrospectiveTests.task, "id": "TK-002", "file": "tk-002-b.md",
                   "requested_at": "2026-10-16T10:03:00+00:00"}]
@@ -807,7 +810,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         rest = task_lane.attach_sessions(rows, tasks, self.scan(), False, 1e12, self.prices)
         # d2 names two tasks: other work, unattributed, never split into a task's startup context.
         self.assertEqual([row["cost"]["tokens"]["output"] for row in rows], [105, 425])
-        self.assertEqual(rest["tokens"]["output"], 240)
+        self.assertEqual(rest["tokens"]["output"], 1240)
         self.assertEqual(rows[0]["cost"]["main"]["tokens"]["output"], 5)
         self.assertEqual(len(rows[0]["cost"]["spawns"]), 1)
         # Every scanned token lands exactly once: tasks plus the unattributed rest equal the scan.

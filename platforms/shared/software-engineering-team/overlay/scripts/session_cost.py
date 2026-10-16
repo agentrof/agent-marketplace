@@ -110,15 +110,17 @@ def result_size(content) -> int:
 
 
 def claude_events(path: Path, role: str, purpose: str = "") -> list[dict]:
-    events, calls, task = [], {}, ""
+    events, calls, task, started = [], {}, "", None
     if role != "main":
         first = next((record for record in records(path) if record.get("type") == "user"), {})
         task = task_hint(purpose, text_of((first.get("message") or {}).get("content")))
+        # A subagent keeps the branch it started on: a later checkout switch under it is not its task.
+        started = next((record["gitBranch"] for record in records(path) if record.get("gitBranch")), "")
     for record in records(path):
         at = epoch(record.get("timestamp"))
         if at is None:
             continue
-        branch = record.get("gitBranch") or ""
+        branch = (record.get("gitBranch") or "") if started is None else started
         message = record.get("message") if isinstance(record.get("message"), dict) else {}
         base = {"at": at, "branch": branch, "role": role, "lane": f"claude:{path.stem}", "task": task,
                 "purpose": purpose}

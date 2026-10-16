@@ -1,0 +1,6 @@
+{
+  "summary": "Let an autopilot grant that allows phase_start run the next entry once the owning compiler reads the prior phase closed.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

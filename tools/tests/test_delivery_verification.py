@@ -2867,6 +2867,16 @@ class HostGuardTests(unittest.TestCase):
             with self.subTest(props=props):
                 self.assertEqual(len(problems(props)), 1)
 
+    def test_a_passing_run_records_its_interruptions_as_advisory_only(self):
+        self.assertEqual(verification.live_interruptions(self.root, "live_test:smoke", 0), {})
+        self.progress.write_text(json.dumps({"interruptions": [
+            {"kind": "network_loss"}, {"kind": "host_sleep"}, {"kind": "other"}, "bad"]}), encoding="utf-8")
+        seen = ["host_sleep", "network_loss"]
+        self.assertEqual(verification.live_interruptions(self.root, "live_test:smoke", 0),
+                         {"interruptions_seen": seen})
+        self.assertEqual(verification.live_interruptions(self.root, "live_test:smoke", 1),
+                         {"interruptions_seen": seen, "interrupted_by": seen})
+
     def test_an_interrupted_failed_run_is_resumable_and_a_plain_failure_is_not(self):
         checkpoint = {"schema_version": 1, "failure": "infrastructure_preflight", "preflight": "registry",
                       "failed_cases": 0, "started_cases_in_phase": 0, "completed_phases": {},

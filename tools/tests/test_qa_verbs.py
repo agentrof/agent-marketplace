@@ -107,10 +107,16 @@ class QaVerbIntegrationTests(unittest.TestCase):
         self.freeze()
         events = []
         for verb, value in (("down", None), ("recorded_results", None), ("up", None), ("seed", "baseline"),
-                            ("recorded_results", None), ("logs", None), ("down", None)):
+                            ("recorded_results", None), ("logs", None), ("down", None), ("recorded_results", None)):
             event = verification.run_environment(self.root, verb, value)
             self.assertEqual((event["exit_code"], event["candidate_intact"]), (0, True))
             events.append(event)
+            session = verification.read_session(self.root)
+            if verb == "up":
+                self.assertTrue(session["runtime"]["cleanup_required"])
+            if verb == "recorded_results" and len(events) in {2, 8}:
+                # A QA verb run after down owes no further teardown.
+                self.assertFalse(verification.runtime_needs_cleanup(session))
         declared = events[1]
         self.assertEqual(declared["command"], reader)
         self.assertEqual(declared["output"].strip(), "recorded results")

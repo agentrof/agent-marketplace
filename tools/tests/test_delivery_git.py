@@ -7601,6 +7601,22 @@ class DeliveryGitDecisionTests(unittest.TestCase):
                     delivery_git.require_carried_control_paths(
                         [f"{DECISION_PACKAGE}/{path}", DECISION_ITEM], DECISION_ITEM, lambda _path: False)
 
+    def test_item_publication_accepts_a_rendered_relation_block_beside_the_architecture_stamp(self):
+        """render-relations may rewrite an active Item record's generated relation block during an
+        architect pass; the stamped record still passes, while an authored change beside it does not."""
+        block = (vault_check.RELATION_START + "\n\n- Reviewed by: [[delivery/items/auth-01/code-review|Code review]]\n"
+                 "- Verified by: [[delivery/items/auth-01/verification|Verification]]\n\n" + vault_check.RELATION_END)
+        rendered = vault_check.replace_relation_block(DECISION_BODY, block)
+        self.assertIn(vault_check.RELATION_START, rendered)
+        before = self.item_note(stamp=None)
+        self.assertIsNone(delivery_git.require_item_controls(before, self.item_note(body=rendered)))
+        republished = self.item_note(stamp=None, body=DECISION_BODY, integration_base_commit="b" * 40)
+        converged = self.item_note(body=rendered, integration_base_commit="c" * 40)
+        self.assertIsNone(delivery_git.require_item_controls(before, converged, republished))
+        tampered = self.item_note(body=vault_check.replace_relation_block(DECISION_BODY + "\nUnapproved change.\n", block))
+        with self.assertRaisesRegex(RuntimeError, "beyond its Architecture stamp$"):
+            delivery_git.require_item_controls(before, tampered)
+
     def test_item_publication_refuses_what_a_converged_item_record_does_not_carry(self):
         """A converged Item record holds the plan-owned fields and body of the Integration commit it
         took and keeps its own lifecycle and stamp; a control path it changed must be that commit's."""
@@ -7941,6 +7957,35 @@ class DeliveryGitDecisionTests(unittest.TestCase):
             "DELIVERY_PLAN_SUPERSEDED",
             f"the Integration holds execution plan {published['plan_hash']} and no Verification Contract, which this "
             f"checkout's approval of execution plan sha256:{'1' * 64} does not supersede; {remedy}"))
+
+    def test_publication_accepts_a_contract_only_re_paired_at_the_same_revision(self):
+        """re-pair after an Environment approval keeps the Verification revision and restamps only
+        its pairing and source_hash, so publication takes it; any other same-revision change, or a
+        pairing that is not later, is still a different approval."""
+        contract = "workspace/docs/operation/verification-contract.md"
+        kinds = {contract: "verification"}
+        plan = {"plan_hash": "sha256:" + "2" * 64, "source_hash": "sha256:" + "b" * 64}
+        held = {"status": "approved", "revision": 2, "source_hash": "sha256:" + "c" * 64, "title": "Verification",
+                "paired_environment_revision": 3, "paired_environment_source_hash": "sha256:" + "5" * 64}
+        re_paired = {**held, "source_hash": "sha256:" + "d" * 64,
+                     "paired_environment_revision": 4, "paired_environment_source_hash": "sha256:" + "6" * 64}
+        self.assertIsNone(delivery_git.require_unsuperseded_approval(
+            kinds, plan, {"plan_hash": plan["plan_hash"]}, {contract: held}, {contract: re_paired}.get))
+        message = (f"the Integration holds execution plan {plan['plan_hash']} and the Verification Contract approved "
+                   f"at revision 2, which this checkout would replace with a different approved revision 2; "
+                   f"{DeliveryGitTests.SUPERSEDED_REMEDY}")
+        for label, local in (
+            ("another field", {**re_paired, "title": "Changed"}),
+            ("an added field", {**re_paired, "owner": "someone"}),
+            ("same pairing", {**re_paired, "paired_environment_revision": 3}),
+            ("lower pairing", {**re_paired, "paired_environment_revision": 2}),
+            ("no pairing", {key: value for key, value in re_paired.items()
+                            if key != "paired_environment_revision"}),
+        ):
+            with self.subTest(refused=label):
+                self.assertEqual(self.refused_finding(lambda: delivery_git.require_unsuperseded_approval(
+                    kinds, plan, {"plan_hash": plan["plan_hash"]}, {contract: held}, {contract: local}.get)),
+                    ("DELIVERY_PLAN_SUPERSEDED", message))
 
 
 # Changing an environment or any setup callable cannot silently reuse a seed

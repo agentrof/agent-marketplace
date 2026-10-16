@@ -521,9 +521,11 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn("decision [approval_gate, merge] Approve gate B and merge?",
                       self.p.run_verb("report")[1])
         self.p.run_verb("on", "--allow", "phase_start")
+        self.p.delivery("scope_approved")
         code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--class",
                                           "phase_start", "--question", "Approve gate A?",
-                                          "--choice", "Approve", "--reason", "r", "--target", "t")
+                                          "--choice", "Approve", "--reason", "r", "--target", "t",
+                                          "--entry", "execution-plan", "--after", "delivery:DLV-001")
         self.assertEqual(code, 0, err)
 
     def test_off_revokes_the_grant_prints_the_report_and_check_is_inactive(self):
@@ -1547,6 +1549,60 @@ class DecisionLogTests(unittest.TestCase):
             self.assertIn(rule, section)
 
 
+class PhaseStartTests(unittest.TestCase):
+    """A phase_start decision runs the next entry only under a grant that allows it, after the
+    prior phase's owning compiler reads it closed."""
+
+    def setUp(self) -> None:
+        self.p = Project(self)
+
+    def start(self, entry: str, after: str) -> tuple[int, str, str]:
+        return self.p.run_verb("record", "--class", "phase_start", "--question",
+                               f"Start {entry}?", "--choice", "Start", "--reason",
+                               "the prior phase closed", "--target", "Delivery decisions",
+                               "--entry", entry, "--after", after)
+
+    def test_phase_start_is_refused_without_the_class(self):
+        self.p.delivery("scope_approved")
+        self.p.run_verb("on")
+        code, _out, err = self.start("execution-plan", "delivery:DLV-001")
+        self.assertEqual(code, 1)
+        self.assertIn("class 'phase_start' is not allowed by grant", err)
+        self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
+
+    def test_phase_start_is_recorded_with_the_state_it_read_once_the_prior_phase_closed(self):
+        self.p.delivery("execution_approved")
+        self.p.run_verb("on", "--allow", "phase_start")
+        code, _out, err = self.start("deliver", "delivery:DLV-001")
+        self.assertEqual(code, 0, err)
+        event = self.p.events()[-1]
+        self.assertEqual((event["classes"], event["entry"], event["after"], event["after_state"]),
+                         (["phase_start"], "deliver", "delivery:DLV-001", "execution_approved"))
+        self.p.requirement("approved")
+        code, _out, err = self.start("backlog-plan", "requirement:REQ-001")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.p.events()[-1]["after_state"], "approved")
+
+    def test_phase_start_is_refused_while_the_prior_phase_is_open(self):
+        self.p.run_verb("on", "--allow", "phase_start")
+        self.p.delivery("scope_proposed")
+        self.p.requirement("draft")
+        cases = ((("execution-plan", "delivery:DLV-001"),
+                  "execution-plan starts only after delivery DLV-001 reads scope_approved;"
+                  " it reads scope_proposed"),
+                 (("backlog-plan", "requirement:REQ-001"),
+                  "backlog-plan starts only after requirement REQ-001 reads approved; it reads draft"),
+                 (("delivery-plan", "delivery:DLV-009"), "finds no Delivery DLV-009"),
+                 (("deliver", "requirement:REQ-001"), "deliver needs --after <kind>:<id> with kind delivery"),
+                 (("requirement", "requirement:REQ-001"), "phase_start needs --entry, one of:"))
+        for (entry, after), fragment in cases:
+            with self.subTest(entry=entry, after=after):
+                code, _out, err = self.start(entry, after)
+                self.assertEqual(code, 1)
+                self.assertIn(fragment, err)
+        self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
+
+
 class ValidatorTests(unittest.TestCase):
     """tools/validate.py rejects every malformed autopilot policy."""
 
@@ -1602,6 +1658,13 @@ class ValidatorTests(unittest.TestCase):
             (lambda value: value["classes"][1].pop("description"),
              "every class holds exactly an id, a description and a default"),
             (lambda value: value.update(schema_version=2), "with schema_version 1"),
+            (duplicate("phase_starts"), "duplicate phase start 'backlog-plan'"),
+            (lambda value: value["phase_starts"][0]["after"].update(text=["done"]),
+             "phase start 'backlog-plan' names 'text', which is no readable goal kind"),
+            (lambda value: value["phase_starts"][0]["after"].update(requirement=[]),
+             "phase start 'backlog-plan' declares no distinct ready statuses after 'requirement'"),
+            (lambda value: value["phase_starts"][0].pop("after"),
+             "every phase start holds exactly an entry and a nonempty after"),
         )
         for mutate, fragment in cases:
             with self.subTest(fragment=fragment):

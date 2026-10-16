@@ -509,6 +509,21 @@ def check_minutes(checks: list[dict]) -> dict[str, float]:
     return durations
 
 
+PROOF_SECTION_RE = re.compile(r"^## Local proof\n\nEvery check passed on HEAD `[0-9a-f]+` with a clean tree,"
+                              r" finished (\S+?)\.\n\n\| Command \| Result \| Seconds \|\n\|---\|---\|---\|\n"
+                              r"((?:\| `[^\n]*` \| pass \| [0-9.]+ \|\n?)+)", re.MULTILINE)
+
+
+def local_proof(body: str) -> dict | None:
+    """The local proof ``open-pr`` wrote into the PR body: when it finished and its minutes; None
+    when the body holds none."""
+    match = PROOF_SECTION_RE.search(body or "")
+    if not match:
+        return None
+    seconds = [float(row.rsplit("|", 2)[1]) for row in match.group(2).strip().splitlines()]
+    return {"finished": match.group(1), "minutes": round(sum(seconds) / 60, 1)}
+
+
 def review_at(comments: list[dict]) -> str | None:
     times = [comment["createdAt"] for comment in comments
              if REVIEW_MARK in (comment.get("body") or "") and comment.get("createdAt")]
@@ -568,11 +583,15 @@ def pr_times(root: Path, number, runs: bool = True, causes: dict | None = None) 
     """Times, check minutes and quality of one pull request; ``runs`` adds the CI first pass and
     the red runs' causes, read from at most ``ci_logs.max_calls_per_task`` failed logs."""
     data = json.loads(run("gh", "pr", "view", str(number), "--json",
-                          "createdAt,mergedAt,statusCheckRollup,comments,headRefName,commits", cwd=root))
+                          "createdAt,mergedAt,statusCheckRollup,comments,headRefName,commits,body", cwd=root))
     checks = data.get("statusCheckRollup") or []
     comments = data.get("comments") or []
+    # At pr_proof local_record no CI runs: the PR opens on a passed local proof, so it is green
+    # when it opens and its CI step is the proof's own minutes.
+    proof = None if checks else local_proof(data.get("body") or "")
     result = {"pr": str(number), "pr_opened": data.get("createdAt"),
-              "ci_green": ci_green_at(checks), "review": review_at(comments),
+              "ci_green": data.get("createdAt") if proof else ci_green_at(checks), "review": review_at(comments),
+              **({"proof_minutes": proof["minutes"]} if proof else {}),
               "merged": data.get("mergedAt"), "checks": check_minutes(checks), **findings(comments),
               "review_note": next((scrub(FINDINGS_RE.sub("", body.replace(REVIEW_MARK, "")), 240)
                                    for comment in reversed(comments)
@@ -690,6 +709,8 @@ def task_row(task: dict, pr: dict | None) -> dict:
     times = {"requested_at": task.get("requested_at"), "approved_at": task.get("approved_at"),
              **{key: (pr or {}).get(key) for key in ("pr_opened", "ci_green", "review", "merged")}}
     steps = {step: minutes_between(times, start, end) for step, (start, end) in STEPS.items()}
+    if (pr or {}).get("proof_minutes") is not None:
+        steps["ci"] = pr["proof_minutes"]
     known = {step: value for step, value in steps.items() if value is not None}
     return {"task_id": task["id"], "title": task.get("title", ""), "size": task.get("size", ""),
             "rigor": task.get("rigor", "normal"), "delivery": task.get("delivery", ""),

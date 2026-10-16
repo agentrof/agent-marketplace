@@ -37,7 +37,7 @@ panel beside its reader, whose merge step registers that one result.
 
 The writer side of those backlog, Solution Design and Operation contract
 reviews runs as process switch `mechanical_pass_tier` selects. `role_tier`,
-the default, keeps every writer pass on its role's own tier. `mechanical`,
+the default, keeps every writer pass on its role's own class. `mechanical`,
 defined in
 `challenge-review/references/switch-mechanical_pass_tier-mechanical.md`,
 gives a pass whose findings each name their exact fix to the owning writer's
@@ -61,7 +61,7 @@ its dependency context. Before a critical or major claim gates, one fresh,
 read-only calibration reader, neither the writer nor the claiming reader,
 confirms it, lowers it to minor or rules it invalid, citing the text. It runs
 as the claiming reviewer's role, or for an Operation contract or bundle claim
-the counterpart of the contract it concerns, on that role's own tier, never as
+the counterpart of the contract it concerns, on that role's own class, never as
 a `-lens` or a `-mechanical` variant. In Delivery code review it registers its
 rulings as a result of its
 own, and `delivery_verification.py result` refuses rulings that the claiming
@@ -96,7 +96,7 @@ lens assignment of `code-review/data/code-review-panel.json` reads the same
 candidate and inputs in parallel with the official reviewer, which reviews as
 before, and every reader registers its result through
 `delivery_verification.py panel-result`. One fresh code reviewer on its own
-tier then calibrates every critical or major panel claim, confirming it,
+class then calibrates every critical or major panel claim, confirming it,
 lowering it to minor, ruling it invalid or ruling it a duplicate of a finding
 that already carries the defect, and at `review_loop` `blocking_delta` the
 official claims too. `merge-panel` registers the one code review result the
@@ -507,7 +507,7 @@ scratch clone and no delegated lane switches the main checkout's branch, as
 
 Whether a technical Requirement is fact-checked before its approval is process
 switch `requirement_fact_check`. At `off`, the default, only the compiler checks
-it. At `pre_approval_reader`, one read-only low-tier reader checks its outcome
+it. At `pre_approval_reader`, one read-only `routine_review` reader checks its outcome
 sentences against the files they cite and returns contradictions only, which
 the coordinator fixes before the owner sees the draft, as
 `requirement/references/switch-requirement_fact_check-pre_approval_reader.md`

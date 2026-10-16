@@ -444,13 +444,13 @@ DRIFT_REPORT
    had no catalog: `--subset` checks only the named hosts, and the unchecked
    ones are named on stderr and in the issue.
 3. On drift, `--issue-body` renders the upstream issue: the finding in plain
-   words, the bump diff of the catalog and of every tier that names the moved
+   words, the bump diff of the catalog and of every class slot that names the moved
    model, the frozen-task A/B and the approval steps. The maintainer files
    it. A pinned model that is gone without a successor waits for the owner's
    decision instead of a bump.
 4. Flow A turns the issue into the pull request: the catalog change, keyed by
    each new ID with its efforts, `min_cli_version` and sources confirmed on
-   the official pages, every `execution-profiles.json` tier on the old ID
+   the official pages, every `execution-profiles.json` slot on the old ID
    moved to the new one, `tools/data/host-cli-versions.json` raised to any
    newer minimum, the regenerated `dist/`, a `minor` changeset and the A/B
    results. Quality on the frozen tasks decides the bump; speed is reported

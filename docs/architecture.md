@@ -130,7 +130,7 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     `tools/build_distributions.py`.
 19. Every host is discovered through `platforms/<host>/adapter.json` and its
     adapter module. Host-specific path names, manifests, permissions, hooks,
-    the pinned model catalog and the per-tier model and effort profiles,
+    the pinned model catalog and the per-class model and effort profiles,
     and runtime behavior remain in that platform directory;
     central tooling
     only orchestrates registry discovery, canonical copying, provenance, and
@@ -142,9 +142,10 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     datastore choices belong to accepted Solution decisions, commands belong
     to Operation Contracts, and the hard Delivery concurrency guard belongs to
     approved Delivery Governance under `workspace/docs/delivery/governance/`.
-    Beside the languages it holds only the overrides `tier_models` and
-    `role_tiers`: a tier's model and effort per host, within what the
-    package's tier map lets that tier take, and a role's tier on every host.
+    Beside the languages it holds only the overrides `class_models` and
+    `role_classes`: a class slot's model and effort per host, within what
+    the package's class map lets that slot take, and a role's class on
+    every host.
     Setup writes neither, and the package catalog and profiles stay the
     defaults.
 22. Outside an explicitly closed artifact contract, `artifacts/` beneath a
@@ -228,13 +229,13 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     are validated data in `challenge-review/data/review-panels.json`; a panel
     replaces a step's single reviewer and never stacks on top of it, and it
     keeps the step's review loop, which process switch `review_loop` sets. The
-    read-only document reviewers keep their own tier, and every build ships
-    their generated `-lens` variants on the `low` tier for panel readers.
+    read-only document reviewers keep their own class, and every build ships
+    their generated `-lens` variants on `routine_review` for panel readers.
     Review steps whose machine interface accepts one result per role keep one
     reader, except Delivery code review under process switch
     `code_review_panel` at `beside_official`: a panel of the code reviewer's
     `-lens` variant reads beside the official code reviewer, a fresh
-    calibration reader on the code reviewer's own tier rules each panel claim,
+    calibration reader on the code reviewer's own class rules each panel claim,
     and a merge step registers the one result.
 30. Every new process behaviour ships behind a process switch declared in
     `configure/data/process-switches.json` whose default is the behaviour it

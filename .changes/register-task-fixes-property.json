@@ -1,0 +1,6 @@
+{
+  "summary": "The vault property schema now registers the fixes property that task_lane start --fixes writes, so a rework task passes the vault gate instead of failing with an unknown frontmatter property.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

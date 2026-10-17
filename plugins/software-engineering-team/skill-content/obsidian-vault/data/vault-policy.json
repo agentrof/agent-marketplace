@@ -297,6 +297,7 @@
     "rigor": "text",
     "roles": "text",
     "task_kind": "text",
+    "fixes": "text",
     "epic": "text",
     "source_story": "text",
     "covers": "multitext",

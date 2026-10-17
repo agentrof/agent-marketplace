@@ -909,6 +909,23 @@ class RetrospectiveCostTests(unittest.TestCase):
         props = task_lane.task_props(path)
         self.assertEqual((props["task_kind"], props["approved_at"]), ("knowledge", props["requested_at"]))
 
+    def test_every_property_a_task_can_carry_is_registered_in_the_vault_schema(self):
+        texts = [task_lane.task_text("TK-009", "T", "R.", "2026-10-16T10:00:00Z", "DLV-001", "normal",
+                                     epic="EP-1", source_story="ST-1", covers=[1], size="m", fixes="TK-008"),
+                 task_lane.task_text("TK-010", "T", "R.", "2026-10-16T10:00:00Z", "DLV-001", "normal",
+                                     kind="knowledge", fixes="TK-008")]
+        emitted = {match for text in texts
+                   for match in re.findall(r"(?m)^([a-z_]+):", text.split("\n---\n")[0])}
+        self.assertIn("fixes", emitted)
+        plugin = ROOT / "plugins" / "software-engineering-team"
+        registered = (
+            set(json.loads((plugin / "skill-content/obsidian-vault/data/vault-policy.json")
+                           .read_text(encoding="utf-8"))["property_types"]),
+            set(json.loads((plugin / "templates/vault/.obsidian/types.json")
+                           .read_text(encoding="utf-8"))["types"]))
+        for names in registered:
+            self.assertEqual(emitted - names, set())
+
     def test_the_report_sums_each_kind_and_ranks_its_levers_by_the_target_gap(self):
         build = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001"},
                                    pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:40:00Z"))

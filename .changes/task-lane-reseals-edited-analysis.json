@@ -1,0 +1,6 @@
+{
+  "summary": "Task lane open-pr re-approves every approved business-analysis space the task edited, so a plain task edit no longer leaves the package and everything that requires it stale.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -574,6 +574,31 @@ class LocalProofTests(unittest.TestCase):
         self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
 
 
+@integration
+class AnalysisResealTests(unittest.TestCase):
+    def test_an_edited_approved_space_is_resealed_strict_current(self):
+        from tools.tests import test_ba_compile as ba_tests
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            space = root / task_lane.ANALYSIS / "erp"
+            ba_tests.make_valid_space(space)
+            overview = space / "space.md"
+            overview.write_text(overview.read_text(encoding="utf-8").replace(
+                "status: approved\n", "status: approved\ntags:\n  - doc/space\n  - status/approved\n", 1),
+                encoding="utf-8")
+            common = ["--space", str(space), "--vault-root", str(space.parent.parent)]
+            self.assertEqual(ba_tests.run(["approve-package", *common])[0], 0)
+            (space / "space.md").write_text((space / "space.md").read_text(encoding="utf-8")
+                                            + "\nA reworded scope line.\n", encoding="utf-8")
+            self.assertEqual(ba_tests.ba.classify_package(space, ba_tests.SCHEMA,
+                                                          space.parent.parent)["profile"], "invalid")
+            sealed = task_lane.reseal_analysis(root, {"workspace/docs/business-analysis/erp/space.md"})
+            self.assertEqual(sealed, ["workspace/docs/business-analysis/erp"])
+            self.assertEqual(ba_tests.ba.classify_package(space, ba_tests.SCHEMA,
+                                                          space.parent.parent)["profile"], "strict-current")
+            self.assertEqual(task_lane.reseal_analysis(root, {"workspace/docs/business-analysis/erp/space.md"}), [])
+
+
 class FastLaneOwnershipTests(unittest.TestCase):
     def test_a_task_owns_architecture_only_in_the_fast_lane(self):
         with tempfile.TemporaryDirectory() as temporary:

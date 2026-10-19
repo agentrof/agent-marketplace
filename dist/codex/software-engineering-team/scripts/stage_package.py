@@ -17,6 +17,7 @@ import os
 import re
 import stat
 import subprocess
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -999,6 +1000,32 @@ def verify(docs: Path, stage: str, ref: str, expected_hash: str = "",
     if require_committed and not item["committed"]:
         errors.append(f"{ref} has uncommitted package changes")
     return item, errors
+
+
+# Findings that say only that a bound package moved on after the binding was taken.
+STALE_BINDING = ("package hash is stale", "is not an approved/current", "begin a revision before using it",
+                 "receipt must use its canonical result_ref")
+_WARNED: set[str] = set()
+
+
+def advisory_stale(docs: Path, errors: list[str]) -> list[str]:
+    """Drop stale-binding findings to stderr warnings under process_profile fast_lane.
+
+    A fast-lane project reads its governed packages as knowledge and does not
+    rebind them after every task edit, so a binding that only went stale warns.
+    """
+    import process_policy
+    if not errors or not process_policy.fast_lane(docs_root(docs)):
+        return errors
+    kept = []
+    for error in errors:
+        if any(marker in error for marker in STALE_BINDING):
+            if error not in _WARNED:
+                _WARNED.add(error)
+                print(f"WARNING [binding] {error}", file=sys.stderr)
+        else:
+            kept.append(error)
+    return kept
 
 
 def main(argv: list[str] | None = None) -> int:

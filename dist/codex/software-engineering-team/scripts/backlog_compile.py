@@ -715,7 +715,8 @@ def verify_input_bindings(docs: Path, bindings: list[str], path: str, *,
             docs, stage, reference, digest, require_committed=True,
             require_strict_current=not allow_historical,
             allow_historical=allow_historical)
-        errors.extend(f"{path} input binding: {error}" for error in verify_errors)
+        errors.extend(f"{path} input binding: {error}"
+                      for error in stage_package.advisory_stale(docs, verify_errors))
     return rows, errors
 
 

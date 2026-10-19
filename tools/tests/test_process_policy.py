@@ -1415,3 +1415,16 @@ class MeasuredBaselineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdvisoryStaleBindingTests(unittest.TestCase):
+    def test_fast_lane_turns_only_stale_binding_findings_into_warnings(self):
+        import stage_package
+        errors = ["a/space package hash is stale or does not match expected hash",
+                  "a/space is not an approved/current business-analysis package",
+                  "a/space has uncommitted package changes"]
+        for fast, kept in ((True, errors[2:]), (False, errors)):
+            with mock.patch.object(process_policy, "fast_lane", return_value=fast), \
+                    contextlib.redirect_stderr(io.StringIO()) as warned:
+                self.assertEqual(stage_package.advisory_stale(Path("docs"), list(errors)), kept)
+            self.assertEqual("WARNING [binding]" in warned.getvalue(), fast)

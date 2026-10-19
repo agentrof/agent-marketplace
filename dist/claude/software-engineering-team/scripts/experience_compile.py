@@ -2957,7 +2957,7 @@ def compile_package(package: Path, gate: bool = False, *,
                 problems.append(f"experience.md: missing {stage} input binding")
             else:
                 _receipt, errors = stage_package.verify(docs, stage, item[0], item[1])
-                problems.extend(f"experience.md: {error}" for error in errors)
+                problems.extend(f"experience.md: {error}" for error in stage_package.advisory_stale(docs, errors))
         ba_binding = bindings(data).get("business-analysis")
         if ba_binding is not None:
             canonical_process, process_errors = stage_package.resolve_ba_process(
@@ -2965,7 +2965,8 @@ def compile_package(package: Path, gate: bool = False, *,
                 expected_ba_ref=ba_binding[0], expected_ba_hash=ba_binding[1],
                 require_strict_current=gate,
             )
-            problems.extend(f"experience.md: {error}" for error in process_errors)
+            problems.extend(f"experience.md: {error}"
+                            for error in stage_package.advisory_stale(docs, process_errors))
             if canonical_process and canonical_process != data.get("primary_process_ref"):
                 problems.append("experience.md: primary_process_ref is not canonical")
             related = list_value(data, "related_process_refs")
@@ -2976,7 +2977,7 @@ def compile_package(package: Path, gate: bool = False, *,
                 )
                 problems.extend(
                     f"experience.md: related_process_refs[{index}]: {error}"
-                    for error in related_errors
+                    for error in stage_package.advisory_stale(docs, related_errors)
                 )
                 if canonical_related and canonical_related != raw:
                     problems.append(

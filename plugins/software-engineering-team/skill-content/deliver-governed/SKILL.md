@@ -41,7 +41,9 @@ directly. Report a Delivery complete only when `closure-audit` returns
 `closed`. Any other outcome is reported as it is, with the recovery the audit
 names: `merged_cleanup_pending` needs `verify-merge`, and
 `external_product_merge` and `unproven_record_merge` are never a merge and go
-to the project owner. Identical product bytes on the target alone are a
+to the project owner. When the owner decides the work landed, `delivery_compile.py
+close-external --delivery <id> --pull-request <url> --decision <id> --reason <text>`
+records it on the target and the audit then reads the Delivery closed. Identical product bytes on the target alone are a
 warning for the owner to check, never an external merge. The
 `delivery-closure` check is red on `opened` until the PR record's push runs
 it again; after a recovery step that changes no PR head, such as the release

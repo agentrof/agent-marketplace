@@ -17,7 +17,7 @@
       "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474"
     ,
     ".claude-plugin/plugin.json":
-      "b111d36496efa5058170982b4c92aafd353210a314ac8f3a9c0fd52cd874a96f"
+      "fda58d420f818d946d36286b6812e21aaeb9a24d52bc6d3317e438cd2e984177"
     ,
     "agents/analysis-challenger.md":
       "061a20fdd900079cad714a7fa3f091da591874d9ff88abe05a8d431f26207589"
@@ -1268,10 +1268,10 @@
       "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
   },
   "host": "claude",
-  "marketplace_release": "2026.10.5",
+  "marketplace_release": "2026.10.6",
   "runtime_contracts": [
     "in_use_pid_marker_v1"
   ],
   "schema_version": 4,
-  "version": "2026.10.5"
+  "version": "2026.10.6"
 }

@@ -181,3 +181,8 @@
 - A role check recorded in the task file after the local proof no longer invalidates the proof, so the pull request opens without a full re-run when that is the only change since.
 - Allow approval-bound amendments of unheld product paths for active serial Items without a full plan revision.
 - Generate a current verification-command and refusal reference for planning and review inputs.
+
+## 2026.10.6
+
+- Under process_profile fast_lane, a stale or superseded input binding in the backlog and Experience checks is a warning instead of an error, so governed packages read as knowledge no longer fail the full vault gate after a task edit.
+- Task lane open-pr re-approves every approved business-analysis space the task edited, so a plain task edit no longer leaves the package and everything that requires it stale.

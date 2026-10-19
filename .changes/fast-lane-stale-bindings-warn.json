@@ -1,6 +1,0 @@
-{
-  "summary": "Under process_profile fast_lane, a stale or superseded input binding in the backlog and Experience checks is a warning instead of an error, so governed packages read as knowledge no longer fail the full vault gate after a task edit.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

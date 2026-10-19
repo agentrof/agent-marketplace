@@ -639,6 +639,15 @@ class SizeExceptionApprovalTests(unittest.TestCase):
         code, output = self.fx.check()
         self.assertEqual(sorted(json.loads(output)["story_size"]["stories"]), ["ST-001", "ST-002"])
 
+    def test_the_board_shows_a_story_a_merged_delivery_integrated_as_delivered(self):
+        self.delivery("merged")
+        record, errors = backlog_compile.collect(self.fx.docs)
+        self.assertEqual(errors, [])
+        backlog_compile.render(record, self.fx.docs)
+        board = (self.fx.docs / "backlog/_generated/board.md").read_text(encoding="utf-8")
+        self.assertIn("| delivered (DLV-001) |", board)
+        self.assertIn("| planned |", board)
+
     def revise_second_story(self) -> None:
         """Open backlog revision 2, which changes ST-002 alone."""
         root = self.fx.docs / "backlog/backlog.md"
@@ -673,7 +682,7 @@ class SizeExceptionApprovalTests(unittest.TestCase):
         review.write_bytes(b"\xef\xbb\xbf" + review.read_bytes())
         self.revise_second_story()
         finding = f"Delivery merge state cannot be evaluated: {review} cannot be read: missing frontmatter block"
-        self.assertEqual(backlog_compile.delivered_stories(self.fx.docs), (set(), finding))
+        self.assertEqual(backlog_compile.delivered_stories(self.fx.docs), ({}, finding))
         code, output = self.fx.check()
         size = json.loads(output)["story_size"]
         self.assertEqual(sorted(size["stories"]), ["ST-002"])

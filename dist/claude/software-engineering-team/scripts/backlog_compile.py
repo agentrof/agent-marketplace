@@ -2104,31 +2104,32 @@ def story_size_block(budget: dict, entries: dict[str, dict]) -> dict:
                                           if entry["over_budget"])}
 
 
-def delivered_stories(docs: Path) -> tuple[set[str], str | None]:
-    """Return the stories a merged Delivery records as integrated.
+def delivered_stories(docs: Path) -> tuple[dict[str, str], str | None]:
+    """Return the stories a merged Delivery records as integrated, each with
+    that Delivery's id.
 
     The second value says why a Delivery's merge state cannot be read, and
-    the set is then empty.
+    the mapping is then empty.
     """
     import delivery_compile
 
     root = docs / "delivery" / "deliveries"
-    delivered: set[str] = set()
+    delivered: dict[str, str] = {}
     for path in sorted(root.glob("*/delivery.md")) if root.is_dir() else []:
         try:
             props, _body = delivery_compile.split_note(path)
             status, unknown = delivery_compile.delivery_state(path.parent, props)
             if unknown is not None:
-                return set(), unknown
+                return {}, unknown
             if status != "merged":
                 continue
             for item in sorted(path.parent.glob("items/*/item.md")):
                 item_props, _item_body = delivery_compile.split_note(item)
                 if item_props.get("status") == "integrated" \
                         and isinstance(item_props.get("story_id"), str):
-                    delivered.add(item_props["story_id"])
+                    delivered[item_props["story_id"]] = str(props.get("id") or path.parent.name)
         except (OSError, ValueError) as exc:
-            return set(), f"{path.parent.relative_to(docs).as_posix()} cannot be read: {exc}"
+            return {}, f"{path.parent.relative_to(docs).as_posix()} cannot be read: {exc}"
     return delivered, None
 
 
@@ -3893,6 +3894,13 @@ def story_cites_input_package(story: dict, stage: str, reference: str) -> bool:
     return False
 
 
+def delivery_status(story: dict, delivered: dict[str, str]) -> str:
+    """Show a story a merged Delivery integrated as delivered, naming it."""
+    if story["id"] in delivered:
+        return f"delivered ({delivered[story['id']]})"
+    return str(story["props"].get("status", ""))
+
+
 def render(record: dict, docs: Path) -> None:
     out = docs / "backlog" / "_generated"
     out.mkdir(parents=True, exist_ok=True)
@@ -3934,13 +3942,16 @@ def render(record: dict, docs: Path) -> None:
         payload["absent_input_stages"] = absent
     write_generated(out / "registry.json",
         (json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
-    board = [GENERATED_MAP_MARKER, "# Backlog board", "",
-             "| Story | Epic | Status | Owner | Priority | Test plan |",
-             "|---|---|---|---|---|---|"]
+    delivered, unknown = delivered_stories(docs)
+    board = [GENERATED_MAP_MARKER, "# Backlog board", ""]
+    if unknown is not None:
+        board += [f"Delivered stories unknown: {unknown.replace(f'{docs}/', '')}", ""]
+    board += ["| Story | Epic | Status | Owner | Priority | Test plan |",
+              "|---|---|---|---|---|---|"]
     for story in record["stories"]:
         board.append(
             f"| [[{story['path'][:-3]}|{story['id']}]] | {story['epic_id']} | "
-            f"{story['props'].get('status', '')} | {story['props'].get('owner_role', '')} | "
+            f"{delivery_status(story, delivered)} | {story['props'].get('owner_role', '')} | "
             f"{story['props'].get('priority', '')} | "
             f"[[{story['test_plan'][:-3]}|scenarios]] |")
     write_generated(out / "board.md", ("\n".join(board) + "\n").encode("utf-8"))

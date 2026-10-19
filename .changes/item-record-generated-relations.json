@@ -1,6 +1,0 @@
-{
-  "summary": "push-item accepts an active Item record whose generated relation block render-relations rewrote; only its authored content beyond the Architecture stamp is refused.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

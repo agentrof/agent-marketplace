@@ -1,6 +1,0 @@
-{
-  "summary": "Record the host sleep and network loss interruptions a live run saw as advisory interruptions_seen on every live run record, passing runs included, without changing verdicts or the resume rule.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

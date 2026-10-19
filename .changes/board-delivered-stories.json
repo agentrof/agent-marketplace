@@ -1,6 +1,0 @@
-{
-  "summary": "The generated backlog board shows a story a merged Delivery integrated as delivered, naming that Delivery, and says when a Delivery's merge state cannot be read instead of guessing.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

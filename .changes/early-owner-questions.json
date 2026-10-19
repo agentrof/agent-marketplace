@@ -1,6 +1,0 @@
-{
-  "summary": "Surface pending Item decisions when an execution plan is published so the owner can answer before the Item starts.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

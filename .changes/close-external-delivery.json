@@ -1,6 +1,0 @@
-{
-  "summary": "Add delivery_compile.py close-external: the owner closes a Delivery whose integrated work reached the target outside merge-pr, recording the decision, reason and carrying pull request; unfinished Items are cancelled so their Stories return to planning, and the closure audit reads the Delivery as closed instead of an open external_product_merge blocker.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "A role that starts background agents or commands now waits for their output files in its own turn with the packaged await_outputs.py, since a host may deliver the completion notice to the top session instead.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

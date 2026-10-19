@@ -1,6 +1,0 @@
-{
-  "summary": "Wait out an Environment Contract's declared steady-state window before collecting logs.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

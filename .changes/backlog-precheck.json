@@ -1,6 +1,0 @@
-{
-  "summary": "Add backlog_compile.py precheck, a write-free mechanical check the writer runs before the first review manifest: story criteria without a tracing scenario, scenario row lists that differ from their declared rows, Dependencies links not declared in depends_on, a deliverable supplied by two stories, and stale root backlog counts.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

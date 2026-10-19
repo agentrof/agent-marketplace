@@ -1,6 +1,0 @@
-{
-  "summary": "Switching a measurement-only process switch (step timing, baselines, budgets, cost report, lane table, review scope record) no longer invalidates a pinned backlog review round or drifts a Delivery's pin.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

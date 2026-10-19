@@ -1,6 +1,0 @@
-{
-  "summary": "Fast-lane retro report: a task pull request with no CI checks whose body holds the Local proof section is green when it opens, and its CI step is the proof's own minutes, so the CI and merge-wait steps are no longer empty at `pr_proof: local_record`.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

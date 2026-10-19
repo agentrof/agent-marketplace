@@ -1,6 +1,0 @@
-{
-  "summary": "Aborting a governance handoff now returns the Fence to the Governance-Hash it replaced, so a later apply-governance starts the handoff again instead of reporting it unchanged.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

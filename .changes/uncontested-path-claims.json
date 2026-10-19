@@ -1,6 +1,0 @@
-{
-  "summary": "Allow approval-bound amendments of unheld product paths for active serial Items without a full plan revision.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

@@ -1,6 +1,0 @@
-{
-  "summary": "Fast-lane `prove` keeps the distinct failing test ids of each red command in its record, and `open-pr`'s refusal names them.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

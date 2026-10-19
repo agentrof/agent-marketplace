@@ -1,6 +1,0 @@
-{
-  "summary": "Add process switch item_verification: at single_verifier one fresh verifier reviews the frozen Item diff, runs QA's approved commands and registers the code review and QA results together with single-verifier-result; only a critical finding blocks and every other finding is a follow-up issue.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

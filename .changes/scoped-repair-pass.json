@@ -1,6 +1,0 @@
-{
-  "summary": "Add process switch repair_pass: at scoped_repair a repair of Delivery findings below critical, reviewed before freeze and covered by a passing touched-suites run, is frozen and settled by scoped-repair without a new full reader and QA pass.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

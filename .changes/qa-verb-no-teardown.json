@@ -1,6 +1,0 @@
-{
-  "summary": "A declared QA verb run after the final down no longer forces another down before settlement.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

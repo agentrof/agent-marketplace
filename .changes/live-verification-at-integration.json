@@ -1,6 +1,0 @@
-{
-  "summary": "Add process switches live_verification and item_live_gate: at delivery_integration story QA passes run no live tests and record live: deferred_to_integration, and the Delivery runs one impact-selected live run at integration; at tooling_items an Item that changes environment tooling runs its affected live groups once before merge.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

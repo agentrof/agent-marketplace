@@ -1,6 +1,0 @@
-{
-  "summary": "Show production-caller, command-dispatch and record-writer gaps in the frozen code review inputs.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

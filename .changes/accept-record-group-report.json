@@ -1,6 +1,0 @@
-{
-  "summary": "At own_target_reuse accept_record with test_group_report refuse_missing_groups, QA's final test run accepts the passing full-suite pre-handoff run and takes its group report, when that run binds the same group declaration and every declared group passed, instead of launching the suite again.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

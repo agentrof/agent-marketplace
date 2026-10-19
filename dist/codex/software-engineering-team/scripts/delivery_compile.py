@@ -3449,6 +3449,64 @@ def record_pr_url(docs: Path, delivery_id: str, url: str) -> None:
         atomic_text(delivery_path_value, frontmatter(recorded, delivery_body))
 
 
+OWNER_CLOSURE_FIELDS = ("owner_closure_decision", "owner_closure_reason", "owner_closure_pull_request",
+                        "owner_closed_at_utc")
+
+
+def close_external(docs: Path, delivery_id: str, pull_request: str, decision: str, reason: str) -> dict:
+    """Close a Delivery whose integrated work reached the target outside merge-pr, by the owner's decision.
+
+    The Delivery becomes merged with the decision, reason and carrying pull
+    request recorded, so its integrated Items count as delivered; every Item
+    that is not integrated or cancelled is cancelled, so its Story returns to
+    planning. The closure audit reads these fields from the target's package.
+    """
+    if not decision.strip() or not reason.strip():
+        raise RuntimeError("the owner's decision and reason are both required")
+    from delivery_git import canonical_github_pr
+    pull_request, _number = canonical_github_pr(pull_request)
+    root = find_delivery(docs, delivery_id)
+    if root is None:
+        raise RuntimeError("Delivery not found")
+    path = root / "delivery.md"
+    props, body = split_note(path)
+    status, unknown = delivery_state(root, props)
+    if unknown is not None:
+        raise RuntimeError(unknown)
+    if status in {"merged", "cancelled"}:
+        raise RuntimeError(f"{delivery_id} is already {status}")
+    items = [(item, *split_note(item)) for item in sorted(root.glob("items/*/item.md"))]
+    if not any(item_props.get("status") == "integrated" for _item, item_props, _body in items):
+        raise RuntimeError(f"{delivery_id} has no integrated Item that could have reached the target;"
+                           " cancel it through cancel-delivery instead")
+    cancelled = []
+    for item, item_props, item_body in items:
+        if item_props.get("status") in TERMINAL_ITEM_STATUSES:
+            continue
+        item_props["status"] = "cancelled"
+        item_props["cancellation_disposition"] = "owner_closure"
+        item_props["tags"] = [tag for tag in item_props.get("tags", [])
+                              if not str(tag).startswith("status/")] + ["status/cancelled"]
+        if "source_hash" in item_props:
+            item_props["source_hash"] = content_hash(item_props, item_body)
+        atomic_text(item, frontmatter(item_props, item_body))
+        cancelled.append(str(item_props.get("story_id", item.parent.name.upper())))
+    props.update(status="merged", owner_closure_decision=decision.strip(), owner_closure_reason=reason.strip(),
+                 owner_closure_pull_request=pull_request, owner_closed_at_utc=utc_now())
+    props["tags"] = [tag for tag in props.get("tags", []) if not str(tag).startswith("status/")] + ["status/merged"]
+    props["source_hash"] = content_hash(props, body)
+    atomic_text(path, frontmatter(props, body))
+    return {"delivery": delivery_id, "status": "merged", "cancelled_items": cancelled}
+
+
+def close_external_cmd(args) -> int:
+    try:
+        result = close_external(docs_root(args.docs), args.delivery, args.pull_request, args.decision, args.reason)
+    except (RuntimeError, ValueError) as exc:
+        print(json.dumps({"ok": False, "errors": [str(exc)]}, indent=2)); return 1
+    print(json.dumps({"ok": True, **result}, indent=2)); return 0
+
+
 def record_pr(args) -> int:
     try:
         record_pr_url(docs_root(args.docs), args.delivery, args.url)
@@ -3516,6 +3574,11 @@ def main(argv=None) -> int:
     review.add_argument("--delivery", required=True); review.add_argument("--reviewed-commit", required=True); review.add_argument("--reviewed-integration-commit", required=True); review.set_defaults(func=approve_review)
     pr = sub.add_parser("record-pr")
     pr.add_argument("--delivery", required=True); pr.add_argument("--url", required=True); pr.set_defaults(func=record_pr)
+    owner_close = sub.add_parser(
+        "close-external", help="close a Delivery whose work the target holds outside merge-pr, by the owner's decision")
+    owner_close.add_argument("--delivery", required=True); owner_close.add_argument("--pull-request", required=True)
+    owner_close.add_argument("--decision", required=True); owner_close.add_argument("--reason", required=True)
+    owner_close.set_defaults(func=close_external_cmd)
     args = parser.parse_args(argv)
     return int(args.func(args))
 

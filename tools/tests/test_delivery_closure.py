@@ -317,6 +317,23 @@ class DeliveryClosureTests(unittest.TestCase):
         target = git(project, "rev-parse", "origin/main")
         self.assertIsNone(delivery_compile.merged_pr_record(project, "DLV-001", target))
 
+    def test_the_owner_closes_an_external_merge_and_the_audit_reads_it_closed(self):
+        project, _docs, _product, _head, _provider = self.recorded()
+
+        def squash_and_close(view: Path) -> None:
+            git(view, "fetch", "-q", "origin", INTEGRATION)
+            git(view, "merge", "--squash", "-q", "FETCH_HEAD")
+            git(view, "-c", "user.email=test@example.com", "-c", "user.name=Test", "commit", "-qm", "Squash")
+            closed = delivery_compile.close_external(view / "workspace" / "docs", "DLV-001", URL, "D-1",
+                                                     "the work landed by a squash")
+            self.assertEqual(closed["status"], "merged")
+
+        self.on_target(project, squash_and_close, "Close the Delivery by the owner's decision")
+        outcome = self.outcome(project)
+        self.assertEqual((outcome["outcome"], outcome["closure"], outcome["owner_closure_decision"]),
+                         ("closed", "owner", "D-1"), outcome)
+        self.assertTrue(delivery_closure.audit(project, "DLV-001")["ok"])
+
     def test_a_stale_slot_after_an_external_merge_reports_external_product_merge(self):
         """An active Item pushed its evidence, and its product reached the target by hand while its
         Slot stays: the audit reports the external merge with the Slot, and never closes it."""

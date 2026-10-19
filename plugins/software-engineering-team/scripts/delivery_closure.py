@@ -1434,6 +1434,23 @@ def external_product_merge(root: Path, delivery_id: str, target: str, integratio
     return evidence, signs
 
 
+def owner_closure(root: Path, target: str, delivery_id: str) -> dict | None:
+    """The owner's recorded closure of an externally merged Delivery in the target's package, or None.
+
+    close-external writes it: status merged with the decision, reason and the
+    pull request that carried the work. Without all of them the external merge
+    stays the owner's open decision.
+    """
+    directory = package_directory(root, target, delivery_id)
+    if directory is None:
+        return None
+    props = tree_note(root, target, f"{directory}/delivery.md")[0]
+    if props.get("status") != "merged" or not all(props.get(field)
+                                                  for field in delivery_compile.OWNER_CLOSURE_FIELDS):
+        return None
+    return {field: props[field] for field in delivery_compile.OWNER_CLOSURE_FIELDS}
+
+
 def writer_receipts(root: Path, delivery_id: str, state: dict | None = None) -> list[str]:
     """This Delivery's writer receipts, or with *state* only those that bind a live writer.
 
@@ -1534,13 +1551,24 @@ def audit_delivery(root: Path, delivery_id: str, target: str, state: dict, remot
                             " resolve, since only the atomic leased verbs release one"}
     evidence, signs = external_product_merge(root, delivery_id, target, integration, items,
                                              state.get("fence_target", ""))
+    closure = owner_closure(root, target, delivery_id) if evidence else None
+    if closure:
+        slots_left = [f"Slot {ref.removeprefix('refs/heads/')}" for ref in slots]
+        closed = {"delivery": delivery_id, "closure": "owner", "evidence": evidence + signs, **closure}
+        if not slots_left:
+            return {**closed, "outcome": "closed"}
+        return {**closed, "outcome": "merged_cleanup_pending", "leftovers": slots_left,
+                "next_entry": f"/deliver-governed {delivery_id}",
+                "recovery": "the project owner closed the Delivery; a Slot is released only by integrate-item or"
+                            " cancel-delivery"}
     if evidence:
         return {"delivery": delivery_id, "outcome": "external_product_merge", "evidence": evidence + signs,
                 "leftovers": [f"Slot {ref.removeprefix('refs/heads/')}" for ref in slots],
                 "next_entry": f"/deliver-governed {delivery_id}",
                 "recovery": f"the project owner decides in /deliver-governed {delivery_id}: the Delivery's product reached the"
-                            " target outside merge-pr, so it is not merged and never complete; a Slot is released"
-                            " only by integrate-item or cancel-delivery"}
+                            " target outside merge-pr, so it is not merged and never complete until the owner records that"
+                            " decision with delivery_compile.py close-external; a Slot is released only by"
+                            " integrate-item or cancel-delivery"}
     qualified = {"signs": signs} if signs else {}
     if integration and record_kind(commit_message(root, integration)) == "pr_url_recorded_v1":
         readiness = recorded_head_readiness(root, remote, delivery_id, integration, branch, target, state)

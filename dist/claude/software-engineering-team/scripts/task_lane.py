@@ -53,6 +53,7 @@ task travels in its own pull request.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import fnmatch
 import io
@@ -83,6 +84,7 @@ ID_RE = re.compile(r"^TK-[0-9]{3,}$")
 EPIC_RE = re.compile(r"^EP-[0-9]{3,}$")
 STORY_RE = re.compile(r"^ST-[0-9]{3,}$")
 STORIES = Path("workspace") / "docs" / "backlog" / "epics"
+ANALYSIS = Path("workspace") / "docs" / "business-analysis"
 BOARD = EXPORT / "board.md"
 DELIVERY_RE = re.compile(r"^DLV-[0-9]{3,}$")
 AC_RANGE = (3, 8)
@@ -2015,6 +2017,36 @@ def proof_section(record: dict) -> str:
             f" finished {finished}.\n\n| Command | Result | Seconds |\n|---|---|---|\n{rows}\n")
 
 
+def reseal_analysis(root: Path, changed: set[str]) -> list[str]:
+    """Re-approve each approved business-analysis space the task edited.
+
+    Merging the pull request is the owner's approval of the edit; resealing here
+    keeps the package and every package that requires it approved/current.
+    """
+    import ba_compile
+    names = {Path(path).parts[len(ANALYSIS.parts)] for path in changed
+             if Path(path).parts[:len(ANALYSIS.parts)] == ANALYSIS.parts and len(Path(path).parts) > len(ANALYSIS.parts) + 1}
+    sealed = []
+    for name in sorted(names):
+        space = root / ANALYSIS / name
+        overview = space / "space.md"
+        if not overview.is_file():
+            continue
+        props = parse_frontmatter(overview.read_text(encoding="utf-8"))[0]
+        if props.get("package_status") != "approved" or props.get("package_hash") == ba_compile.package_hash(space):
+            continue
+        common = ["--space", str(space), "--vault-root", str(root / ANALYSIS.parent)]
+        for step in (["begin-revision", *common, "--doc", "space.md"], ["enter-review", *common, "--doc", "space.md"],
+                     ["approve", *common, "--doc", "space.md"], ["approve-package", *common]):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+                code = ba_compile.main(step)
+            if code:
+                raise Refused(f"resealing business-analysis/{name} failed at {step[0]}: {out.getvalue().strip()}")
+        sealed.append(space.relative_to(root).as_posix())
+    return sealed
+
+
 def cmd_open_pr(args, root: Path) -> dict:
     path = task_path(root, args.task)
     errors = lint(path)
@@ -2034,6 +2066,8 @@ def cmd_open_pr(args, root: Path) -> dict:
             raise Refused("no local proof for this HEAD (switch pr_proof is local_record): " + "; ".join(problems))
     if task_props(path).get("status") == "active":
         set_field(path, "status", "delivered")
+    for space in reseal_analysis(root, changed_files(root, args.base)):
+        run("git", "add", space, cwd=root)
     run("git", "add", str(path), cwd=root)
     if run("git", "diff", "--cached", "--name-only", cwd=root):
         run("git", "commit", "-m", f"docs: deliver task {args.task}", cwd=root)

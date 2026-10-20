@@ -93,10 +93,10 @@ def resolve(class_map: dict, config: dict, host: str, model_class: str | None = 
     return result
 
 
-def task_facts(project_root: Path, task: str) -> tuple[str | None, str | None]:
-    """A fast-lane task's size and rigor from its task file."""
+def task_facts(project_root: Path, task: str) -> tuple[str | None, str | None, list[str]]:
+    """A fast-lane task's size, rigor and risk flags from its task file."""
     props = task_lane.task_props(task_lane.task_path(project_root, task))
-    return props.get("size"), props.get("rigor", "normal")
+    return props.get("size"), props.get("rigor", "normal"), task_lane.field_items(props, "risks")
 
 
 def main(argv=None) -> int:
@@ -108,7 +108,7 @@ def main(argv=None) -> int:
                    " defaults to the role's own class")
     p.add_argument("--role", help="the role spawned")
     p.add_argument("--host", required=True)
-    p.add_argument("--task", help="a fast-lane task id; its size and rigor apply")
+    p.add_argument("--task", help="a fast-lane task id; its size, rigor and risks apply")
     p.add_argument("--project-root", default=".")
     p.add_argument("--size", choices=SIZES)
     p.add_argument("--rigor", choices=RIGORS)
@@ -127,12 +127,13 @@ def main(argv=None) -> int:
         errors = role_settings.config_errors(config, class_map)
         if errors:
             raise ValueError("; ".join(errors))
-        size, rigor = args.size, args.rigor
+        size, rigor, risks = args.size, args.rigor, list(args.risk)
         if args.task:
-            task_size, task_rigor = task_facts(root, args.task)
+            task_size, task_rigor, task_risks = task_facts(root, args.task)
             size, rigor = size or task_size, rigor or task_rigor
+            risks = sorted(set(risks) | set(task_risks))
         result = resolve(class_map, config, args.host, args.model_class, role=args.role,
-                         size=size, rigor=rigor, risks=args.risk)
+                         size=size, rigor=rigor, risks=risks)
     except (OSError, ValueError, task_lane.Refused) as exc:
         print(f"model_class: {exc}", file=sys.stderr)
         return 1

@@ -172,6 +172,11 @@ class ResolverCommandTests(unittest.TestCase):
                                      "--task", "TK-001", "--json")
             self.assertEqual(sized.returncode, 0, sized.stderr)
             self.assertEqual(json.loads(sized.stdout)["slot"], "critical_decision_escalated")
+            # So does a risk flag the task file records.
+            task.write_text("---\nid: TK-001\nsize: s\nrisks: migration\n---\n", encoding="utf-8")
+            flagged = self.run_resolve(project, "--role", "solution-architect", "--host", "claude",
+                                       "--task", "TK-001", "--json")
+            self.assertEqual(json.loads(flagged.stdout)["slot"], "critical_decision_escalated", flagged.stderr)
             config.write_text(json.dumps({**base, "tier_models": {}}), encoding="utf-8")
             refused = self.run_resolve(project, "--role", "code-reviewer", "--host", "claude")
             self.assertEqual(refused.returncode, 1)

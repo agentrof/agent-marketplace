@@ -100,7 +100,7 @@
         },
         {
           "id": "fast_lane",
-          "tradeoffs": "The deliver entry turns a free-text request into one task with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and one reviewer reading the diff verify it; only a critical finding blocks, the rest become issues, and auto-merge lands it. No analysis, solution or design stage, no review panels, no Integration branch, Item refs, plan approvals, exclusive claims or contract pins, and live tests leave the story path, so a defect those would catch surfaces later, on main."
+          "tradeoffs": "The deliver entry turns a free-text request into one task with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and the reviewers its changed files route to verify it; a critical or major finding blocks, out-of-scope minors become one issue, and auto-merge lands it. No analysis, solution or design stage, no review panels, no Integration branch, Item refs, plan approvals, exclusive claims or contract pins, and live tests leave the story path, so a defect those would catch surfaces later, on main."
         }
       ],
       "default": "governed",

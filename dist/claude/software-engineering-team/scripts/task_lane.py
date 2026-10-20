@@ -9,6 +9,11 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   ``requested_at`` time and the proposed ``rigor``.
 - ``lint`` checks one task: title, size, rigor, 3 to 8 acceptance criteria
   and a test list. ``approve`` lints it and writes ``approved_at``.
+- ``start`` also writes ``risks`` (``--risk`` and the risk flags its request hits),
+  ``applied_skills`` (the method skills ``task-triggers.json`` makes mandatory)
+  and ``sources`` (each doc it relies on with a short sha256); ``approve``
+  hashes a source added since. ``review-inputs`` lists the reviewers the diff
+  routes to, triggered skills the task did not apply and changed sources.
 - ``overlap`` warns, never refuses, when an open pull request touches the
   same files as this branch.
 - ``start`` and ``approve`` also route roles: each rule in
@@ -55,11 +60,14 @@ from __future__ import annotations
 import argparse
 import csv
 import fnmatch
+import hashlib
 import io
 import json
 import re
+import shutil
 import statistics
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -86,6 +94,10 @@ STORIES = Path("workspace") / "docs" / "backlog" / "epics"
 BOARD = EXPORT / "board.md"
 DELIVERY_RE = re.compile(r"^DLV-[0-9]{3,}$")
 AC_RANGE = (3, 8)
+# Every build task proves its change is wired into the running system and names its docs change.
+LIVE_WIRING = "Live wiring:"
+DOCS_DELTA = "Docs delta:"
+TESTS_MAP_RE = re.compile(r"^-\s+([0-9]+(?:\s*,\s*[0-9]+)*)\s*:\s*\S")
 # knowledge: analysis, design, architecture, backlog and contract documents; build: code, devops, tests.
 KINDS = ("build", "knowledge")
 TARGETS_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "deliver" / "data" / "targets.json"
@@ -94,6 +106,12 @@ TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
 TARGET_MINUTES = TARGETS["build"]["average"]
 ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
 PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
+TRIGGERS_FILE = TARGETS_FILE.with_name("task-triggers.json")
+PROJECT_TRIGGERS = Path(".agentrof") / "task-triggers.json"
+TRIGGER_KEYS = {"method_skills": "skill", "risk_flags": "flag", "reviewers": "role"}
+SKILLS = Path(__file__).resolve().parent.parent / "skill-content"
+SOURCE_HASH = 12
+GRAPH_REFRESH = Path(__file__).resolve().with_name("graphify_refresh.py")
 # The project's local proof commands; {base} is the target branch. Without the file
 # the proof runs the test command the flow names.
 PROJECT_PROOF = Path(".agentrof") / "local-proof.json"
@@ -262,14 +280,75 @@ def route(rules: list[dict], text: str, kind: str, size: str, files: set[str]) -
         if kind not in rule.get("kinds", KINDS):
             continue
         reasons = [f"size {size}"] if size in rule.get("sizes", []) else []
-        reasons += [f"file {name} matches {glob}" for glob in rule.get("path_globs", [])
-                    for name in sorted(files) if fnmatch.fnmatch(name, glob)]
-        reasons += [f"keyword {word}" for word in rule.get("keywords", [])
-                    if re.search(rf"\b{re.escape(word)}(?:s|es)?\b", text, re.IGNORECASE)]
+        reasons += trigger_reasons(rule, text, files)
         if reasons:
             found.append({key: rule.get(key) for key in ("role", "mode", "step", "time_budget_minutes", "ask")}
                          | {"reasons": reasons})
     return found
+
+
+def trigger_reasons(rule: dict, text: str, files: set[str]) -> list[str]:
+    """The files and keywords of one rule that a task's text and files hit."""
+    files = {name for name in files
+             if not any(fnmatch.fnmatch(name, glob) for glob in rule.get("exclude_globs", []))}
+    reasons = [f"file {name} matches {glob}" for glob in rule.get("path_globs", [])
+               for name in sorted(files) if fnmatch.fnmatch(name, glob)]
+    return reasons + [f"keyword {word}" for word in rule.get("keywords", [])
+                      if re.search(rf"\b{re.escape(word)}(?:s|es)?\b", text, re.IGNORECASE)]
+
+
+def task_triggers(root: Path | None = None) -> dict:
+    """Packaged trigger tables, a project's .agentrof/task-triggers.json rule replacing the one of its id."""
+    tables = json.loads(TRIGGERS_FILE.read_text(encoding="utf-8"))
+    own = root / PROJECT_TRIGGERS if root else None
+    extra = json.loads(own.read_text(encoding="utf-8")) if own and own.is_file() else {}
+    result = {}
+    for table, key in TRIGGER_KEYS.items():
+        rules = {rule[key]: rule for rule in tables[table]}
+        rules.update({rule[key]: rule for rule in extra.get(table, [])})
+        result[table] = list(rules.values())
+    unknown = {rule["skill"] for rule in result["method_skills"]} - {
+        path.parent.name for path in SKILLS.glob("*/SKILL.md")}
+    if unknown:
+        raise Refused(f"task triggers name skills this package does not ship: {', '.join(sorted(unknown))}")
+    return result
+
+
+def triggered(rules: list[dict], key: str, text: str, files: set[str]) -> list[str]:
+    return sorted({rule[key] for rule in rules if trigger_reasons(rule, text, files)})
+
+
+def field_items(props: dict, key: str) -> list[str]:
+    """A comma-separated or list front matter field as its items."""
+    value = props.get(key) or []
+    items = value if isinstance(value, list) else str(value).split(",")
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def source_hash(root: Path, relative: str) -> str:
+    path = root / relative
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:SOURCE_HASH] if path.is_file() else "missing"
+
+
+def hashed_sources(root: Path, items: list[str]) -> list[str]:
+    """Each source as path@hash; an item that already carries its hash keeps it."""
+    return [item if "@" in item else f"{item}@{source_hash(root, item)}" for item in items]
+
+
+def changed_sources(root: Path, items: list[str]) -> list[dict]:
+    """The sources whose content changed since the task recorded their hash."""
+    found = []
+    for item in items:
+        relative, _, recorded = item.rpartition("@")
+        if relative and source_hash(root, relative) != recorded:
+            found.append({"path": relative, "defined": recorded, "now": source_hash(root, relative)})
+    return found
+
+
+def task_body(path: Path) -> str:
+    """The task's own words: the body before the navigation and the recorded verdicts."""
+    return re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks|^## Rework",
+                    path.read_text(encoding="utf-8").split("\n---\n", 1)[-1])[0]
 
 
 def task_roles(props: dict) -> dict[str, dict]:
@@ -301,9 +380,7 @@ def routed_roles(root: Path | None, path: Path, files: set[str] = frozenset()) -
     """Every role the task routes to now (its roles field, then the rules its text, size and the
     given changed files hit), and the require roles that have no recorded verdict yet."""
     props = task_props(path)
-    # The navigation and the recorded verdicts are not the task's own words.
-    body = re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks|^## Rework",
-                    path.read_text(encoding="utf-8").split("\n---\n", 1)[-1])[0]
+    body = task_body(path)
     text = f"{props.get('title', '')}\n{body}"
     roles = task_roles(props)
     for item in route(role_rules(root), text, props.get("task_kind", "build"), props.get("size", "s"),
@@ -335,14 +412,17 @@ def role_minutes(task: dict) -> dict:
 
 def task_text(task: str, title: str, request: str, requested_at: str, delivery: str,
               rigor: str, epic: str = "", source_story: str = "", covers: list[int] | None = None,
-              kind: str = "build", size: str = "s", fixes: str = "") -> str:
+              kind: str = "build", size: str = "s", fixes: str = "", risks: list[str] = (),
+              skills: list[str] = (), sources: list[str] = ()) -> str:
     grouped = f"delivery: {delivery}\n" if delivery else ""
     grouped += f"fixes: {fixes}\n" if fixes else ""
+    facts = "".join(f"{key}:{' ' if items else ''}{', '.join(items)}\n"
+                    for key, items in (("risks", risks), ("sources", sources), ("applied_skills", skills)))
     if kind == "knowledge":
         # A knowledge task needs no separate approval: the owner's request is the approval.
         return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
                 f"task_kind: knowledge\nrequested_at: {requested_at}\napproved_at: {requested_at}\n"
-                f"size: {size}\nrigor: {rigor}\n{grouped}"
+                f"size: {size}\nrigor: {rigor}\n{facts}{grouped}"
                 f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
                 f"# {title}\n\n## Request\n\n{request.strip()}\n\n<!-- sec: nav -->\n## Navigation\n")
     grouped += f"epic: {epic}\n" if epic else ""
@@ -350,10 +430,11 @@ def task_text(task: str, title: str, request: str, requested_at: str, delivery: 
         grouped += f"source_story: {source_story}\ncovers:\n" + "".join(
             f"  - {number}\n" for number in covers or [])
     return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
-            f"requested_at: {requested_at}\nsize: {size}\nrigor: {rigor}\n{grouped}"
+            f"requested_at: {requested_at}\nsize: {size}\nrigor: {rigor}\n{facts}{grouped}"
             f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
-            f"# {title}\n\n## Request\n\n{request.strip()}\n\n## Acceptance Criteria\n\n"
-            "1. \n2. \n3. \n\n## Tests\n\n- \n\n<!-- sec: nav -->\n## Navigation\n")
+            f"# {title}\n\n## Request\n\n{request.strip()}\n\n### Do\n\n- \n\n## Acceptance Criteria\n\n"
+            f"1. \n2. {LIVE_WIRING} \n3. {DOCS_DELTA} \n\n## Tests\n\n- 1: \n- 2: \n- 3: \n\n"
+            "<!-- sec: nav -->\n## Navigation\n")
 
 
 def section(body: str, title: str) -> list[str]:
@@ -419,6 +500,15 @@ def lint(path: Path) -> list[str]:
         errors.append("Role Checks lines must be '- <time> <role> go|changes: <note>'")
     if any(not REWORK_RE.match(line) for line in section(body, "Rework")):
         errors.append("Rework lines must be '- <time> <category> [<ref>]: <note>'")
+    triggers = task_triggers()
+    flags = {rule["flag"] for rule in triggers["risk_flags"]}
+    bad = sorted(set(field_items(props, "risks")) - flags)
+    if bad:
+        errors.append(f"risks must be among {', '.join(sorted(flags))}, found {', '.join(bad)}")
+    bad = sorted(skill for skill in field_items(props, "applied_skills")
+                 if not (SKILLS / skill / "SKILL.md").is_file())
+    if bad:
+        errors.append("applied_skills names skills this package does not ship: " + ", ".join(bad))
     if props.get("task_kind") == "knowledge":
         return errors
     criteria = [line for line in section(body, "Acceptance Criteria")
@@ -426,8 +516,15 @@ def lint(path: Path) -> list[str]:
     if not AC_RANGE[0] <= len(criteria) <= AC_RANGE[1]:
         errors.append(f"Acceptance Criteria needs {AC_RANGE[0]} to {AC_RANGE[1]} numbered"
                       f" criteria, found {len(criteria)}")
-    if not [line for line in section(body, "Tests") if re.match(r"^-\s+\S", line)]:
-        errors.append("Tests needs at least one '- <test>' line")
+    numbers = {int(line.split(".", 1)[0]) for line in criteria}
+    for label in (LIVE_WIRING, DOCS_DELTA):
+        if not any(re.match(rf"^[0-9]+\.\s+{label}\s*\S", line) for line in criteria):
+            errors.append(f"Acceptance Criteria needs a filled '{label}' criterion")
+    mapped = {int(number) for line in section(body, "Tests") if (match := TESTS_MAP_RE.match(line))
+              for number in match.group(1).split(",")}
+    if numbers - mapped:
+        errors.append("Tests needs a '- <criterion>: <test>' line for criteria "
+                      + ", ".join(str(number) for number in sorted(numbers - mapped)))
     return errors
 
 
@@ -1830,7 +1927,15 @@ def cmd_start(args, root: Path) -> dict:
     elif args.covers:
         raise Refused("--covers needs --source-story")
     kind = "knowledge" if args.knowledge else "build"
-    roles = route(role_rules(root), f"{args.title}\n{request}", kind, args.size, named_files(request))
+    text, files = f"{args.title}\n{request}", named_files(request)
+    roles = route(role_rules(root), text, kind, args.size, files)
+    triggers = task_triggers(root)
+    flags = {rule["flag"] for rule in triggers["risk_flags"]}
+    asked = set(getattr(args, "risk", None) or [])
+    if asked - flags:
+        raise Refused(f"--risk must be one of {', '.join(sorted(flags))}")
+    risks = sorted(asked | set(triggered(triggers["risk_flags"], "flag", text, files)))
+    skills = triggered(triggers["method_skills"], "skill", text, files)
     run("git", "fetch", "--prune", "origin", cwd=root)
     task = next_id(taken_names(root, args.base))
     slug = slugify(args.title)
@@ -1838,14 +1943,19 @@ def cmd_start(args, root: Path) -> dict:
     run("git", "switch", "-c", branch, f"origin/{args.base}", cwd=root)
     path = root / TASKS / f"{task.lower()}-{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
+    # The docs the task relies on: the ones it is given and the existing docs its request names.
+    named = sorted(name for name in files if name.startswith("workspace/docs/") and (root / name).is_file())
+    sources = hashed_sources(root, list(dict.fromkeys([*(getattr(args, "source", None) or []), *named])))
     path.write_bytes((task_text(task, args.title, request, requested_at, args.delivery or "",
                               rigor, epic, args.source_story or "", covers,
-                              kind, args.size, getattr(args, "fixes", None) or "")).encode("utf-8"))
+                              kind, args.size, getattr(args, "fixes", None) or "",
+                              risks, skills, sources)).encode("utf-8"))
     if roles:
         set_field(path, "roles", roles_value(roles))
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     return {"task_id": task, "branch": branch, "task": str(path.relative_to(root)),
-            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles}
+            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles,
+            "risks": risks, "applied_skills": skills, "sources": sources}
 
 
 def cmd_lint(args, root: Path) -> dict:
@@ -1863,12 +1973,35 @@ def cmd_approve(args, root: Path) -> dict:
         raise Refused("task lint failed: " + "; ".join(errors))
     if not task_props(path).get("approved_at"):
         set_field(path, "approved_at", args.at or now())
+    # Sources added while the task was filled are hashed now, still at define time.
+    sources = field_items(task_props(path), "sources")
+    if sources != hashed_sources(root, sources):
+        set_field(path, "sources", ", ".join(hashed_sources(root, sources)))
     roles, missing = routed_roles(root, path)
     if roles:
         set_field(path, "roles", roles_value(roles))
     props = task_props(path)
     return {"ok": True, "task_id": args.task, "approved_at": props["approved_at"],
             "rigor": props.get("rigor", "normal"), "roles": roles, "pending_roles": missing}
+
+
+def cmd_review_inputs(args, root: Path) -> dict:
+    """What the review needs beyond the diff: its reviewers, triggered skills the task did not
+    apply and sources whose content changed since the task was defined."""
+    path = task_path(root, args.task)
+    props = task_props(path)
+    files = changed_files(root, args.base)
+    triggers = task_triggers(root)
+    skills = triggered(triggers["method_skills"], "skill", f"{props.get('title', '')}\n{task_body(path)}",
+                       named_files(task_body(path)) | files)
+    reviewers = triggered(triggers["reviewers"], "role", "", files)
+    risks = field_items(props, "risks")
+    if props.get("rigor") == "high" or risks:
+        reviewers.append("security-reviewer")
+    return {"ok": True, "task_id": args.task, "reviewers": reviewers, "risks": risks,
+            "triggered_skills": skills,
+            "missing_skills": sorted(set(skills) - set(field_items(props, "applied_skills"))),
+            "changed_sources": changed_sources(root, field_items(props, "sources"))}
 
 
 def cmd_role_check(args, root: Path) -> dict:
@@ -2047,6 +2180,16 @@ def cmd_open_pr(args, root: Path) -> dict:
             "overlaps": warnings}
 
 
+def refresh_graph(root: Path) -> None:
+    """Start the graph refresh in the background when it and graphify are installed; never blocks a merge."""
+    if GRAPH_REFRESH.is_file() and shutil.which("graphify"):
+        try:
+            subprocess.Popen([sys.executable, str(GRAPH_REFRESH)], cwd=root, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            pass
+
+
 def cmd_merge(args, root: Path) -> dict:
     rigor = task_props(task_path(root, args.task)).get("rigor", "normal")
     note = REVIEW_MARK + (f"\n\n{args.detail}" if args.detail else "")
@@ -2066,7 +2209,9 @@ def cmd_merge(args, root: Path) -> dict:
         if "clean status" not in str(refused):
             raise
         run("gh", "pr", "merge", args.pr, f"--{args.style}", cwd=root)
+        refresh_graph(root)
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False, "merged": True}
+    refresh_graph(root)
     return {"task_id": args.task, "pr": args.pr, "auto_merge": True}
 
 
@@ -2170,6 +2315,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="a knowledge task (documents only): the request is the approval, no criteria or reviewer")
     start.add_argument("--size", choices=SIZES, default="s")
     start.add_argument("--fixes", help="the earlier task whose defect this task repairs, such as TK-007")
+    start.add_argument("--risk", action="append", help="a risk flag of the task; repeatable")
+    start.add_argument("--source", action="append", help="a project file the task relies on; repeatable")
     criteria = sub.add_parser("criteria")
     criteria.add_argument("--story", required=True)
     criteria.add_argument("--base", default="main")
@@ -2189,6 +2336,9 @@ def main(argv: list[str] | None = None) -> int:
     checked.add_argument("--note", help="the reasons, one line")
     checked.add_argument("--at")
     sub.add_parser("overlap").add_argument("--base", default="main")
+    reviewed = sub.add_parser("review-inputs", help="reviewers, missing triggered skills and changed sources")
+    reviewed.add_argument("--task", required=True)
+    reviewed.add_argument("--base", default="main")
     opened = sub.add_parser("open-pr")
     opened.add_argument("--task", required=True)
     opened.add_argument("--base", default="main")
@@ -2232,7 +2382,7 @@ def main(argv: list[str] | None = None) -> int:
                 "overlap": cmd_overlap, "open-pr": cmd_open_pr, "prove": cmd_prove, "merge": cmd_merge,
                 "report": cmd_report, "file-issues": cmd_file_issues,
                 "criteria": cmd_criteria, "board": cmd_board,
-                "role-check": cmd_role_check, "rework": cmd_rework}
+                "role-check": cmd_role_check, "rework": cmd_rework, "review-inputs": cmd_review_inputs}
     try:
         if args.command == "lint" and not (args.file or args.task):
             raise Refused("lint needs --file or --task")

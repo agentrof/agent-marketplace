@@ -47,7 +47,7 @@ project's design tokens.
 ## Approach
 1. Follow the constitution included in the role prompt; if absent, read the
    installed team's `constitution.md`.
-2. Load the bound stack skill; read the inputs named in the spawn
+2. Load every skill the task's `applied_skills` lists; read the inputs named in the spawn
    prompt: the task, the contract and the design tokens.
 3. Wire tokens first, then build components small to large, then routing
    and guards, then the typed data layer against the contract, then

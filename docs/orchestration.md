@@ -5,10 +5,12 @@ project-local workspace and delegates work to role agents when needed.
 Implementation work runs on the fast lane, `flows/fast-lane.md` in the
 Software Engineering Team package: one task, approved by the owner, one branch
 and one pull request to the target branch. The owning developer role writes
-the change and its tests; the project's CI and one fresh `code-reviewer`
-verify it, and only a critical finding blocks. Every other finding becomes an
-issue in the project's repository. At rigor `high` the read-only
-`security-reviewer` joins and the owner merges.
+the change and its tests; the project's CI and the reviewers its changed
+files route to (`code-reviewer` for code, `analysis-challenger` or
+`solution-reviewer` for analysis or solution documents) verify it. It merges
+with 0 critical and 0 major findings after at most one fix round; out-of-scope
+minors become one issue in the project's repository. At rigor `high` or on a
+risk flag the read-only `security-reviewer` joins; at `high` the owner merges.
 
 Every delegated role receives explicit inputs derived by
 `scripts/task_inputs.py` under `templates/task-input-contract.md`: the

@@ -1,0 +1,42 @@
+{
+  "description": "Fast-lane task triggers, read by task_lane.py. A rule hits when a file the task names or changes matches one of its path_globs (shell globs, * crosses /) or a keyword appears in the task's title or text (whole word, plural allowed). method_skills: a hit skill is mandatory; start writes it to the task's applied_skills, the writer loads it, and review-inputs reports a triggered skill the task did not apply, which the reviewer raises as a major finding. A stack no rule names is worked from the code. risk_flags: a hit proposes the flag in the task's risks at start; a flag runs the security reviewer and escalates model_class. reviewers: the review roles a task's changed files route to; exclude_globs drop files from a rule. A project replaces a rule of the same skill, flag or role, or adds one, in .agentrof/task-triggers.json with the same shape.",
+  "method_skills": [
+    {
+      "skill": "sql-database-design",
+      "path_globs": ["*migrations/*", "*migration*", "*.sql", "*schema*", "*models/*", "*models.py", "*entities/*", "*.prisma", "*alembic*"],
+      "keywords": ["schema", "migration", "sql", "postgres", "postgresql", "mysql", "data model"]
+    },
+    {
+      "skill": "nosql-database-design",
+      "path_globs": ["*mongo*", "*dynamo*", "*firestore*"],
+      "keywords": ["mongodb", "document store", "document database", "dynamodb", "firestore", "couchdb"]
+    },
+    {
+      "skill": "docker-compose",
+      "path_globs": ["*Dockerfile*", "*.dockerignore", "*docker-compose*", "*compose.yml", "*compose.yaml", "*Chart.yaml", "*charts/*", "*helm/*", "*kind*.yaml", "*kind*.yml", "*k8s/*", "*kubernetes/*", "*manifests/*"],
+      "keywords": ["docker", "dockerfile", "compose", "container", "helm", "kubernetes", "kind cluster"]
+    },
+    {
+      "skill": "python-fastapi",
+      "path_globs": ["*apps/*.py", "*services/*.py", "*api/*.py", "*routers/*.py", "*pyproject.toml"],
+      "keywords": ["fastapi", "pydantic", "uvicorn"]
+    },
+    {
+      "skill": "react-typescript",
+      "path_globs": ["*.tsx", "*.jsx"],
+      "keywords": ["react", "tsx"]
+    }
+  ],
+  "risk_flags": [
+    {"flag": "auth", "keywords": ["auth", "authentication", "authorization", "login", "password", "permission"]},
+    {"flag": "secrets", "keywords": ["secret", "credential", "token", "api key", "private key", "certificate"]},
+    {"flag": "data_placement", "keywords": ["tenant", "tenant data", "personal data", "pii", "data residency", "cross-tenant"]},
+    {"flag": "migration", "path_globs": ["*migrations/*", "*migration*"], "keywords": ["migration", "migrate", "backfill"]},
+    {"flag": "irreversible", "keywords": ["delete", "drop", "purge", "wipe", "truncate", "irreversible"]}
+  ],
+  "reviewers": [
+    {"role": "code-reviewer", "path_globs": ["*"], "exclude_globs": ["workspace/docs/*"]},
+    {"role": "analysis-challenger", "path_globs": ["workspace/docs/business-analysis/*"]},
+    {"role": "solution-reviewer", "path_globs": ["workspace/docs/solution-design/*", "workspace/docs/system-architecture/*"]}
+  ]
+}

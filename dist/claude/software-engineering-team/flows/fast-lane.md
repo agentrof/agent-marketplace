@@ -53,9 +53,10 @@ max 15 minutes; build 5/15/30, max 60) and `/retrospective` reports each task
 against its own.
 
 Knowledge task, the short path: `start --knowledge --size s|m|l`. The request
-is the approval: no criteria, no `approve`, no reviewer. The main session
+is the approval: no criteria and no `approve`. The main session
 edits the documents itself and spawns the owning role only at size `l`;
-then it runs `open-pr` and `merge`. Approval stamps are not re-verified at
+then it runs `open-pr`, the review of step 6 only when `review-inputs`
+routes a reviewer, and `merge`. Approval stamps are not re-verified at
 `fast_lane`: the file on the target branch is in force.
 
 The task's `rigor` sets the verification:
@@ -64,6 +65,18 @@ The task's `rigor` sets the verification:
 |---|---|---|---|
 | `normal` (default) | one `code-reviewer` | only when the change really affects a live group | auto-merge on green CI |
 | `high` | the `code-reviewer` and the `security-reviewer` | every affected live group, always | the owner merges |
+
+Any risk flag in the task's `risks` (`auth`, `secrets`, `data_placement`,
+`migration`, `irreversible`) also runs the `security-reviewer` and escalates
+the spawns `model_class.py --task` resolves, at either rigor.
+
+Method skills: `skill-content/deliver/data/task-triggers.json` maps paths and
+words to the method skill they make mandatory (data model, schema, migration
+or SQL to `sql-database-design`, a document store to `nosql-database-design`,
+container, compose, chart or cluster files to `docker-compose`, Python
+service files to `python-fastapi`, React UI to `react-typescript`); a project
+replaces or adds a rule in `.agentrof/task-triggers.json`. Every stack is
+accepted; a stack no rule names is worked from the code.
 
 Role routing pulls a team role into a task only where it adds value.
 `start` and `approve` match the task's kind, size, named files and words
@@ -91,12 +104,22 @@ its diff changes, has no verdict; a `suggest` role never blocks.
    task skeleton under `workspace/docs/backlog/tasks/` with `requested_at`,
    and proposes `rigor: high` when the request names authentication,
    credentials, secrets, data deletion or another irreversible action.
-2. Task. Fill the task in one pass: the request, 3 to 8 numbered
-   acceptance criteria, each one verifiable property, a `## Tests` list
-   naming the test file or case that proves each criterion, and `size` s, m
-   or l. Set `rigor: high` yourself when the change touches authentication,
-   credentials, secrets, data deletion or an irreversible action even if the
-   proposal missed it. `lint --task <id>` until it passes. Show the task to
+   It also writes `risks` (each `--risk <flag>` and the flags the request
+   hits), `applied_skills` (the method skills the request's words and files
+   trigger) and `sources` (each `--source <file>` and each existing doc the
+   request names, as `path@<sha256 prefix>`).
+2. Task. Fill the task in one pass: the request with its `### Do` list,
+   3 to 8 numbered acceptance criteria, each one verifiable property with
+   its exact codes and limits, among them a filled `Live wiring:` criterion
+   (where the running system serves the change and how it is seen working)
+   and a `Docs delta:` criterion (the docs it changes, or none), a `## Tests`
+   map with a `- <criterion numbers>: <test>` line for every criterion, and
+   `size` s, m or l. Set `rigor: high` yourself when the change touches
+   authentication, credentials, secrets, data deletion or an irreversible
+   action even if the proposal missed it, and add each risk flag the change
+   carries to `risks`. Add every planned file's triggered skill to
+   `applied_skills` and every doc the task rests on to `sources`; `approve`
+   hashes the sources added. `lint --task <id>` until it passes. Show the task to
    the owner with the proposed rigor; the owner confirms or changes rigor on
    the task. On the owner's go, or under a standing delegation, run
    `approve --task <id>`; it writes `approved_at`. No analysis, solution or
@@ -105,7 +128,8 @@ its diff changes, has no verdict; a `suggest` role never blocks.
    the first.
    Then run the role checks `approve` lists under `roles` (Role routing above).
 3. Write. Spawn the owning developer role in the foreground with the task,
-   the branch and the files it names. It writes the change and its tests on
+   the branch, the files it names and every skill in `applied_skills`, which
+   it loads before writing. It writes the change and its tests on
    the branch, commits, and runs the project's test command for the suites it
    touched, the command the CI workflow runs on pull requests (`make test`
    unless the project declares another). Architecture records and contracts
@@ -122,16 +146,25 @@ its diff changes, has no verdict; a `suggest` role never blocks.
    run `prove --task <id>` first; `open-pr` refuses without its green record
    of a clean HEAD, as
    `skill-content/deliver/references/switch-pr_proof-local_record.md` defines.
-6. Review. Spawn one `code-reviewer` in the foreground with the task and
-   the output of `gh pr diff <pr>`. It checks each acceptance criterion
-   against the diff and its tests and returns findings with severities. At
-   `high`, or when a risk flag applies, also spawn the read-only
-   `security-reviewer` in the foreground with the same inputs; it walks its
-   security and data-loss checklist. Only a critical
-   finding blocks: the developer fixes it on the branch, and the reviewer
-   that raised it re-reads only the fix diff, once. Every other finding
-   becomes one issue in the project's repository through `gh issue create`,
-   linked from a pull request comment.
+6. Review. Run `review-inputs --task <id>`. It routes by the files the
+   branch changes: code to `code-reviewer`, `workspace/docs/business-analysis`
+   to `analysis-challenger`, `workspace/docs/solution-design` or
+   `workspace/docs/system-architecture` to `solution-reviewer`, and adds the
+   read-only `security-reviewer` at `high` or on any risk flag. Spawn every
+   listed reviewer in the foreground in parallel with the task, the output
+   of `gh pr diff <pr>` and the `review-inputs` result. Each checks every
+   acceptance criterion against the diff and its tests and returns findings
+   with severities; a skill in `missing_skills` that the change did not
+   follow is a major finding, and a source in `changed_sources` is checked
+   for a change the task now contradicts. The pull request merges with 0
+   critical and 0 major findings. The same writer fixes each critical or
+   major finding on the branch, and only the reviewer that raised it
+   re-reads the fix diff, once; at most one fix round, then the owner
+   decides. Trivial minors are fixed in one commit on the branch; only
+   out-of-scope minors become one grouped issue in the project's repository
+   through `gh issue create`, linked from a pull request comment. A design
+   or policy question found in review goes to the owner as a decision, never
+   patched by the developer.
 7. Merge. Run `merge --task <id> --pr <pr>`. It posts the review pass on
    the pull request. At `normal` it turns on auto-merge, so the pull request
    merges when its required CI checks are green; a red check is fixed on the

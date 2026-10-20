@@ -482,7 +482,7 @@ RELEASED_DEFAULTS = {
 SAFETY_RULES = {
     "process_profile": {
         f"{SKILLS}/deliver/references/switch-process_profile-fast_lane.md": (
-            "Only a critical finding blocks",
+            "Any critical or major finding blocks",
             "every affected live group runs and the owner merges",
         ),
     },

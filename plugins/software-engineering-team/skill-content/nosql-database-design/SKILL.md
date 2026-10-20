@@ -1,6 +1,6 @@
 ---
 name: nosql-database-design
-description: Document database design expertise. Document modeling, embedding vs referencing, schema patterns, indexing, sharding, and consistency for document stores. Loaded by the architecture role when the project stack declares a document database.
+description: Document database design expertise. Document modeling, embedding vs referencing, schema patterns, indexing, sharding, and consistency for document stores. Loaded by the implementation owner and independent reviewers when a task touches a document store.
 exposure: internal
 ---
 

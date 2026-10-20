@@ -193,30 +193,12 @@ class ClaudeFallbackHookTests(unittest.TestCase):
     def test_the_host_contract_and_docs_state_the_fallback(self):
         contract = " ".join((fixtures.REAL_REPOSITORY / "platforms/claude" / fixtures.PLUGIN
                              / "host-contract.md").read_text(encoding="utf-8").split())
-        for fragment in (
-                "A role whose pinned model cannot run falls back to this session's model with a"
-                " visible warning",
-                "An organization model policy (`availableModels`, `deniedModels` or an Enterprise"
-                " restriction) that blocks a pinned ID already runs the role on the main"
-                " conversation's model, and an interactive session shows Claude Code's warning",
-                # Claude Code's own wording (https://code.claude.com/docs/en/errors).
-                "When a role's Agent result or completion message names its pinned model as"
-                " unavailable or refused in Claude Code's wording, error type `model_not_found`,"
-                " `There's an issue with the selected model`, `is not available on your ..."
-                " deployment`, `is not available with the ... plan` or `don't have access to the"
-                " model`, or as too new for this Claude Code, `does not support this model`, tell"
-                " the user which role, which model and why.",
-                WRITER_GUARD.format(start="spawn", Start="Spawn")
-                + "; otherwise stop and report.",
-                "That spawn names the same `subagent_type` with `model` set to the family alias"
-                " of this session's model",
-                "If it fails too, stop and report both errors.",
-                "a background role reports its failure only in its completion message",
-                "Neither hook fires for a spawn that passes `model` or under"
-                " `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`"):
+        # The contract keeps only the run-time rule; docs/authoring.md holds the rationale.
+        for fragment in ("falls back to this session's model with a visible warning",
+                         "`model_not_found`", "`does not support this model`",
+                         "only when the failed run changed nothing",
+                         "`--expected-hash <source_hash>`", "stay silent for a spawn that passes `model`"):
             self.assertIn(fragment, contract)
-        self.assertNotIn("retired", contract.split("A role whose pinned model cannot run", 1)[1]
-                         .split("Every build also ships the `-mechanical`", 1)[0])
         authoring = " ".join((fixtures.REAL_REPOSITORY / "docs/authoring.md").read_text(
             encoding="utf-8").split("## Execution profiles", 1)[1].split("\n## ", 1)[0].split())
         self.assertIn("A role whose pinned model cannot run falls back to the session's model"
@@ -898,31 +880,10 @@ class CodexModelCheckTests(unittest.TestCase):
     def test_the_host_contract_and_docs_state_the_check_and_the_runtime_rule(self):
         contract = " ".join((fixtures.REAL_REPOSITORY / "platforms/codex" / fixtures.PLUGIN
                              / "host-contract.md").read_text(encoding="utf-8").split())
-        for fragment in (
-                # test_host_models checks the setup-time strategy both contracts share.
-                "omit `model` and keep `model_reasoning_effort`",
-                # Only an availability error moves a role, in Codex 0.159.1's
-                # wording of the service's answer (codex-rs core/tests/suite/compact.rs).
-                "When a role's spawn ends in `Agent errored: ...` and the error names its pinned"
-                " model as unknown, unsupported, not found or not supported with this account,"
-                " such as `Model not found <model>` or `The '<model>' model is not supported"
-                " when using Codex with a ChatGPT account.`, tell the user which role, which"
-                " model and why",
-                "Any other error, such as a rate limit whose text names the model, moves no"
-                " role: report it as it is.",
-                WRITER_GUARD.format(start="start", Start="Start")
-                + "; otherwise stop and report, and record no fallback.",
-                "To start it again, run `<absolute-python>"
-                " <absolute-package-scripts>/generate_codex_project.py apply --project-root"
-                " <root> --scope local --inherit-model <model>`",
-                "start the same `agent_type` again",
-                "If it errors again, run that command with `--restore-model <model>` in place of"
-                " `--inherit-model <model>`, which renders those roles with their pin again and"
-                " drops the record, then stop and report both errors.",
-                "--execution-profile inherit`, which omits `model` from every role file and"
-                " keeps `model_reasoning_effort`"):
+        for fragment in ("`Agent errored: ...`", "any other error moves no role",
+                         "only when the failed run changed nothing", "--inherit-model <model>",
+                         "--restore-model <model>", "--execution-profile inherit"):
             self.assertIn(fragment, contract)
-        self.assertNotIn("If it errors again, stop and report both errors.", contract)
         authoring = " ".join((fixtures.REAL_REPOSITORY / "docs/authoring.md").read_text(
             encoding="utf-8").split("## Execution profiles", 1)[1].split("\n## ", 1)[0].split())
         for fragment in ("omits `model` from every role file and keeps `model_reasoning_effort`",

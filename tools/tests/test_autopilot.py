@@ -1223,68 +1223,45 @@ class DistributionTests(unittest.TestCase):
 
 
 class ContractTests(unittest.TestCase):
-    def test_host_contracts_state_the_procedure_and_that_only_the_user_arms(self):
+    def test_host_contracts_point_at_the_skill_and_name_their_hooks(self):
         spellings = {"claude": (f"/{NAME}", "UserPromptExpansion", "AskUserQuestion"),
                      "codex": (f"${NAME}", "UserPromptSubmit", "request_user_input")}
         for host, tokens in spellings.items():
             with self.subTest(host=host):
                 text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
                                  / "host-contract.md").read_text(encoding="utf-8").split())
-                section = text.split("## Autopilot", 1)[1].lower()
-                for fragment in (*tokens, "Only the user arms a grant", "autopilot.py check",
-                                 "take the recommended option", "autopilot.py record",
-                                 "governing document", "marked with the grant id",
-                                 "autopilot.py queue", "continue the work that does not depend on it",
-                                 "stop only when every remaining task waits on a queued question"):
-                    self.assertIn(fragment.lower(), section)
-
-    def test_a_grant_merges_only_the_flow_s_own_head(self):
-        """A broad delegation or an autopilot merge grant authorizes the flow's own steps only: the
-        merge class is merge-pr on the recorded PR head, and closure stays the closure audit's (#461)."""
-        merge = next(entry for entry in POLICY["classes"] if entry["id"] == "merge")
-        self.assertEqual(merge["description"], "The flow's own merge step on its recorded PR head, once its"
-                                               " required checks pass; never a provider or Git merge of another head.")
-        documents = {"skill": ENTRY / "SKILL.md", "orchestration": ROOT / "docs/orchestration.md",
-                     **{host: ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
-                        for host in ("claude", "codex")}}
-        for name, path in documents.items():
-            with self.subTest(document=name):
-                text = " ".join(path.read_text(encoding="utf-8").split())
-                if name in ("claude", "codex"):
-                    text = text.split("## Autopilot", 1)[1]
-                self.assertIn("never a provider or Git merge of another head", text)
-
-    def test_the_procedure_records_a_decision_before_it_applies_it(self):
-        for host in ("claude", "codex"):
-            with self.subTest(host=host):
-                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
                 section = text.split("## Autopilot", 1)[1]
-                self.assertIn("run `autopilot.py record` first, then apply it", section)
-                self.assertIn("when it exits 1, ask the user as usual", section)
-        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("recorded with `record` before it is applied", skill)
+                for fragment in (*tokens, "its skill holds the procedure"):
+                    self.assertIn(fragment, section)
 
-    def test_the_procedure_classifies_a_question_by_every_effect(self):
+    def test_the_skill_holds_the_procedure(self):
+        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
+        for fragment in ("autopilot.py check", "when it exits 1, ask the user as usual",
+                         "run `autopilot.py record` first, then apply it",
+                         "`--class` once per class it touches", "marked with the grant id",
+                         "continue the work that does not depend on it",
+                         "Stop only when every remaining task waits on a queued question"):
+            self.assertIn(fragment, skill)
         rule = ("classify the question by every effect of its recommended option: any never"
                 " effect makes it never, an excluded effect the grant does not allow queues it,"
                 " and doubt queues it")
-        for host in ("claude", "codex"):
-            with self.subTest(host=host):
-                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
-                self.assertIn(rule, text.split("## Autopilot", 1)[1].lower())
-                self.assertIn("--class` once per class it touches", text)
-        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split()).lower()
-        self.assertIn(rule, skill)
+        self.assertIn(rule, skill.lower())
+
+    def test_a_grant_merges_only_the_flow_s_own_head(self):
+        """A broad delegation or an autopilot merge grant authorizes the flow's own steps only: the
+        merge class is the flow's merge step on the recorded PR head (#461)."""
+        merge = next(entry for entry in POLICY["classes"] if entry["id"] == "merge")
+        self.assertEqual(merge["description"], "The flow's own merge step on its recorded PR head, once its"
+                                               " required checks pass; never a provider or Git merge of another head.")
+        for path in (ENTRY / "SKILL.md", ROOT / "docs/orchestration.md"):
+            with self.subTest(document=path.name):
+                text = " ".join(path.read_text(encoding="utf-8").split())
+                self.assertIn("never a provider or Git merge of another head", text)
 
     def test_every_autopilot_document_states_the_same_user_limit(self):
         limit = ("The guard stops an agent that runs the packaged script, not a process that"
                  " writes the runtime files with the user's filesystem authority")
-        documents = [ENTRY / "SKILL.md", ROOT / "docs/orchestration.md",
-                     *(ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
-                       for host in ("claude", "codex"))]
-        for document in documents:
+        for document in (ENTRY / "SKILL.md", ROOT / "docs/orchestration.md"):
             with self.subTest(document=document.name):
                 text = " ".join(document.read_text(encoding="utf-8").split())
                 self.assertIn(limit, text)
@@ -1297,9 +1274,7 @@ class ContractTests(unittest.TestCase):
         self.assertIn("`status` reports which guards the package declares", docs)
         codex = " ".join((ROOT / "platforms/codex/software-engineering-team/host-contract.md")
                          .read_text(encoding="utf-8").split())
-        for fragment in ("both the `UserPromptSubmit` arming hook and the `PreToolUse` question"
-                         " hook need that trust",
-                         "`send_user_message_async`", "`request_user_input_async`",
+        for fragment in ("trusts them in `/hooks`", "`request_user_input_async`",
                          "`send_message_to_user_async`"):
             self.assertIn(fragment, codex)
 

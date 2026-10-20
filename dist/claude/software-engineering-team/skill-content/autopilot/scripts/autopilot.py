@@ -207,16 +207,16 @@ def package_guard() -> tuple[str | None, str]:
 
 
 def main_checkout(project: Path) -> Path:
-    import delivery_git
+    import project_paths
 
-    return delivery_git.main_worktree(project)
+    return project_paths.main_worktree(project)
 
 
 def state_dir(project: Path) -> Path:
     """The autopilot runtime directory of the checkout's main worktree."""
-    import delivery_git
+    import project_paths
 
-    runtime = delivery_git.runtime_root(main_checkout(project))
+    runtime = project_paths.runtime_root(main_checkout(project))
     directory = runtime / "autopilot"
     for part in (runtime.parents[1], runtime.parent, runtime, directory):
         if part.is_symlink():

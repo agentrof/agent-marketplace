@@ -27,6 +27,7 @@ import delivery_governance
 
 import delivery_result
 import file_lock
+from project_paths import main_worktree, runtime_root  # noqa: F401 - shared with the fast lane
 from vault_check import rel_posix
 
 
@@ -104,11 +105,6 @@ def worktree_paths(main_worktree: Path, delivery_id: str,
     if story_id is not None:
         paths["item"] = root / "items" / story_key(story_id)
     return paths
-
-
-def runtime_root(main_worktree: Path) -> Path:
-    """Return the project-local disposable runtime anchor."""
-    return main_worktree / ".agentrof" / "agent-marketplace" / ".runtime"
 
 
 def writer_receipt_paths(main_worktree: Path, delivery_id: str,
@@ -6238,28 +6234,6 @@ def merge_candidate(root: Path, first_parent: str, second_parent: str,
 def find_delivery_dir_from_remote(root: Path, remote: str, delivery_id: str) -> Path | None:
     from delivery_compile import docs_root, find_delivery
     return find_delivery(docs_root(root), delivery_id)
-
-
-def main_worktree(root: Path) -> Path:
-    common = Path(run_git(root, "rev-parse", "--git-common-dir"))
-    if not common.is_absolute():
-        common = (root / common).resolve()
-    output = run_git(root, "worktree", "list", "--porcelain")
-    records = output.split("\n\n") if output else []
-    candidates = []
-    for record in records:
-        line = next((line for line in record.splitlines() if line.startswith("worktree ")), "")
-        if line:
-            candidate = Path(line.removeprefix("worktree ")).resolve()
-            candidate_common = (candidate / ".git").resolve() if (candidate / ".git").is_file() else candidate / ".git"
-            if candidate_common.exists() or candidate == root.resolve():
-                candidates.append(candidate)
-    if not candidates:
-        raise RuntimeError("main worktree cannot be resolved")
-    for candidate in candidates:
-        if (candidate / "workspace" / "config.json").exists():
-            return candidate
-    return candidates[0]
 
 
 def preflight(project_root: Path, delivery_id: str, story_id: str | None = None,

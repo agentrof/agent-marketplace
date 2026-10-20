@@ -131,8 +131,8 @@ class Project:
                 if args == ("worktree", "list", "--porcelain"):
                     return f"worktree {root}\nHEAD {'0' * 40}\nbranch refs/heads/main\n"
                 raise AssertionError("unexpected Git operation: " + " ".join(args))
-            import delivery_git
-            stack.enter_context(mock.patch.object(delivery_git, "run_git", side_effect=git_output))
+            import project_paths
+            stack.enter_context(mock.patch.object(project_paths, "run_git", side_effect=git_output))
         hooks = Path(stack.enter_context(tempfile.TemporaryDirectory())) / "hooks.json"
         if armed:
             hooks.write_text(json.dumps(ARMED_HOOKS), encoding="utf-8")

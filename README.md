@@ -155,7 +155,7 @@ Smallest complete change, plain-language review and a shortcut debt ledger. Deve
 
 Codex runs the ponytail hooks only after the owner trusts them once in /hooks.
 
-Environment: `PONYTAIL_DEFAULT_MODE=full`.
+Environment: `PONYTAIL_DEFAULT_MODE=full`, `PONYTAIL_SUBAGENT_MATCHER=^software-engineering-team[:-](backend-developer|frontend-developer|devops-engineer)(-mechanical)?$`.
 
 <!-- companions:end -->
 

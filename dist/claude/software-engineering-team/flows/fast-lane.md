@@ -83,7 +83,7 @@ The task's `rigor` sets the verification:
 | Rigor | Reviewers | Live tests | Merge |
 |---|---|---|---|
 | `normal` (default) | one `code-reviewer` | only when the change really affects a live group | auto-merge on green CI |
-| `high` | the `code-reviewer` and a second one with the security and data-loss lens | every affected live group, always | the owner merges |
+| `high` | the `code-reviewer` and the `security-reviewer` | every affected live group, always | the owner merges |
 
 Role routing pulls a team role into a task only where it adds value.
 `start` and `approve` match the task's kind, size, named files and words
@@ -145,9 +145,9 @@ its diff changes, has no verdict; a `suggest` role never blocks.
 6. Review. Spawn one `code-reviewer` in the foreground with the task and
    the output of `gh pr diff <pr>`. It checks each acceptance criterion
    against the diff and its tests and returns findings with severities. At
-   `high`, spawn a second `code-reviewer` in the foreground, resolved with
-   `--class security_review`, with the same inputs and the lens: authentication and authorization, secret handling,
-   data loss, irreversible operations and their rollback. Only a critical
+   `high`, or when a risk flag applies, also spawn the read-only
+   `security-reviewer` in the foreground with the same inputs; it walks its
+   security and data-loss checklist. Only a critical
    finding blocks: the developer fixes it on the branch, and the reviewer
    that raised it re-reads only the fix diff, once. Every other finding
    becomes one issue in the project's repository through `gh issue create`,

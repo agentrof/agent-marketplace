@@ -70,7 +70,7 @@ The team flow owns plans, task files, branches, worktrees, commits, pull request
 | Fix pass | same writer | superpowers:receiving-code-review | applying review findings |
 | Team skill authoring | plugin maintainers | superpowers:writing-skills | writing or changing a skill |
 | PR body, docs, README, upstream issue | writer, deliver | humanizer, embedded mode | prose deliverables; not commit messages |
-| Review, high rigor | security reviewer lens | security-audit guidance mode | auth, tenant data, secrets, money, deletion |
+| Review, high rigor | security-reviewer | security-audit guidance mode | auth, tenant data, secrets, money, deletion |
 | Full security audit | owner request only | security-audit full mode | explicit audit request, reports outside the repo |
 | Architecture change | software-architect | diagram-design (architecture, architecture-delta, sequence, ER) | a structural change to system-architecture |
 | Write UI | frontend-developer | impeccable (craft, polish, harden, adapt) | the task touches UI |

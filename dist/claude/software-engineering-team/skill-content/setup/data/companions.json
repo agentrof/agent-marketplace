@@ -99,7 +99,7 @@
         }
       },
       "routing": [
-        {"step": "Review, high rigor", "role": "security reviewer lens", "skill": "security-audit guidance mode", "when": "auth, tenant data, secrets, money, deletion"},
+        {"step": "Review, high rigor", "role": "security-reviewer", "skill": "security-audit guidance mode", "when": "auth, tenant data, secrets, money, deletion"},
         {"step": "Full security audit", "role": "owner request only", "skill": "security-audit full mode", "when": "explicit audit request, reports outside the repo"}
       ]
     },

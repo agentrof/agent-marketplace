@@ -573,7 +573,9 @@
       "experience-reviewer",
       "solution-reviewer-lens"
     ],
-    "security_review": []
+    "security_review": [
+      "security-reviewer"
+    ]
   },
   "schema_version": 3
 }

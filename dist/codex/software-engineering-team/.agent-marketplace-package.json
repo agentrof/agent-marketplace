@@ -133,6 +133,9 @@
     "agents/qa-engineer.md":
       "0779606e15a835e9f3704a3d35e13b21afe253cb45a160a21ce4987608a858ac"
     ,
+    "agents/security-reviewer.md":
+      "9c8c4a120dfffa1b3040a5c369d46a11459caeb175798ea09e9c5ecb4b2ae7a3"
+    ,
     "agents/software-architect-escalated.md":
       "f0e8cee7a6b4e0f606ab22b99b1a0fb86102afc0429a04dc4ff13cd70f02f806"
     ,
@@ -200,7 +203,7 @@
       "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
     ,
     "flows/fast-lane.md":
-      "205e2d9a2cf5fa475725af0aaa1f7f06e5f75ccffa03f4d975efffa62a41af28"
+      "eadefdf487b9786f87b0fa027767f6e59c0bc1b4b939794883de2b62c7b84115"
     ,
     "flows/operation.md":
       "26b336ebc9fb9737b681e76e6ef87886b331ac40588dfc8457b7c8584e7c9d64"
@@ -671,7 +674,7 @@
       "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
     ,
     "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "a2ab0fc1cd284ceed0c0e0e234040ce3e6c060ba5227577a93add11011e2c7b5"
+      "5cede00d18c9c40c48dfafe78e39d4c48ec29f3bea728080668d1499cc7e1991"
     ,
     "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
       "ddc02ad48cbf5b91a33557b97363f6a2dfdc83245a4e71f3109bd93e5e612b45"
@@ -983,7 +986,7 @@
       "b5ec2c00dc33dfdf1eeb33f413ae2f110febd4eed82f8b256b331ec61353b76f"
     ,
     "skill-content/setup/data/companions.json":
-      "c3dd675ca93141a17d3e1f90206b5cd268bc3891453eb55aa95dfd2385e5324a"
+      "9a51eff45f55b8f1f094d7cf294930b57d4048dc4b835d86d9963e6faafe2d37"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "598c71d4a7c4d0b72d8a57d2bc18898292583a7c692d3d227d0e12a50218a39b"
@@ -1217,10 +1220,10 @@
       "a7126597ce9ea9103be1d443ab748322ddf880e7438ec38fd9d7d13db4134c34"
     ,
     "templates/AGENTS.override.md":
-      "e366c5d255b1a7209994c947435f09449a6343452f1fac85b66282e93a37bbf1"
+      "6d6e4668598e93a813e7cd9a96cd3e2d3794170f2334c8f7284faf26b2457234"
     ,
     "templates/CLAUDE.md":
-      "6925bf2d36bdf9323f4cd1b05d8237ec302423077d778b4703c52937cff790b6"
+      "107b7b4cd7862dc27130223c22ccc1d305d18e03a176ae9eb7557e83eddc0fb1"
     ,
     "templates/ci-tests.yml":
       "0d05078ab3c81a50c20b8a08ce2f1bef6c8fe7b01d7c6230e122e1b140a49cc7"
@@ -1241,7 +1244,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/model-classes.json":
-      "b8e53929f258a2ce40631ec2a44c8baaca257072e95e7565ecf58172113384ae"
+      "f23ebbe94b5bb7d3c7622c69fe7a2d09e21afa948f3225a8870385a4345a3bbf"
     ,
     "templates/project-context-policy.json":
       "1064215323cacff3ba2748f6992ac5d43026183c4f30e43b1633d579800d951f"
@@ -1268,7 +1271,7 @@
       "c0d6b90d546a1277663a5a8d68c63dbcd209c1e5475d2df5c26c1e1e45a2753f"
     ,
     "templates/task-input-policy.json":
-      "c26391187d793f2e715bdba7c60bf9ead15d96ab842fc3784bb3b6ab6d4facef"
+      "446519a98c41904a0df07c72e2fde271d5198337bd11d34d5290200ce41a4e3f"
     ,
     "templates/vault-index-policy.json":
       "d44d46600e86a49f6b054d6a79ce989ff8b43740357fa8c8b0cfe9b015755584"

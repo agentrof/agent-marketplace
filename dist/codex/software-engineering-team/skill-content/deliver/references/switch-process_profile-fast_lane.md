@@ -92,9 +92,9 @@ a story (source_story, covers) or stand alone.
   lands the pull request once CI is green and the reviewer passed.
 - The task's `rigor` is `normal` by default. At `high`, proposed for
   authentication, credentials, secrets, data deletion and irreversible
-  actions and confirmed by the owner on the task, a second reviewer with the
-  security and data-loss lens joins, every affected live group runs and the
-  owner merges.
+  actions and confirmed by the owner on the task, the read-only
+  `security-reviewer` joins, every affected live group runs and the owner
+  merges.
 - At rigor `normal`, live tests run only when the diff touches environment
   code or live test files and the change can alter what a live group
   proves; otherwise they run on demand.

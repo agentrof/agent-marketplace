@@ -55,6 +55,9 @@
     "qa_engineer": [
       "qa-verification"
     ],
+    "security_reviewer": [
+      "code-review"
+    ],
     "software_architect": [
       "software-architecture"
     ],
@@ -216,7 +219,8 @@
         "backend-developer",
         "frontend-developer",
         "devops-engineer",
-        "code-reviewer"
+        "code-reviewer",
+        "security-reviewer"
       ],
       "scope_kind": "story",
       "project_state": true,
@@ -349,6 +353,7 @@
     "design-system-reviewer",
     "domain-expert",
     "experience-reviewer",
+    "security-reviewer",
     "solution-reviewer"
   ],
   "required_references": {
@@ -403,6 +408,9 @@
     "qa_engineer": [
       "qa-verification"
     ],
+    "security_reviewer": [
+      "code-review"
+    ],
     "software_architect": [
       "software-architecture"
     ],
@@ -434,7 +442,8 @@
       "qa-engineer"
     ],
     "deliver": [
-      "code-reviewer"
+      "code-reviewer",
+      "security-reviewer"
     ]
   },
   "technology_method_skills": [

@@ -5,182 +5,103 @@ Spawn template: paste `{{constitution}}` into every role prompt.
 Sources first, per constitution section 5: every role reads the sources the
 task file lists and greps `workspace/docs/` for anything missing.
 
-Switch `step_timing`: at `recorded`, the coordinator runs
-`step_timing.py start --run <run> --step <step> [--budget <id>]` before
-each step and `step_timing.py end --run <run> --span <span>` after it,
-and records each role spawn with `--kind spawn --parent <step span>
---role <role> --phase reading|writing|review|re_review|waiting`. An end
-that returns overrun is reported to the owner at once with its
-breakdown, largest contributor and lever. The run ends with
-`step_timing.py report --run <run> --write`, as
-`skill-content/deliver/references/switch-step_timing-recorded.md`
-defines. Switch `step_budgets`: at `enforced`, each budgeted step is
-compared with its maximum, the owner's parameter or the package target
-in `skill-content/configure/data/step-budgets.json`; a step may finish
-well under it, and only an exceeded maximum is reported, never blocking,
-as
-`skill-content/deliver/references/switch-step_budgets-enforced.md`
-defines.
-Follow `skill-content/deliver/references/fast-lane.md` and the steps
-below.
+Switch `step_timing`: at `recorded`, time each step and role spawn with
+`step_timing.py` as
+`skill-content/deliver/references/switch-step_timing-recorded.md` defines.
+Switch `step_budgets`: at `enforced`, report a step that exceeds its maximum,
+never blocking, as
+`skill-content/deliver/references/switch-step_budgets-enforced.md` defines.
+Tasks, links and parallel lanes follow
+`skill-content/deliver/references/fast-lane.md`.
 
-One request becomes one task, one branch and one pull request to the
-target branch. Git, the pull request and the project's CI are the protocol.
+One request becomes one task, one branch and one pull request. Each step names
+its `scripts/task_lane.py` verb. The main session only orchestrates: large
+reads and proofs go to spawned roles, every role runs in the foreground, and
+nobody writes into a tree while a verification run or a delegated role reads
+it. Each spawn passes what `model_class.py resolve --role <role> --task <id>
+--project-root . --host <host> --json` returns (`--class <class>` when a step
+names one).
 
-The main session only orchestrates: large reads and proofs go to spawned
-roles. It spawns every role in the foreground, one call that returns the
-role's result, never a background agent that would report to it. Nobody
-writes into a tree while a verification run or a delegated role reads it.
-Each spawn passes the model and effort, or names the agent, that
-`model_class.py resolve --role <role> --task <id> --project-root . --host
-<host> --json` returns; a step that names a class passes `--class <class>`.
-
-Each step names its `scripts/task_lane.py` verb. The task holds the
-request and approval times; GitHub holds the pull request, review, CI and
-merge times. Nothing is recorded after the merge.
-
-A task is `build` (code, devops, tests) or `knowledge` (documents only:
-analysis, design, architecture records, backlog, contracts). One request that
-needs both is two tasks, run side by side. Request-to-merge targets per kind
-and size are in `skill-content/deliver/data/targets.json` (knowledge 1/3/5,
-max 15 minutes; build 5/15/30, max 60) and `/retrospective` reports each task
-against its own.
-
-Knowledge task, the short path: `start --knowledge --size s|m|l`. The request
-is the approval: no criteria and no `approve`. The main session
-edits the documents itself and spawns the owning role only at size `l`;
-then it runs `open-pr`, the review of step 6 only when `review-inputs`
-routes a reviewer, and `merge`. The file on the target branch is in force.
-
-The task's `rigor` sets the verification:
+A task is `build` (code, devops, tests) or `knowledge` (documents only); a
+request that needs both is two tasks run side by side. Request-to-merge
+targets are in `skill-content/deliver/data/targets.json`. Knowledge task:
+`start --knowledge --size s|m|l`; the request is the approval. The main
+session edits the documents, spawning the owning role only at size `l`, then
+runs `open-pr`, step 6 when `review-inputs` routes a reviewer, and `merge`.
 
 | Rigor | Reviewers | Live tests | Merge |
 |---|---|---|---|
-| `normal` (default) | one `code-reviewer` | only when the change really affects a live group | auto-merge on green CI |
-| `high` | the `code-reviewer` and the `security-reviewer` | every affected live group, always | the owner merges |
+| `normal` (default) | `code-reviewer` | only when the change affects a live group | auto-merge on green CI |
+| `high` | `code-reviewer` and `security-reviewer` | every affected live group | the owner, or auto under a delegation |
 
-Any risk flag in the task's `risks` (`auth`, `secrets`, `data_placement`,
-`migration`, `irreversible`) also runs the `security-reviewer` and escalates
-the spawns `model_class.py --task` resolves, at either rigor.
+Rigor is `high` for authentication, credentials, secrets, tenant data, money,
+data deletion or an irreversible action. Any flag in `risks` (`auth`,
+`secrets`, `data_placement`, `migration`, `irreversible`) also adds the
+`security-reviewer` and escalates the resolved spawns.
 
-Method skills: `skill-content/deliver/data/task-triggers.json` maps paths and
-words to the method skill they make mandatory (data model, schema, migration
-or SQL to `sql-database-design`, a document store to `nosql-database-design`,
-container, compose, chart or cluster files to `docker-compose`, Python
-service files to `python-fastapi`, React UI to `react-typescript`); a project
-replaces or adds a rule in `.agentrof/task-triggers.json`. Every stack is
-accepted; a stack no rule names is worked from the code.
+Method skills: `skill-content/deliver/data/task-triggers.json` (project rules
+in `.agentrof/task-triggers.json`) makes a method skill mandatory for the
+paths and words it matches; a stack no rule names is worked from the code.
+Role routing: `start` and `approve` match the task against
+`skill-content/deliver/data/role-routing.json` (project rules in
+`.agentrof/role-routing.json`) and write `roles` as `<role>:<mode>:<step>`.
+The software architect is `require` for a data model, schema or migration
+change, a structural change or size `l`; other roles are `suggest`. Spawn
+each routed role with the task, the plan and only the notes it rests on,
+within the rule's `time_budget_minutes` and with its `ask`; the architect
+applies the record changes its pre-check calls for in the same spawn. Record
+the answer with `role-check --task <id> --role <role> --verdict go|changes
+--note "<reasons>"` and apply `changes` before writing. `open-pr` refuses
+while a `require` role has no verdict.
 
-Role routing pulls a team role into a task only where it adds value.
-`start` and `approve` match the task's kind, size, named files and words
-against `skill-content/deliver/data/role-routing.json` (a project replaces
-or adds a rule in `.agentrof/role-routing.json`) and write the hits to the
-task's `roles` field as `<role>:<mode>:<step>`; the main session may add one
-by hand. The software architect is `require` for a build task that changes a
-data model, schema or migration, makes a structural change (new module,
-service, package or app, a public interface or contract, a cross-component
-dependency) or is size `l`; the other roles are `suggest`. Spawn each routed
-role in the foreground with the task, the plan and only the architecture or
-solution notes it rests on, within the rule's `time_budget_minutes`, and give
-it the rule's `ask`. The architect applies the record changes its pre-check
-calls for in the same spawn. Record its answer with `role-check --task <id> --role
-<role> --verdict go|changes --note "<reasons>"`; apply a `changes` verdict
-before writing, and file a minor finding as an issue.
-`open-pr` refuses while a `require` role, routed by the task or by the files
-its diff changes, has no verdict; a `suggest` role never blocks.
-
-1. Request. Run `start --title "<short title>" --request-file <file>` from
-   the project checkout, with the user's request verbatim in the file, and
-   `--delivery DLV-###` when the user groups tasks under a Delivery label.
-   A task that delivers part of a backlog story adds `--source-story ST-###
-   --covers <numbers>`; a standalone task may add `--epic EP-###`.
-   It creates and pushes `task/<id>-<slug>` from `origin/main`, writes the
-   task skeleton under `workspace/docs/backlog/tasks/` with `requested_at`,
-   and proposes `rigor: high` when the request names authentication,
-   credentials, secrets, data deletion or another irreversible action.
-   It also writes `risks` (each `--risk <flag>` and the flags the request
-   hits), `applied_skills` (the method skills the request's words and files
-   trigger) and `sources` (each `--source <file>` and each existing doc the
-   request names, as `path@<sha256 prefix>`).
-2. Task. Fill the task in one pass: the request with its `### Do` list,
-   3 to 8 numbered acceptance criteria, each one verifiable property with
-   its exact codes and limits, among them a filled `Live wiring:` criterion
-   (where the running system serves the change and how it is seen working)
-   and a `Docs delta:` criterion (the docs it changes, or none), a `## Tests`
-   map with a `- <criterion numbers>: <test>` line for every criterion, and
-   `size` s, m or l. Set `rigor: high` yourself when the change touches
-   authentication, credentials, secrets, tenant data, money, data deletion
-   or an irreversible action even if the proposal missed it, and add each risk flag the change
-   carries to `risks`. Add every planned file's triggered skill to
-   `applied_skills` and every doc the task rests on to `sources`; `approve`
-   hashes the sources added. `lint --task <id>` until it passes. Show the task to
-   the owner with the proposed rigor; the owner confirms or changes rigor on
-   the task. On the owner's go, or under a standing delegation, run
-   `approve --task <id>`; it writes `approved_at`. Approval never blocks
-   defining: while it waits, define the next task, or the owner pre-approves
-   a batch. A request that needs more than 8 criteria is two tasks; split a
-   size `l` task by layer or deployable, or run its writers in parallel on
-   disjoint files.
-   Then run the role checks `approve` lists under `roles` (Role routing above).
-3. Write. Spawn the owning developer role in the foreground with the task,
-   the branch, the files it names and every skill in `applied_skills`, which
-   it loads before writing. It writes the change and its tests on
-   the branch: an app's own tests stay inside that app, and shared suites
-   go under the configured `tests_root` (default `workspace/tests`). It
-   commits, and runs the project's test command for the suites it
-   touched, the command the CI workflow runs on pull requests (`make test`
-   unless the project declares another). Architecture records and contracts
-   the change needs are edited in the same branch.
-4. Live tests. At `normal`, run a live group only when the diff touches
-   environment code or live test files and the change can really alter what
-   that group proves; say which group and why. At `high`, run every live
-   group the diff can affect. Otherwise live tests are not part of the story
-   and run on demand through the project's live command. Each worktree that
-   runs live checks gets its own environment namespace.
-5. Pull request. Run `overlap` and pass its warnings on; they never block.
-   Run `open-pr --task <id>`. It marks the task delivered, pushes the
-   branch and opens the pull request. Switch `pr_proof`: at `local_record`,
-   run `prove --task <id>` first; `open-pr` refuses without its green record
-   of a clean HEAD, as
+1. Request. `start --title "<short title>" --request-file <file>` with the
+   request verbatim (`--source-story ST-### --covers <numbers>`, `--epic
+   EP-###` or `--delivery DLV-###` when they apply). It pushes
+   `task/<id>-<slug>` from `origin/main` and writes the skeleton with
+   `requested_at`, a proposed rigor, `risks`, `applied_skills` and `sources`
+   as `path@<sha256 prefix>`.
+2. Task. Fill it in one pass: the `### Do` list; 3 to 8 numbered criteria,
+   each one verifiable property with exact codes and limits, including a
+   `Live wiring:` and a `Docs delta:` criterion; a `## Tests` line per
+   criterion; `size`; rigor, risks, triggered skills and sources. `lint
+   --task <id>` until it passes, show the task with its rigor, and on the
+   owner's go or a standing delegation run `approve --task <id>`. Approval
+   never blocks defining: define the next task meanwhile, or the owner
+   pre-approves a batch. More than 8 criteria is two tasks; split a size `l`
+   task by layer or deployable, or run its writers in parallel on disjoint
+   files. Then run the routed role checks.
+3. Write. Spawn the owning developer with the task, the branch, its files and
+   every `applied_skills` skill, loaded before writing. It writes the change
+   and its tests (app tests inside the app, shared suites under `tests_root`),
+   records and contracts the change needs, commits, and runs the CI test
+   command for the suites it touched.
+4. Live tests. At `normal`, run a live group only when the diff can alter what
+   it proves, and say which and why; at `high`, every affected group. Each
+   worktree that runs live checks gets its own environment namespace.
+5. Pull request. Run `overlap` (warnings only), then `open-pr --task <id>`.
+   Switch `pr_proof`: at `local_record`, run `prove --task <id>` first, as
    `skill-content/deliver/references/switch-pr_proof-local_record.md` defines.
-6. Review. Run `review-inputs --task <id>`. It routes by the files the
-   branch changes: code to `code-reviewer`, `workspace/docs/business-analysis`
-   to `analysis-challenger`, `workspace/docs/solution-design` or
-   `workspace/docs/system-architecture` to `solution-reviewer`, and adds the
-   read-only `security-reviewer` at `high` or on any risk flag. Spawn every
-   listed reviewer in the foreground in parallel with the task, the output
-   of `gh pr diff <pr>` and the `review-inputs` result. Each checks every
-   acceptance criterion against the diff and its tests and returns findings
-   with severities; a skill in `missing_skills` that the change did not
-   follow is a major finding, and a source in `changed_sources` is checked
-   for a change the task now contradicts. The pull request merges with 0
-   critical and 0 major findings. The same writer fixes each critical or
-   major finding on the branch, and only the reviewer that raised it
-   re-reads the fix diff, once; at most one fix round, then the owner
-   decides. Trivial minors are fixed in one commit on the branch; only
-   out-of-scope minors become one grouped issue in the project's repository
-   through `gh issue create`, linked from a pull request comment. A design
-   or policy question found in review goes to the owner as a decision, never
-   patched by the developer.
-7. Merge. The required CI runs the full suite on the branch head merged
-   with current main; registries the change touches, such as path maps and
-   grant lists, are updated in the same pull request. Run `merge --task <id>
-   --pr <pr>`. It posts the review pass on the pull request. At `normal` it
-   turns on auto-merge, so the pull request merges when its required CI
-   checks are green; a red check is fixed on the branch like a critical
-   finding. At `high` it leaves the merge to the owner, unless an active
-   delegation allows `merge`: then pass `--delegated` and it auto-merges too.
-   A green pull request never waits on a chat message: when it is left to
-   the owner, report it with its expected finish time.
-8. Report the task, the pull request and its merge state. `/retrospective`
-   reads the times later.
-   Pass the review's counts to `merge` as `--critical <n> --non-critical <n>
-   --filed <n>`, and start a task that repairs a defect an earlier task let
-   through with `--fixes TK-###`; `/retrospective` reads both as quality.
-   When a task needed another pass for a reason no red run, finding or
-   verdict shows, record it with `rework --task <id> --category <cause>
-   --note "<why>"`. `/retrospective` groups the rework causes; only the
-   recurring ones become lessons, memory candidates or process proposals.
+6. Review. Spawn every reviewer `review-inputs --task <id>` lists, in
+   parallel, with the task, `gh pr diff <pr>` and its result. Each checks
+   every criterion against the diff and tests; an unfollowed skill in
+   `missing_skills` is major, and a source in `changed_sources` is checked for
+   a contradiction. Merge needs 0 critical and 0 major. The same writer fixes
+   them on the branch and only the raising reviewer re-reads once; after one
+   fix round the owner decides. Trivial minors are fixed in one commit;
+   out-of-scope minors become one grouped issue (`gh issue create`). A design
+   or policy question goes to the owner, never patched by the developer.
+7. Merge. CI runs the full suite on the branch merged with current main;
+   registries the change touches are updated in the same pull request. Run
+   `merge --task <id> --pr <pr> --critical <n> --non-critical <n> --filed
+   <n>`: at `normal` it auto-merges on green CI, and a red check is fixed like
+   a critical finding. At `high` the owner merges unless an active delegation
+   allows `merge`, then add `--delegated`. A green pull request never waits on
+   a chat message: report one left to the owner with its expected finish
+   time.
+8. Report the task, the pull request and its merge state. A task repairing an
+   earlier task's defect starts with `--fixes TK-###`; extra passes no red
+   run or finding shows are recorded with `rework --task <id> --category
+   <cause> --note "<why>"` for `/retrospective`.
 
-The task is done when its pull request is merged. The task file on the target
-branch is the durable task record.
+The task is done when its pull request is merged; the task file on the target
+branch is the durable record.

@@ -41,4 +41,4 @@ Every seam in the ownership map names how the two sides relate. The options, in 
 - Each boundary yields exactly one owner row: module or file group, owning role, and the interface contract named at every seam.
 - Every seam also names its context-mapping relation (anti-corruption, open host, shared kernel, conformist) so the reviewer can check imports against the declared relation.
 - No overlaps: a file group appearing in two rows blocks parallel implementation. Resolve the overlap before handing the map to the flow.
-- Copies across rows are snapshots: any field read from another row's data and stored locally carries the constitution's snapshot declaration (refresh path, staleness tolerance), recorded in the decision log.
+- Copies across rows are snapshots: any field read from another row's data and stored locally carries a snapshot declaration (refresh path, staleness tolerance), recorded in the decision log.

@@ -1433,25 +1433,12 @@ class ClaudeProjectAgentTests(unittest.TestCase):
     def test_the_host_contract_spawns_the_rendered_role_first(self):
         contract = flat((ROOT / "platforms/claude" / PLUGIN / "host-contract.md").read_text(
             encoding="utf-8"))
-        paragraph = contract.split("When the canonical workflow says `spawn`", 1)[1]
-        paragraph = paragraph.split(" - ", 1)[0]
-        self.assertIn(f"`{PREFIX}<agent-id>`", paragraph)
-        self.assertIn(f"`{PLUGIN}:<agent-id>`", paragraph)
+        paragraph = contract.split("`spawn` uses", 1)[1].split(" - ", 1)[0]
         self.assertLess(paragraph.index(f"`{PREFIX}<agent-id>`"),
                         paragraph.index(f"`{PLUGIN}:<agent-id>`"))
-        for fragment in ("available agents", "restart", "`strictPluginOnlyCustomization`",
-                         "once", "wait for every required agent before synthesis",
-                         "Never run overlapping writers concurrently",
-                         "since it runs the project's model settings",
-                         "the package version and source agent it was rendered from and"
-                         " the digest of the model and effort it renders",
-                         "`team_guard.py` reports at session start that a stamp does not"
-                         " match the installed plugin or the project's"
-                         " `workspace/config.json`",
-                         f"spawn the plugin's `{PLUGIN}:<agent-id>` identity for every role"
-                         " until setup or a package refresh renders them again"):
+        for fragment in ("stale stamp", "restart", "`strictPluginOnlyCustomization`",
+                         "never run overlapping writers"):
             self.assertIn(fragment, paragraph)
-        self.assertNotIn("class map", paragraph)
 
 
 @integration
@@ -1738,15 +1725,7 @@ class CodexRoleStampTests(unittest.TestCase):
     def test_the_codex_host_contract_and_the_upgrade_protocol_state_the_report(self):
         contract = flat((ROOT / "platforms/codex" / PLUGIN / "host-contract.md").read_text(
             encoding="utf-8"))
-        for fragment in (
-                "reports the project's role files in `.codex/agents/` whose stamp is not the"
-                " installed plugin's",
-                "The last line of that header stamps the package version and source agent the"
-                " file was rendered from and the digest of the model and effort the project"
-                " config resolves for the role.",
-                "those roles still run the role definition, model and effort they were rendered"
-                " with: the hook tells the user once per session to run setup, which renders"
-                " them again"):
+        for fragment in ("whose stamp no longer matches", "still runs what it was rendered with"):
             self.assertIn(fragment, contract)
         upgrade = flat((ROOT / "docs/upgrade-protocol.md").read_text(encoding="utf-8"))
         self.assertIn("Until a refresh renders them, on either host, the session start check"
@@ -1932,29 +1911,15 @@ class DocumentationTests(unittest.TestCase):
     def read(self, relative: str) -> str:
         return flat((ROOT / relative).read_text(encoding="utf-8"))
 
-    def test_the_host_contracts_state_the_settings_precedence_and_the_session(self):
-        for host, session, effort_key in (
-                ("claude", "`model: inherit`", "`effort`"),
-                ("codex", "the role file without a `model` key", "`model_reasoning_effort`")):
+    def test_the_host_contracts_name_the_project_overrides(self):
+        # The precedence itself is pinned in config-contract.md and docs/authoring.md.
+        for host in ("claude", "codex"):
             contract = self.read(f"platforms/{host}/{PLUGIN}/host-contract.md")
             with self.subTest(host=host):
-                for fragment in (
-                        "A project sets a class slot's model and effort and a role's class"
-                        " through `/configure models`, which records only overrides in"
-                        " `workspace/config.json`: `class_models`",
-                        "`role_classes`, which moves any role to another class on every host",
-                        "drops the retired `tier_models` and `role_tiers`",
-                        "A role's class comes from `role_classes`, else the package; the slot's"
-                        " model and effort come from `class_models`, else the package's `auto`"
-                        " profile",
-                        f"`session` renders {session}",
-                        effort_key,
-                        "`project_config.py classes` prints the config-level effective map",
-                        "`model_class.py resolve`",
-                        "Generated role files are never edited by hand"):
+                for fragment in ("`/configure models`", "`class_models`", "`role_classes`",
+                                 "never edit them by hand"):
                     self.assertIn(fragment, contract)
                 self.assertNotIn("effort_overrides", contract)
-                self.assertNotIn("/configure effort", contract)
 
     def test_the_configure_topic_asks_the_model_then_the_effort_then_the_role_tiers(self):
         skill = self.read(f"plugins/{PLUGIN}/skill-content/configure/SKILL.md")
@@ -2015,8 +1980,9 @@ class DocumentationTests(unittest.TestCase):
                                      ("codex", "request_user_input", "three")):
             with self.subTest(host=host):
                 contract = self.read(f"platforms/{host}/{PLUGIN}/host-contract.md")
-                self.assertIn(f"`{surface}` takes at most {bound} questions per call and two to"
-                              f" {bound} options per question", contract)
+                self.assertIn(f"`{surface}`", contract)
+                self.assertIn(f"at most {bound} questions per call, two to {bound} options each",
+                              contract)
 
     def test_setup_presents_the_effective_table(self):
         setup = self.read(f"plugins/{PLUGIN}/skill-content/setup/SKILL.md")

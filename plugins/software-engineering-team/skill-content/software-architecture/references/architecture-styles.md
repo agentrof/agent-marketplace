@@ -36,7 +36,7 @@ The style vocabulary for structure verdicts. Every style verdict lands in the de
 - Dependency rules: command handling validates against write-side state only, never against a projection; read models are disposable and rebuildable from write-side facts.
 - When NOT to, which is the default answer: the write model serves reads fine in most systems. Separation adds a second model, a projection path, and a staleness contract. DON'T adopt it for symmetry, purity, or anticipated load.
 - Earns its keep only against a recorded symptom: a quantified read budget or query shape the write model cannot serve within the cited budget.
-- Every projection is a denormalized copy of mutable data: snapshot semantics apply, with a declared refresh path and staleness tolerance, per the constitution rule.
+- Every projection is a denormalized copy of mutable data: snapshot semantics apply, with a declared refresh path and staleness tolerance.
 
 ## Symptom-to-Cause Table
 

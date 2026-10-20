@@ -275,6 +275,15 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertFalse(result["auto_merge"])
         self.assertFalse(any(call[:3] == ("gh", "pr", "merge") for call in calls))
 
+    def test_high_rigor_auto_merges_under_a_delegation(self):
+        calls = []
+        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
+            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
+                                                          detail=None, delegated=True),
+                                         self.project("high"))
+        self.assertTrue(result["auto_merge"])
+        self.assertIn(("gh", "pr", "merge", "9", "--auto", "--merge"), calls)
+
     def test_issues_open_only_for_named_proposals_in_the_origin_repository(self):
         root = self.project("normal")
         calls = []

@@ -196,7 +196,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         self.assertEqual(config["schema_version"], 2)
         self.assertEqual(set(config), {
             "schema_version", "team_id", "output_language",
-            "terminology_language",
+            "terminology_language", "tests_root", "workspace_layout",
         })
         self.assertNotIn("consumer_refresh_data", config)
         for instructions in (

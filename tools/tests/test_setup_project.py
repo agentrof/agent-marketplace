@@ -1174,7 +1174,8 @@ class SetupInputRulesTests(unittest.TestCase):
     def test_fresh_config_uses_only_the_closed_schema(self):
         value, changed = setup_module.desired_config(self.args, self.config)
         self.assertEqual(value, {"schema_version": 2, "team_id": "software-engineering-team",
-                                 "output_language": "English", "terminology_language": "English"})
+                                 "output_language": "English", "terminology_language": "English",
+                                 **setup_module.project_config.DEFAULTS})
         self.assertEqual(changed, sorted(value))
         self.assertFalse(self.config.exists())
 

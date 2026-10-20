@@ -38,8 +38,10 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    ```
 
    Apply creates the project-local
-   `.agentrof/agent-marketplace/.runtime/` scratch directory, reconciles the
-   managed workspace surfaces and runs its closing gate. A disposable OS guard
+   `.agentrof/agent-marketplace/.runtime/` scratch directory, creates the
+   folders `workspace_layout` in `workspace/config.json` allows, seeds
+   `workspace/experience-design/DESIGN.md` and its `README.md` when absent,
+   reconciles the managed workspace surfaces and runs its closing gate. A disposable OS guard
    serializes mutating setup apply processes. Apply rebuilds its authoritative
    plan under that guard, and each target is rechecked immediately before its
    atomic replacement. If the gate fails, setup restores only exact unchanged

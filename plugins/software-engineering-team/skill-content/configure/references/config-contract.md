@@ -2,8 +2,9 @@
 
 `workspace/config.json` is a closed bootstrap contract, not a project-design
 database. Its keys are `schema_version`, `team_id`, `output_language`,
-`terminology_language` and, once the project overrides the package's role
-settings, `class_models` and `role_classes`. Setup deterministically
+`terminology_language`, `tests_root`, `workspace_layout` and, once the
+project overrides the package's role settings, `class_models` and
+`role_classes`. Setup deterministically
 reconstructs this shape, preserving valid language values and overrides
 while dropping retired and unknown keys. Setup writes neither key; an
 override the installed package no longer takes stops setup, naming the slot
@@ -12,8 +13,14 @@ or role, and `project_config.py set-class --default` or `set-role-class
 has. The retired `tier_models` and `role_tiers` fail the check; setup drops
 them.
 
-`output_language` and `terminology_language` are changed through
-`project_config.py set`. Authored note titles are direct user-facing labels,
+`output_language`, `terminology_language`, `tests_root` and
+`workspace_layout` are changed through `project_config.py set`.
+`tests_root` (default `workspace/tests`) is where the project's tests live.
+`workspace_layout` lists the only top-level folders a write may create under
+`workspace/` (`workspace`) and `workspace/docs/` (`docs`); setup creates them
+and the workspace guard refuses any other. Project-specific data goes to
+`workspace/project/<name>/`. Setup writes both from the package defaults when
+absent and keeps the project's values after. Authored note titles are direct user-facing labels,
 not configuration data; a language change does not rewrite them.
 
 `class_models` and `role_classes` are changed through `project_config.py

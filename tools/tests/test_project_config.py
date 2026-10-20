@@ -24,6 +24,7 @@ CONFIG = SCRIPTS / "project_config.py"
 
 CANONICAL_KEYS = {
     "schema_version", "team_id", "output_language", "terminology_language",
+    "tests_root", "workspace_layout",
 }
 
 
@@ -60,8 +61,25 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertEqual(value["team_id"], "software-engineering-team")
             checked = self.run_script(CONFIG, "check", "--config", str(config))
             self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
+            workspace = config.parent
+            for relative in ("tests", "project", "memory", "docs/backlog/tasks",
+                             "docs/backlog/retrospectives", "docs/operation"):
+                self.assertTrue((workspace / relative).is_dir(), relative)
+            self.assertTrue((workspace / "experience-design/DESIGN.md").is_file())
+            self.assertIn("<feature-slug>/exports/",
+                          (workspace / "experience-design/README.md").read_text(encoding="utf-8"))
 
-    def test_only_language_fields_have_a_config_writer(self):
+    def test_layout_rejects_nested_names_and_tests_outside_the_allowlist(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import project_config
+        config = {"tests_root": "workspace/qa",
+                  "workspace_layout": {"workspace": ["docs", "apps/x"], "docs": []}}
+        errors = project_config.layout_errors(config)
+        self.assertIn("workspace_layout.workspace must list unique single path names", errors)
+        self.assertIn("tests_root must lie in a folder workspace_layout.workspace allows", errors)
+        self.assertEqual(project_config.layout_errors({}), [])
+
+    def test_only_declared_fields_have_a_config_writer(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = self.unit_config(Path(temporary))
             written = self.run_script(

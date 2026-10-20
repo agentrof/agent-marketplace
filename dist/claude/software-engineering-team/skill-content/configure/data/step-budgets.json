@@ -1,9 +1,6 @@
 {
   "schema_version": 1,
   "budgets": {
-    "reader_closure_unit": {
-      "summary": "Maximum minutes one reader spends on one changed unit's impact closure, from its spawn to its returned findings."
-    },
     "confirmation_rereview": {
       "summary": "Maximum minutes a confirmation re-review of a fix takes, from its spawn to its verdict, reading only the fix's delta."
     },

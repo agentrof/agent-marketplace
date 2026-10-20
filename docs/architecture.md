@@ -43,18 +43,13 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     every host.
     Setup writes neither, and the package catalog and profiles stay the
     defaults.
-15. Outside an explicitly closed artifact contract, `artifacts/` beneath a
-    policy-valid vault folder holds opaque, local files. Generic artifact
-    content is neither a vault note nor workflow executable behavior; symlinks
-    are forbidden and Markdown may link to real local artifacts.
-16. Every official compiler mutation that writes authored Markdown produces
-    an immediately legal per-write Vault result. After deterministic generated
-    views are rendered, the same tree passes both its scoped Vault gate and its
-    owning compiler gate; producer and consumer contracts are tested together.
-    A tool event may share an immutable Vault model across its changed paths;
-    separate writes retain their immediate pre/post validation boundaries.
-    Virtual patch checks read the complete candidate file view, including
-    generated registries and artifacts, without modifying source files.
+15. An `artifacts/` folder under `workspace/docs/` holds opaque, local
+    files. Its content is neither a note nor workflow executable behavior;
+    Markdown may link to real local artifacts.
+16. Context is found, not packed. When `.agentrof/graphify` holds a graph,
+    a role queries it as a starting point; otherwise it starts from the
+    task's sources and grep. Either way it reads only what the change needs.
+    The graph is generated, disposable and never project truth.
 17. Maintainer issue work starts only from an explicit user instruction in an
     active maintainer session; GitHub issue events never start an agent. The
     protocol may prepare a pull request but never merge one without explicit

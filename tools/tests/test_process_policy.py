@@ -570,7 +570,7 @@ READING_SWITCHES = {
 }
 # Initial targets in minutes, maximums that only report.
 STEP_BUDGET_TARGETS = {"backlog_revision": 10, "confirmation_rereview": 3,
-                       "delivery_and_execution_planning": 15, "reader_closure_unit": 5,
+                       "delivery_and_execution_planning": 15,
                        "requirement_technical": 10, "story_end_to_end": 180}
 # The QA step keys, whose length depends on the project, ship no target (#543).
 QA_STEP_KEYS = ("freeze", "live_run", "live_step", "manual_scenario", "pre_handoff", "qa_lifecycle_gate")

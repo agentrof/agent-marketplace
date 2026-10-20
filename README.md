@@ -142,7 +142,7 @@ uv not found: install it (https://docs.astral.sh/uv/getting-started/installation
 
 Environment: `GRAPHIFY_OUT=.agentrof/graphify`.
 
-Setup writes `.agentrof/graphify/.gitignore`.
+Setup writes `.agentrof/graphify/.gitignore`, `workspace/docs/.graphifyignore`.
 
 ### ponytail
 

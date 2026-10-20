@@ -87,7 +87,9 @@ def codex_disabled() -> set[str]:
             if isinstance(entry, dict) and entry.get("enabled") is False}
 
 
-def file_present(path: Path, content) -> bool:
+def file_present(path: Path, content, if_missing: bool = False) -> bool:
+    if if_missing:
+        return path.is_file()
     if isinstance(content, str):
         return path.is_file() and path.read_text(encoding="utf-8") == content
     current = read_json(path)
@@ -131,7 +133,7 @@ def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dic
     rows, findings = [], []
     for companion in registry["companions"]:
         names = blocked_names(companion)
-        files_ok = all(file_present(root / item["path"], item["content"])
+        files_ok = all(file_present(root / item["path"], item["content"], item.get("if_missing", False))
                        for item in companion.get("files", []))
         for step in companion.get("steps", []):
             rows.append({"id": companion["id"], "host": step["name"],
@@ -194,7 +196,7 @@ def write_files(registry: dict, root: Path) -> None:
     for companion in registry["companions"]:
         for item in companion.get("files", []):
             path, content = root / item["path"], item["content"]
-            if file_present(path, content):
+            if file_present(path, content, item.get("if_missing", False)):
                 continue
             if not isinstance(content, str):
                 content = json.dumps({**read_json(path), **content}, indent=2) + "\n"

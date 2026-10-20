@@ -103,10 +103,16 @@ class CompanionCheckTests(unittest.TestCase):
                         skill.write_text("x\n", encoding="utf-8")
             settings = project / ".claude" / "settings.json"
             settings.write_text('{"permissions": {"allow": ["Bash(ls)"]}}\n', encoding="utf-8")
+            ignore = project / "workspace" / "docs" / ".graphifyignore"
+            ignore.parent.mkdir(parents=True)
+            ignore.write_text("own\n", encoding="utf-8")
+            self.assertEqual(run("apply").returncode, 0)
+            self.assertEqual(ignore.read_text(encoding="utf-8"), "own\n")
+            ignore.unlink()
             self.assertEqual(run("apply").returncode, 0)
             written = {path: path.read_bytes() for path in (
                 settings, codex_home / "config.toml", project / ".diagram-design",
-                project / ".impeccable" / "config.json")}
+                project / ".impeccable" / "config.json", ignore)}
             self.assertEqual(run("apply").returncode, 0)
             self.assertEqual(written, {path: path.read_bytes() for path in written})
             merged = json.loads(settings.read_text(encoding="utf-8"))

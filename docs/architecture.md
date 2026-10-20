@@ -17,9 +17,9 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
    project. No second workspace path is valid.
 8. File names are stable slugs; membership is path-derived.
 9. Authored titles are direct, natural phrases in the configured output
-   language; IDs stay in aliases, while stable type keys, graph queries and
-   graph colors remain shipped policy. Issue reporting is an external, stateless support workflow and
-   is never a vault type or project evidence source.
+   language; IDs stay in aliases, while stable type keys remain shipped
+   policy. Issue reporting is an external, stateless support workflow and is
+   never a project evidence source.
 10. Timestamps written by compilers come from UTC system time. User-authored
     approval timestamps are not accepted as evidence.
 11. Distribution output under `dist/` is generated only by

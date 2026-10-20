@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import re
 
-import ba_compile
+import vault_markdown
 
 
 class SourceChangedError(ValueError):
@@ -102,12 +102,12 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
         if text.splitlines() != note.lines:
             raise SourceChangedError(f"source changed while indexing: {relative}")
         lines = text.splitlines(keepends=True)
-        props, start, error = ba_compile.parse_frontmatter(text)
+        props, start, error = vault_markdown.parse_frontmatter(text)
         if error:
             raise ValueError(f"cannot address malformed source: {relative}: {error}")
-        parsed = ba_compile.Doc(relative, path, props, start, str(props.get("type", "")), "",
+        parsed = vault_markdown.Doc(relative, path, props, start, str(props.get("type", "")), "",
                                 lines=text.splitlines())
-        ba_compile.parse_doc_body(parsed)
+        vault_markdown.parse_doc_body(parsed)
         document = {"path": relative, "source_hash": digest(raw),
                     "type": str(props.get("type", "")).replace("_", "-"),
                     "title": str(props.get("title", relative)),
@@ -118,7 +118,7 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
                                    for key, value in props.items() if isinstance(value, (str, list))}}
         documents[relative] = document
         excluded = set()
-        for begin, finish in ba_compile.GENERATED_BODY_BLOCKS:
+        for begin, finish in vault_markdown.GENERATED_BODY_BLOCKS:
             active = False
             for number, line in enumerate(lines, 1):
                 if begin in line:
@@ -179,8 +179,8 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
                                "content_hash": digest(content.encode("utf-8")),
                                "bytes": len(content.encode("utf-8")),
                                "references": ["[[" + match.group("inner").replace("\\|", "|") + "]]"
-                                              for match in ba_compile.WIKILINK_RE.finditer(
-                                                  ba_compile.without_code(content))
+                                              for match in vault_markdown.WIKILINK_RE.finditer(
+                                                  vault_markdown.without_code(content))
                                               if not match.group("embed")]}
             document["units"].append(identity)
             return identity
@@ -207,7 +207,7 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
             unit = add("section", title, [[number, end]])
             if unit:
                 alias(f"{relative}::section:{title}", unit)
-                token = ba_compile.SEC_RE.search(title)
+                token = vault_markdown.SEC_RE.search(title)
                 if token:
                     alias(f"{relative}::section:{token.group(1)}", unit)
                 if re.fullmatch(r"ST-[0-9]{3,}-TS-[0-9]{3,}", title):
@@ -221,7 +221,7 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
                 row = dict(zip(table.columns, cells))
                 label = row.get("id", f"row {number}")
                 unit = add("row", label, [[table.header_line, table.header_line + 1], [number, number]])
-                if unit and (ba_compile.BARE_ID_RE.fullmatch(label) or ba_compile.NAMESPACED_ID_RE.fullmatch(label)):
+                if unit and (vault_markdown.BARE_ID_RE.fullmatch(label) or vault_markdown.NAMESPACED_ID_RE.fullmatch(label)):
                     units[unit]["row_status"] = row.get("status")
                     alias(label, unit)
                     if space:
@@ -246,7 +246,7 @@ def catalog(vault, *, include_receipts: bool = True) -> dict:
                     alias(f"{relative.removesuffix('.md')}#^{match.group(1)}", unit)
         if whole:
             for name in record_aliases(props, relative):
-                if not (ba_compile.BARE_ID_RE.fullmatch(name) or ba_compile.NAMESPACED_ID_RE.fullmatch(name)):
+                if not (vault_markdown.BARE_ID_RE.fullmatch(name) or vault_markdown.NAMESPACED_ID_RE.fullmatch(name)):
                     continue
                 own = [units[key] for key in aliases[name] if units[key]["path"] == relative]
                 rows = [unit for unit in own if unit["kind"] == "row"]
@@ -376,7 +376,7 @@ def add_receipts(root: Path, data: dict, *, paths=None) -> None:
                 "source_hash": digest(raw), "content_hash": digest(content.encode()),
                 "bytes": len(content.encode()), "historical": immutable}
             if isinstance(row.get("content"), str):
-                props, _start, error = ba_compile.parse_frontmatter(row["content"])
+                props, _start, error = vault_markdown.parse_frontmatter(row["content"])
                 if not error:
                     data["units"][identity]["historical_properties"] = props
             document = data["documents"].setdefault(relative, {"path": relative, "type": "receipt",
@@ -390,13 +390,13 @@ def add_receipts(root: Path, data: dict, *, paths=None) -> None:
 def resolve(data: dict, reference: str) -> list[dict]:
     """Exact identities only; ambiguous bare IDs remain visibly ambiguous."""
     if reference.startswith("[[") and reference.endswith("]]" ):
-        path, anchor, label = ba_compile.split_wikilink(reference[2:-2])
+        path, anchor, label = vault_markdown.split_wikilink(reference[2:-2])
         if label in data["aliases"]:
             hits = [data["units"][unit] for unit in data["aliases"][label]
                     if data["units"][unit]["path"].removesuffix(".md") == path]
             return hits
         identifier = label.split(":", 1)[-1] if label else ""
-        if ba_compile.BARE_ID_RE.fullmatch(identifier) or ba_compile.NAMESPACED_ID_RE.fullmatch(identifier):
+        if vault_markdown.BARE_ID_RE.fullmatch(identifier) or vault_markdown.NAMESPACED_ID_RE.fullmatch(identifier):
             return []
         reference = path + ("#" + anchor if anchor else "")
     reference = reference.removeprefix("workspace/docs/")

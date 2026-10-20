@@ -289,7 +289,7 @@ def approval_base(project: Path, scope_kind: str | None, package: Path = PACKAGE
 
 
 def frontmatter_props(text: str) -> dict:
-    from ba_compile import parse_frontmatter
+    from vault_markdown import parse_frontmatter
     props = parse_frontmatter(text)[0]
     return props if isinstance(props, dict) else {}
 
@@ -754,7 +754,7 @@ def task_deliveries(project: Path, delivery: str | None, inputs: list[str]) -> l
         record = project / "workspace/docs/delivery/deliveries" / match.group(1) / "delivery.md"
         if not record.is_file():
             continue
-        from ba_compile import parse_frontmatter
+        from vault_markdown import parse_frontmatter
         props, _line, error = parse_frontmatter(record.read_text(encoding="utf-8"))
         if error or not isinstance(props.get("id"), str) or not props["id"]:
             raise ValueError(f"Delivery record cannot be read: {record.relative_to(project).as_posix()}")
@@ -950,7 +950,7 @@ def offline_constraint(oid: str, cause: str) -> str:
 def item_delivery(project: Path, item: str) -> str:
     """The id of the Delivery whose package holds the selected Item record."""
     import delivery_git
-    from ba_compile import parse_frontmatter
+    from vault_markdown import parse_frontmatter
     record = project / PurePosixPath(item).parent.parent.parent / "delivery.md"
     props, _line, error = (parse_frontmatter(record.read_text(encoding="utf-8")) if record.is_file()
                            else ({}, 0, "missing"))
@@ -997,7 +997,7 @@ def local_integration_commits(project: Path, item: str, delivery: str, remote: s
     """The commits this checkout names as published Integration commits of *delivery*, unverified:
     the remote's tracking ref of the Integration and the Item worktree record's integration_base_commit."""
     import delivery_git
-    from ba_compile import parse_frontmatter
+    from vault_markdown import parse_frontmatter
     found = []
     tracking = "refs/remotes/{}/{}".format(
         remote, delivery_git.canonical_refs(delivery)["integration"].removeprefix("refs/heads/"))
@@ -1041,7 +1041,7 @@ def write_scope(project: Path | None, paths: set[str], role: str | None, route: 
     spec = route["write_scope"]
     if read_only or project is None or role not in spec["roles"]:
         return result
-    from ba_compile import parse_frontmatter
+    from vault_markdown import parse_frontmatter
 
     def properties(relative: str) -> dict:
         props, _line, error = parse_frontmatter(regular(project, relative).read_text(encoding="utf-8"))
@@ -1359,7 +1359,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     method_bindings = {}
     technology = set(skills or []) & set(policy["technology_method_skills"])
     if project is not None and technology:
-        from ba_compile import parse_frontmatter
+        from vault_markdown import parse_frontmatter
         from stage_package import paths_are_committed
         for relative in sorted(project_files):
             if not relative.startswith("workspace/docs/solution-design/decisions/") or not relative.endswith(".md"):

@@ -11,7 +11,7 @@ import re
 import subprocess
 import threading
 
-import ba_compile
+import vault_markdown
 
 HISTORY_POLICY = Path(__file__).resolve().parents[1] / "templates/project-context-policy.json"
 _HISTORY_CACHE = OrderedDict()
@@ -70,7 +70,7 @@ def git_source(project: Path, path: str, revision: str) -> bytes:
 
 def matches(path: Path, raw: bytes, expected: str) -> bool:
     text = raw.decode("utf-8")
-    props, start, error = ba_compile.parse_frontmatter(text)
+    props, start, error = vault_markdown.parse_frontmatter(text)
     if error:
         return False
     body = "\n".join(text.splitlines()[start - 1:])
@@ -135,7 +135,7 @@ def bound_source(project: Path, path: str, expected: str) -> dict | None:
             continue
         if not matches(current, raw, expected):
             continue
-        props, _start, _error = ba_compile.parse_frontmatter(raw.decode("utf-8"))
+        props, _start, _error = vault_markdown.parse_frontmatter(raw.decode("utf-8"))
         unit = {"current": False, "unit_id": f"{path}::commit:{revision}",
                 "path": path, "kind": "document", "label": str(props.get("title", path)),
                 "ranges": [[1, len(raw.decode("utf-8").splitlines())]],

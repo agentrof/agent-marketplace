@@ -21,7 +21,6 @@ delta; a contradiction escalates instead of deviating. Do NOT load for store
 schema detail; the sql-database-design and nosql-database-design siblings own
 that. Do NOT load for implementation; realization lives in component-selected
 method skills.
-Read `obsidian-vault`; its taxonomy and ledger rules govern docs mutations.
 
 Each root, component hub and leaf record carries Delivery Item provenance,
 stable identity and revision. Existing records change only through

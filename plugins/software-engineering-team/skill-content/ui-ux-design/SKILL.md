@@ -51,7 +51,7 @@ while sitting inside the plugin directory.
 3. **Persist Master + overrides** once a candidate is chosen with the packaged
    `search.py "<query>" --design-system --persist -p "Project Name" [--page
    "dashboard"]`.
-   Writes `workspace/docs/design-system/MASTER.md` and `pages/<page>.md` as vault notes (frontmatter, tags and nav section per the obsidian-vault skill; the script emits them). When building a page, read `pages/<page>.md` first; if it exists its rules override MASTER.md, otherwise follow MASTER.md strictly.
+   Writes `workspace/docs/design-system/MASTER.md` and `pages/<page>.md` as typed notes (the script emits their frontmatter). When building a page, read `pages/<page>.md` first; if it exists its rules override MASTER.md, otherwise follow MASTER.md strictly.
 4. **Deep-dive domains** as needed with the packaged `search.py "<keywords>"
    --domain <product|style|color|typography|landing|ux|chart|icons>`.
 5. **Stack guidance** for implementation fidelity with the packaged

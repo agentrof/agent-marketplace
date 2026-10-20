@@ -18,6 +18,43 @@ replies are transient inputs, not project state. Independent readers may run
 in parallel; each host uses its native agent invocation and wait mechanism
 without changing these semantics.
 
+## Process switches
+
+Process switch `process_profile` keeps the default at `governed`. At
+`fast_lane`, the orchestrating session runs one task per change itself, with
+every role in the foreground: one task, one branch and one pull request to the
+target branch, the project's CI plus one reviewer (two at task rigor `high`,
+where the owner merges), and auto-merge. The steps are in `flows/fast-lane.md`
+and `deliver/references/switch-process_profile-fast_lane.md`.
+
+Process switch `pr_proof` leaves a fast-lane task's proof to the project's CI
+at `remote_ci`. At `local_record`, `task_lane.py prove` runs the project's
+declared proof commands on HEAD and records each exit code and duration with
+the HEAD commit and a clean-tree flag, and `open-pr` refuses before pushing
+unless that record is green for the clean HEAD; the steps are in
+`deliver/references/switch-pr_proof-local_record.md`.
+
+What a reviewer reads in full for a change is process switch `review_scope`.
+At `full`, the default, it reads the complete change its step names. At
+`impact_closure`, `task_lane.py lint` runs before any reviewer starts, the
+reviewer reads the pull request diff and the change's impact closure in full
+and each approved, unchanged note outside it as its hash-bound summary, and
+reads beyond it when unsure and records why, as
+`deliver/references/switch-review_scope-impact_closure.md` defines.
+
+Whether flow steps are timed is process switch `step_timing`. At `off`, the
+default, nothing is recorded. At `recorded`, the coordinator wraps each step
+and role spawn in `step_timing.py start` and `end` with its phase, reports an
+overrun at once and ends each run with a durable `step_timing.py report
+--write`, as `deliver/references/switch-step_timing-recorded.md` defines.
+
+Whether steps are compared with a maximum is process switch `step_budgets`. At
+`off`, the default, none is. At `enforced`, each budgeted step's time is
+compared with its maximum in minutes, the owner's parameter or the package
+target in `configure/data/step-budgets.json`; a step may finish well under it,
+and only an exceeded maximum is reported, at once and never blocking, as
+`deliver/references/switch-step_budgets-enforced.md` defines.
+
 ## Autopilot
 
 The `/autopilot` entry gives the orchestrating session a grant the user arms

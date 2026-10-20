@@ -548,8 +548,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Builder registry: one deliberately broken fixture per validator check, the
-# doctrine test_vault_check.py applies to its checker.
+# Builder registry: one deliberately broken fixture per validator check.
 # Each builder breaks the valid fixture repository so that its check reports
 # it; a check without a builder fails the lockstep test. Builders change files
 # only through the helpers below, which remember every original so the test
@@ -714,7 +713,7 @@ VALIDATOR_BUILDERS = {
         root, "platforms/codex/effort-policy.json",
         lambda value: value["refuse"].update(extreme=value["refuse"]["ultra"])),
     "process_switches": lambda root: edit_json(
-        root, SWITCHES, lambda value: value["switches"]["review_scope"].update(default="ghost")),
+        root, SWITCHES, lambda value: value["switches"]["step_timing"].update(default="ghost")),
     "autopilot_policy": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/autopilot/data/autopilot-policy.json",
         lambda value: value["goal_kinds"].append(dict(value["goal_kinds"][0]))),

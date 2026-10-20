@@ -1894,7 +1894,6 @@ def check_effort_policy(tree: Tree, findings: list[Finding]) -> None:
             for problem in build_distributions.effort_policy_problems(policy, adapter, profile))
 
 
-VAULT_POLICY_RELPATH = "skill-content/obsidian-vault/data/vault-policy.json"
 REVIEW_STEP_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 

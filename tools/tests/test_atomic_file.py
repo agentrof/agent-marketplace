@@ -30,7 +30,6 @@ if str(SCRIPTS) not in sys.path:
 import atomic_file  # noqa: E402
 import project_config  # noqa: E402
 import setup_project  # noqa: E402
-import vault_check  # noqa: E402
 from tools.tests.git_fixture import init_repository  # noqa: E402
 from tools.tests.test_writer_line_endings import SHARED_TEAM, load  # noqa: E402
 
@@ -44,22 +43,6 @@ def mode(path: Path) -> int:
 def target(temporary: str, name: str) -> Path:
     """A package-projected plugin file, which every writer here can write."""
     return Path(temporary) / "vault" / ".obsidian" / "plugins" / PLUGIN_ID / name
-
-
-def reconcile_payload(path: Path, text: str) -> None:
-    """Converge one projected plugin file as `vault_check.py normalize` does.
-
-    The reconcile writes a file the vault lacks only where the previous
-    package shipped a directory, so a missing path first becomes one.
-    """
-    root = path.parents[3]
-    payload = root.parent / "payload"
-    source = payload / "plugins" / PLUGIN_ID / path.name
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_bytes(text.encode("utf-8"))
-    if not path.exists():
-        path.mkdir(parents=True)
-    vault_check.payload_reconcile(root, {"community_plugins": [PLUGIN_ID]}, payload)
 
 
 @unittest.skipIf(os.name == "nt", "POSIX file mode contract")
@@ -80,7 +63,6 @@ class AtomicWriterModeTests(unittest.TestCase):
             ),
             "project instructions": instructions.atomic_write,
             "codex projection": projection.atomic_write,
-            "vault payload reconcile": reconcile_payload,
         }
 
     def test_every_atomic_writer_gives_a_new_file_the_umask_mode(self):

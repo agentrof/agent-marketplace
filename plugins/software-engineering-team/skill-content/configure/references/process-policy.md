@@ -51,8 +51,7 @@ parameter the table leaves unset. A switch that only reports, such as
    parameter row, `check` and `approve`. Choosing the default removes the switch's row, so a later
    promoted default also reaches it; a value that takes no parameters also
    removes the switch's parameter rows, which `set` reports as
-   `removed_parameters`. Then run the scoped vault gate and show the exact Git
-   diff.
+   `removed_parameters`. Then show the exact Git diff.
 
 ## Rules
 

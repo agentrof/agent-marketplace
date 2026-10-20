@@ -10,7 +10,7 @@ The project keeps one solution landscape under
 `workspace/docs/solution-design/`: components, engagements and decisions.
 Every accepted technology, boundary, integration, method and sustainability
 verdict is a linked Markdown decision; nothing decided stays only in
-conversation. The `obsidian-vault` skill governs every file of the tree.
+conversation.
 
 ## When to Use
 

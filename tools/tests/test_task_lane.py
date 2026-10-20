@@ -562,7 +562,6 @@ class LocalProofTests(unittest.TestCase):
         self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
 
 
-class FastLaneOwnershipTests(unittest.TestCase):
 STORY = """---
 type: story
 title: "Invoice export"

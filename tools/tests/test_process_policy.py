@@ -63,10 +63,7 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
         self.package = base / "package"
         self.write_registry(FIXTURE_REGISTRY)
         self.docs = base / "workspace" / "docs"
-        (self.docs / "maps").mkdir(parents=True)
-        (self.docs / "home.md").write_text(
-            "---\ntype: home\ntitle: Project home\n---\n\n# Project home\n\n"
-            "[[maps/delivery|Delivery]]\n", encoding="utf-8")
+        self.docs.mkdir(parents=True)
         patcher = mock.patch.object(process_policy, "PACKAGE", self.package)
         patcher.start()
         self.addCleanup(patcher.stop)

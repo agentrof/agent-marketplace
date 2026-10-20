@@ -12,7 +12,7 @@
         },
         {
           "id": "local_record",
-          "tradeoffs": "task_lane.py prove runs the project's declared proof commands, by default its test command and the vault gate, on HEAD and records each command's exit code and duration with the HEAD commit and a clean-tree flag; open-pr refuses before pushing when the record is missing, ran on another commit or a dirty tree, or holds a red command, and adds the record to the pull request body. A project without remote CI still opens only tested pull requests, while the proof is only as good as the declared commands and is run and reported by one machine, never re-run by an independent runner."
+          "tradeoffs": "task_lane.py prove runs the project's declared proof commands, by default its test command, on HEAD and records each command's exit code and duration with the HEAD commit and a clean-tree flag; open-pr refuses before pushing when the record is missing, ran on another commit or a dirty tree, or holds a red command, and adds the record to the pull request body. A project without remote CI still opens only tested pull requests, while the proof is only as good as the declared commands and is run and reported by one machine, never re-run by an independent runner."
         }
       ],
       "default": "remote_ci",

@@ -10,7 +10,6 @@ The project's analysis lives as tracked Markdown under
 `workspace/docs/business-analysis/<topic>/`: goals, actors, processes, rules,
 acceptance criteria, assumptions, open questions, decisions and measurable
 non-functional budgets. `data/space-schema.json` declares its document types.
-The `obsidian-vault` skill governs every file of the tree.
 
 ## When to Use
 

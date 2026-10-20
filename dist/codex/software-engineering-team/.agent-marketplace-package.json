@@ -167,7 +167,7 @@
       "05b57df14c4d46d311129887b9a4537c68dfcc5ee96f26e54f5862cf01b8946e"
     ,
     "skill-content/business-analysis/SKILL.md":
-      "6f3e6f23087367e0255bc40b4e5ee24e1ad84fb80ae8a651c50f3b270275932b"
+      "0457738b63d4bb37ebadba109cc6259d07f5b28e0a56e8afc7f351023f985ca8"
     ,
     "skill-content/business-analysis/data/space-schema.json":
       "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
@@ -188,7 +188,7 @@
       "5375b3628a1523dfd79eef21f6ac5446702b8444446d6deddd88ef6e8f187acf"
     ,
     "skill-content/configure/data/process-switches.json":
-      "cc317a003b5da79c75efa58cd8920024605dca1aa27ff15ecc1cb400aef0dacb"
+      "0ec0961025c8c866b4c090b475d479070fda3da651a98e8cc240d4e8253d9936"
     ,
     "skill-content/configure/data/step-budgets.json":
       "dd99177f7ffc6e91fe189b9d5cc2eae518071e90b1d73a67913400c7aa955a74"
@@ -197,7 +197,7 @@
       "04c96bfe7ad53da5053eaa074890c888f4a175d3a4ac82cbd2a8a79e39b7dc05"
     ,
     "skill-content/configure/references/process-policy.md":
-      "169753a9510ee7cb5f61ebd14931b0c5d23a151bd06c2a9bda6406fadb2f6bba"
+      "227fb0c477ec60c28636dd4300711e2f2575af6a6c38c665e4f8092617a28290"
     ,
     "skill-content/configure/references/role-models.md":
       "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
@@ -362,7 +362,7 @@
       "cb1a7f5d9b887b6c1d7102451909efe59acb24b1ecc42bcf802bbdebc2294355"
     ,
     "skill-content/solution-design/SKILL.md":
-      "831fdff40e88a0c4a22a38e11390e25998f271fb83a75dbaf07578dcff9aa19c"
+      "e720170ae35e091781dbb7c76e5d285390520f55e14fb729e912ebb03f09dbab"
     ,
     "skill-content/sql-database-design/SKILL.md":
       "d0946aedfe3e4d8dc5a063cbba8df3be7c65b49882996491b03eac96d604a159"
@@ -491,7 +491,7 @@
       "33b96298624cd34868c6fa2f11ecbae6d8cd8f7a3ede8540f44ae6e9de57ae24"
     ,
     "templates/task-input-policy.json":
-      "d8e634167d876d881a67b7fe157d9b58ce1f450c4356b8eef309c2673b76bc8a"
+      "bc6548bfaeab8d98703126de7bbe9bfa60ad3c01a9a7ea68c1206fd3000f7e0a"
   },
   "host": "codex",
   "marketplace_release": "2026.10.6",

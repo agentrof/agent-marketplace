@@ -22,7 +22,6 @@ TEAM = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
-import architecture_compile  # noqa: E402
 import process_policy  # noqa: E402
 import task_lane  # noqa: E402
 import vault_check  # noqa: E402
@@ -97,16 +96,6 @@ class SwitchTests(unittest.TestCase):
                              "a draft policy never opens the fast lane")
             run_policy(docs, "approve")
             self.assertEqual(process_policy.process_profile(docs), "fast_lane")
-
-    def test_the_planning_entries_redirect_and_the_stage_flows_anchor_the_switch(self):
-        for entry in ("deliver-governed", "delivery-plan", "execution-plan"):
-            text = (TEAM / "skill-content" / entry / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("use `/deliver` or\n`/requirement`", text, entry)
-        for flow in ("requirement", "business-analysis", "solution-design", "design-system",
-                     "experience-design", "backlog-planning", "fast-lane"):
-            text = (TEAM / "flows" / f"{flow}.md").read_text(encoding="utf-8")
-            self.assertIn("Switch `process_profile`", text, flow)
-
 
 class TaskTests(unittest.TestCase):
     def write(self, text: str) -> Path:
@@ -398,9 +387,9 @@ class RoleRoutingTests(unittest.TestCase):
             self.open_pr(root)
 
     def test_suggested_roles_never_block(self):
-        root = self.project(TASK.replace("as CSV.", "as CSV from a new screen."))
+        root = self.project(TASK.replace("as CSV.", "as CSV with a regression check."))
         roles, missing = task_lane.routed_roles(root, task_lane.task_path(root, "TK-004"))
-        self.assertEqual([(item["role"], item["mode"]) for item in roles], [("ux-designer", "suggest")])
+        self.assertEqual([(item["role"], item["mode"]) for item in roles], [("qa-engineer", "suggest")])
         self.assertEqual(missing, [])
         with self.fake_run():
             self.assertEqual(self.open_pr(root)["pr"], "9")
@@ -411,14 +400,14 @@ class RoleRoutingTests(unittest.TestCase):
         (root / task_lane.PROJECT_ROUTING).write_text(json.dumps({"rules": [
             {"role": "software-architect", "mode": "suggest", "step": "pre_check", "kinds": ["build"],
              "keywords": ["table"], "time_budget_minutes": 2, "ask": "Check the table."},
-            {"role": "ux-designer", "mode": "off", "step": "pre_check"},
+            {"role": "qa-engineer", "mode": "off", "step": "pre_check"},
             {"role": "security-reviewer", "mode": "require", "step": "pre_check", "kinds": ["build"],
              "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}),
             encoding="utf-8")
-        found = self.roles("Add a table and a login screen in src/auth/login.tsx", root=root)
+        found = self.roles("Add a table, a regression check and a login screen in src/auth/login.tsx", root=root)
         self.assertEqual(found["software-architect"]["mode"], "suggest")
         self.assertEqual(found["security-reviewer"]["mode"], "require")
-        self.assertNotIn("ux-designer", found)
+        self.assertNotIn("qa-engineer", found)
 
     def test_the_retrospective_counts_role_checks_and_their_minutes(self):
         root = self.project()
@@ -575,25 +564,6 @@ class LocalProofTests(unittest.TestCase):
 
 
 class FastLaneOwnershipTests(unittest.TestCase):
-    def test_a_task_owns_architecture_only_in_the_fast_lane(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs = Path(temporary) / "workspace" / "docs"
-            (docs / "delivery").mkdir(parents=True)
-            tasks = docs / "backlog" / "tasks"
-            tasks.mkdir(parents=True)
-            (tasks / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
-            self.assertIsNone(architecture_compile.task_owner(docs, "TK-004"))
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            run_policy(docs, "approve")
-            path, props, ref = architecture_compile.task_owner(docs, "TK-004")
-            self.assertEqual((path.name, ref), ("tk-004-export-invoices.md", "TK-004"))
-            self.assertIsNone(architecture_compile.task_owner(docs, "ST-004"))
-            (tasks / "tk-004-export-invoices.md").write_text(
-                TASK.replace("status: active", "status: dropped"), encoding="utf-8")
-            with self.assertRaises(ValueError):
-                architecture_compile.task_owner(docs, "TK-004")
-
     def test_task_owners_need_no_inbound_map_link(self):
         policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
         self.assertIn("task", policy["navigation_exempt_types"])
@@ -710,109 +680,6 @@ class TaskLinkTests(unittest.TestCase):
             self.assertEqual(policy["property_types"][key], kind)
         self.assertEqual(policy["type_path_patterns"]["task"],
                          ["^backlog/tasks/tk-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"])
-
-
-class FastLaneContractTests(unittest.TestCase):
-    """At fast_lane, contracts, the DoD and Governance change by plain pull request."""
-
-    def project(self, fast: bool) -> Path:
-        docs = Path(tempfile.mkdtemp()) / "workspace" / "docs"
-        self.addCleanup(lambda: __import__("shutil").rmtree(docs.parent.parent))
-        (docs / "delivery").mkdir(parents=True)
-        if fast:
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            run_policy(docs, "approve")
-        return docs
-
-    def edited_contract(self, docs: Path) -> None:
-        """A contract a pull request edited to approved, with no stamp, citation or revision."""
-        import operation_compile
-        with contextlib.redirect_stdout(io.StringIO()):
-            operation_compile.main(["init", "--docs", str(docs), "--kind", "verification"])
-        path = operation_compile.contract_path(docs, "verification")
-        props, body = operation_compile.parse(path)
-        props.update(status="approved", test_command="make test")
-        props.pop("revision")
-        path.write_text(operation_compile.render(props, body), encoding="utf-8")
-
-    def test_a_plain_pull_request_contract_is_in_force(self):
-        import operation_compile
-        for fast in (True, False):
-            docs = self.project(fast)
-            self.edited_contract(docs)
-            value, errors = operation_compile.check_contract(docs, "verification")
-            with self.subTest(fast=fast):
-                if fast:
-                    self.assertEqual(errors, [])
-                    self.assertTrue(value["current"])
-                    self.assertNotIn("paired_environment", value)
-                    self.assertEqual(operation_compile.pairing_findings(docs, value), [])
-                else:
-                    self.assertIn("approved contract source_hash is stale", errors)
-                    self.assertIn("revision must be a positive integer", errors)
-                    self.assertIn("approved contract must cite at least one accepted Solution decision"
-                                  " in constrained_by", errors)
-                props, body = operation_compile.parse(operation_compile.contract_path(docs, "verification"))
-                self.assertEqual(operation_compile.contract_in_force(docs, props, body), fast)
-
-    def test_between_gates_never_refuses_a_shared_document_in_the_fast_lane(self):
-        import delivery_compile
-        docs = self.project(True)
-        with mock.patch.object(delivery_compile, "delivery_dirs", side_effect=AssertionError("read")):
-            self.assertEqual(delivery_compile.between_gates_refusals(docs, "Verification Contract revision 2"), [])
-
-    def test_the_dod_needs_no_fixed_headings_or_stamp(self):
-        import delivery_compile
-        text = ("---\ntype: definition-of-done\nid: DOD\nstatus: approved\n---\n# Definition of Done\n\n"
-                "Tests pass in CI.\n\n<!-- sec: nav -->\n## Navigation\n\n- [[maps/delivery|Delivery]]\n")
-        for fast in (True, False):
-            docs = self.project(fast)
-            path = docs / "delivery" / "definition-of-done.md"
-            path.write_text(text, encoding="utf-8")
-            errors = delivery_compile.check_dod(path)
-            with self.subTest(fast=fast):
-                if fast:
-                    self.assertEqual(errors, [])
-                    snapshot, snapshot_errors = delivery_compile.approved_dod_source(docs)
-                    self.assertEqual(snapshot_errors, [])
-                    self.assertTrue(snapshot["definition_of_done_source_hash"].startswith("sha256:"))
-                else:
-                    self.assertIn("DoD missing sections: Commands, Evidence Rules, Quality Gates", errors)
-                    self.assertIn("approved DoD source_hash is stale", errors)
-
-    def test_item_contract_bindings_follow_the_contract_in_force(self):
-        import delivery_compile
-        docs = self.project(True)
-        self.edited_contract(docs)
-        stale = {"runtime_required": False, "verification_contract_ref": "operation/verification-contract",
-                 "verification_contract_hash": "sha256:old"}
-        self.assertEqual(delivery_compile.item_operation_findings(docs, stale), [])
-
-    def test_governance_is_optional_for_activation(self):
-        import delivery_git
-        docs = self.project(True)
-        self.assertEqual(delivery_git.project_max_parallel(docs.parent.parent, "none"), 1)
-        with self.assertRaises(RuntimeError):
-            delivery_git.project_max_parallel(self.project(False).parent.parent, "none")
-
-    def test_the_hook_lets_a_plain_pull_request_edit_contracts_and_governance(self):
-        sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
-        import vault_hook
-        for fast in (True, False):
-            docs = self.project(fast)
-            self.edited_contract(docs)
-            for rel in ("operation/verification-contract.md", "delivery/governance/governance.md"):
-                target = docs / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if not target.exists():
-                    target.write_text("---\ntype: delivery-governance\nstatus: approved\n---\n# G\n",
-                                      encoding="utf-8")
-                with self.subTest(fast=fast, rel=rel), contextlib.redirect_stdout(io.StringIO()), \
-                        contextlib.redirect_stderr(io.StringIO()):
-                    code = vault_hook.pre_target({"file_path": str(target), "old_string": "a",
-                                                  "new_string": "b"})
-                    self.assertEqual(code == 0, fast)
 
 
 class RetrospectiveCostTests(unittest.TestCase):
@@ -1597,36 +1464,10 @@ class RetrospectiveReworkTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_rework"), 4)
 
 
-class GovernedRenameTests(unittest.TestCase):
-    OLD = __import__("re").compile(r"/deliver(?= DLV-| \{)|--entry deliver(?![-\w])|entry=\"deliver\"")
-
-    def test_no_governed_surface_names_the_old_entry(self):
-        governed = [*(TEAM / "flows").glob("*.md"),
-                    *(TEAM / "skill-content" / "deliver-governed").rglob("*.md"),
-                    *(TEAM / "skill-content" / "deliver" / "references").glob("switch-*.md"),
-                    *(TEAM / "skill-content" / "delivery-plan").rglob("*.md"),
-                    *(TEAM / "skill-content" / "execution-plan").rglob("*.md"),
-                    *(TEAM / "scripts").glob("delivery_*.py"),
-                    *(ROOT / "platforms").glob("*/software-engineering-team/host-contract.md")]
-        offenders = [f"{path.relative_to(ROOT)}:{number}"
-                     for path in governed
-                     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-                     if self.OLD.search(line)]
-        self.assertEqual(offenders, [])
-
-    def test_the_governed_entry_binds_its_references_from_the_shared_folder(self):
-        import task_inputs
-        route = task_inputs.catalog()["entries"]["deliver-governed"]
-        self.assertEqual(route["flows"], ["delivery-execution"])
-        self.assertEqual(route["reference_skills"], ["deliver"])
-        self.assertEqual(task_inputs.catalog()["entries"]["deliver"]["flows"], ["fast-lane"])
-
-
 class EntryExposureTests(unittest.TestCase):
     # Agents may call every entry the user can; arming autopilot stays the user's.
-    MODEL_INVOCABLE = ["business-analysis", "configure", "deliver", "demo", "design-system",
-                       "experience-design", "issue-report", "organize-docs", "requirement",
-                       "retrospective", "setup", "sketch", "solution-design"]
+    MODEL_INVOCABLE = ["configure", "deliver", "issue-report", "organize-docs", "retrospective",
+                       "setup"]
     USER_ONLY = ["autopilot"]
 
     def test_the_model_invocable_entries_are_listed_on_both_hosts(self):
@@ -1649,20 +1490,6 @@ class EntryExposureTests(unittest.TestCase):
         text = (TEAM / "skill-content" / "autopilot" / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("model_invocable: false", text.split("---", 2)[1])
         self.assertIn("`on` refuses without one", " ".join(text.split()))
-
-    def test_the_planning_entries_are_hidden_like_internal_skills(self):
-        claude = ROOT / "dist" / "claude" / "software-engineering-team" / "skills"
-        codex = ROOT / "dist" / "codex" / "software-engineering-team" / "skills"
-        internal = (claude / "code-review" / "SKILL.md").read_text(encoding="utf-8")
-        policy = [line for line in internal.splitlines()[1:4] if "invoc" in line]
-        for entry in ("backlog-plan", "delivery-plan", "execution-plan", "deliver-governed"):
-            text = (claude / entry / "SKILL.md").read_text(encoding="utf-8")
-            self.assertEqual([line for line in text.splitlines()[1:5] if "invoc" in line], policy,
-                             entry)
-            self.assertFalse((codex / entry).exists(), entry)
-            source = (TEAM / "skill-content" / entry / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("exposure: entry\nuser_invocable: false\n", source)
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -782,17 +782,17 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         def add_a_file() -> None:
             fixtures.write(self.root / "extra.txt", "not deterministic\n")
 
-        def drop_an_execute_bit() -> None:
-            path = self.root / "dist" / "claude" / fixtures.PLUGIN / "scripts" / "backlog_compile.py"
-            path.chmod(path.stat().st_mode & ~(stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
-            self.git("update-index", "--chmod=-x", path.relative_to(self.root).as_posix())
+        def add_an_execute_bit() -> None:
+            path = self.root / "dist" / "claude" / fixtures.PLUGIN / "scripts" / "task_lane.py"
+            path.chmod(path.stat().st_mode | stat.S_IXUSR)
+            self.git("update-index", "--chmod=+x", path.relative_to(self.root).as_posix())
 
         edits = {
             "build identity": forge_build_identity, "notes": rewrite_notes,
             "kept changeset": keep_a_changeset, "extra file": add_a_file,
         }
         if os.name != "nt":
-            edits["execute bit"] = drop_an_execute_bit
+            edits["execute bit"] = add_an_execute_bit
         for name, edit in edits.items():
             with self.subTest(name):
                 self.amend(edit)

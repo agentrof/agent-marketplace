@@ -33,8 +33,6 @@ for _path in (PACKAGE / "scripts", ROOT / "tools", ROOT / "tools" / "tests"):
         sys.path.insert(0, str(_path))
 
 import build_distributions  # noqa: E402
-import delivery_compile  # noqa: E402
-import requirement_compile  # noqa: E402
 import task_inputs  # noqa: E402
 import validate  # noqa: E402
 from git_fixture import init_repository, temporary_directory  # noqa: E402
@@ -163,24 +161,6 @@ class Project:
         path = self.state / "ledger.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
-    def delivery(self, status: str, identifier: str = "DLV-001") -> None:
-        path = (self.root / "workspace/docs/delivery/deliveries"
-                / f"{identifier.lower()}-night/delivery.md")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"---\ntype: delivery\nid: {identifier}\ntitle: Night run\n"
-                        f"status: {status}\n---\n\n# Night run\n", encoding="utf-8")
-        if status == "awaiting_merge":
-            # The commit that records the PR URL in the Review sets awaiting_merge.
-            (path.parent / "delivery-review.md").write_text(
-                "---\ntype: delivery-review\npull_request_url: https://example.invalid/pull/2\n---\n\n# Review\n",
-                encoding="utf-8")
-
-    def requirement(self, status: str, identifier: str = "REQ-001") -> None:
-        path = self.root / f"workspace/docs/requirements/req-{identifier[4:]}-night.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"---\ntype: requirement\nid: {identifier}\ntitle: Night work\n"
-                        f"status: {status}\n---\n\n# Night work\n", encoding="utf-8")
-
     def assert_refused(self, fragment: str, *argv: str, now: datetime = NOW) -> None:
         code, out, err = self.run_verb(*argv, now=now)
         self.test.assertEqual(code, 1, out + err)
@@ -263,28 +243,19 @@ class GrantTermsTests(unittest.TestCase):
                               "--deny", "release")
 
     def test_goal_refusals_name_what_is_wrong(self):
-        self.p.assert_refused("scripts/delivery_compile.py finds no Delivery DLV-099",
-                              "on", "--goal", "delivery:DLV-099")
-        self.p.assert_refused("scripts/requirement_compile.py finds no Requirement REQ-404",
-                              "on", "--goal", "requirement:REQ-404")
-        self.p.assert_refused("unknown goal kind 'sprint'; declared kinds: delivery, requirement,"
-                              " text", "on", "--goal", "sprint:9")
+        self.p.assert_refused("unknown goal kind 'sprint'; declared kinds: text",
+                              "on", "--goal", "sprint:9")
         self.p.assert_refused("names no target", "on", "--goal", "text:")
-        self.p.delivery("cancelled")
-        self.p.assert_refused("goal delivery:DLV-001 is already reached", "on", "--goal",
-                              "delivery:DLV-001")
         self.assertFalse((self.p.root / ".agentrof").exists())
 
     def test_a_goal_grant_ends_at_its_cap_or_at_the_earlier_given_time(self):
-        self.p.delivery("active")
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:dlv-001")
+        code, _out, err = self.p.run_verb("on", "--goal", "text:night run")
         self.assertEqual(code, 0, err)
         grant = self.p.grant()
         self.assertEqual(grant["expires_at"],
                          stamp(NOW + timedelta(hours=POLICY["default_goal_cap_hours"])))
-        self.assertEqual(grant["goal"]["target"], "DLV-001")
-        self.assertEqual(grant["goal"]["end"]["terminal_statuses"], ["merged", "cancelled"])
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "3h")
+        self.assertEqual(grant["goal"]["target"], "night run")
+        code, _out, err = self.p.run_verb("on", "--goal", "text:night run", "--for", "3h")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.p.grant()["expires_at"], stamp(NOW + timedelta(hours=3)))
 
@@ -541,13 +512,6 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.p.events()[-1]["classes"], ["approval_gate", "merge"])
         self.assertIn("decision [approval_gate, merge] Approve gate B and merge?",
                       self.p.run_verb("report")[1])
-        self.p.run_verb("on", "--allow", "phase_start")
-        self.p.delivery("scope_approved")
-        code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--class",
-                                          "phase_start", "--question", "Approve gate A?",
-                                          "--choice", "Approve", "--reason", "r", "--target", "t",
-                                          "--entry", "execution-plan", "--after", "delivery:DLV-001")
-        self.assertEqual(code, 0, err)
 
     def test_off_revokes_the_grant_prints_the_report_and_check_is_inactive(self):
         self.p.run_verb("on")
@@ -564,16 +528,15 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn(f"autopilot: revoked {grant['id']}", out)
 
     def test_status_shows_the_remaining_time_goal_classes_and_counts(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "9h")
+        self.p.run_verb("on", "--goal", "text:night run", "--for", "9h")
         self.record()
         self.queue()
         self.queue("phase_start")
         code, out, err = self.p.run_verb("status", now=NOW + timedelta(hours=1, minutes=15))
         self.assertEqual(code, 0, err)
         self.assertIn("(7h 45m left)", out)
-        self.assertIn("goal: delivery DLV-001, ends when scripts/delivery_compile.py reads merged or"
-                      " cancelled; current state: active", out)
+        self.assertIn("goal: text night run, read by no compiler; it ends through complete, off"
+                      " or the cap", out)
         self.assertIn("allowed classes: choice, approval_gate, merge", out)
         self.assertIn("decisions: 1, queued: 2", out)
         self.assertIn("declared guards: arming user_only_entry, question guard instructions;"
@@ -581,8 +544,8 @@ class LifecycleTests(unittest.TestCase):
         code, out, _err = self.p.run_verb("status", "--json", now=NOW + timedelta(hours=1))
         status = json.loads(out)
         self.assertEqual((status["active"], status["remaining_minutes"], status["counts"],
-                          status["goal_read"]["state"]),
-                         (True, 480, {"decisions": 1, "queued": 2}, "active"))
+                          status["goal_read"]),
+                         (True, 480, {"decisions": 1, "queued": 2}, None))
 
     def test_report_lists_every_decision_and_queued_question_in_time_order(self):
         self.p.run_verb("on")
@@ -988,125 +951,11 @@ class GoalTests(unittest.TestCase):
         code, out, _err = self.p.run_verb("check", now=now)
         return code, out
 
-    def test_check_completes_a_delivery_goal_once_its_compiler_reads_a_terminal_status(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.assertEqual(self.check(NOW + timedelta(hours=1))[0], 0)
-        self.p.delivery("cancelled")
-        code, out = self.check(NOW + timedelta(hours=2))
-        self.assertEqual(code, 1)
-        self.assertIn("scripts/delivery_compile.py read delivery DLV-001 as cancelled", out)
-        completion = self.p.grant()["completion"]
-        self.assertEqual((self.p.grant()["state"], completion["goal_state"], completion["read_at"]),
-                         ("completed", "cancelled", stamp(NOW + timedelta(hours=2))))
-        self.assertEqual(self.p.events()[-1]["event"], "completed")
-
-    def test_a_compiler_completion_names_the_compiler_and_the_state_it_read(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.p.delivery("cancelled")
-        self.check(NOW + timedelta(hours=2))
-        out = self.p.run_verb("report")[1]
-        self.assertIn("completed: scripts/delivery_compile.py read delivery DLV-001 as cancelled at"
-                      f" {stamp(NOW + timedelta(hours=2))}", out)
-        self.assertNotIn("compiler agreed: None", out)
-
-    @integration
-    def test_a_merged_delivery_is_read_through_the_compiler_merge_derivation(self):
-        self.p.delivery("awaiting_merge")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        with mock.patch.object(delivery_compile, "delivery_state",
-                               return_value=("merged", None)) as derived:
-            code, out = self.check(NOW + timedelta(hours=1))
-        derived.assert_called()
-        self.assertEqual(code, 1)
-        self.assertEqual(self.p.grant()["completion"]["goal_state"], "merged")
-
-    @integration
-    def test_a_delivery_whose_merge_state_cannot_be_read_has_no_goal_state(self):
-        """A Delivery Review record that cannot be read, here after an editor wrote a byte order mark, leaves
-        the merge state unknown: a running grant shows the goal unknown with the reason instead of the tracked
-        status, and on refuses the goal, as it refuses a Delivery record it cannot read."""
-        self.p.delivery("awaiting_merge")
-        review = self.p.root / "workspace/docs/delivery/deliveries/dlv-001-night/delivery-review.md"
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.assertEqual(code, 0, err)
-        review.write_bytes(b"\xef\xbb\xbf" + review.read_bytes())
-        reason = (f"cannot read it: Delivery merge state cannot be evaluated: {review} cannot be read:"
-                  " missing frontmatter block")
-        later = NOW + timedelta(hours=1)
-        code, out = self.check(later)
-        self.assertEqual(code, 0, out)
-        self.assertIn(f"current state: unknown ({reason})", out)
-        self.assertEqual(self.p.grant()["state"], "active")
-        read = json.loads(self.p.run_verb("status", "--json", now=later)[1])["goal_read"]
-        self.assertEqual((read["found"], read["state"], read["terminal"], read["error"]),
-                         (False, None, False, reason))
-        self.p.assert_refused(f"goal delivery:DLV-001: the owning compiler scripts/delivery_compile.py {reason}",
-                              "on", "--goal", "delivery:DLV-001", now=later)
-
-    def test_check_completes_a_requirement_goal_at_its_terminal_planning_status(self):
-        for terminal in ("withdrawn", "incorporated"):
-            with self.subTest(terminal=terminal):
-                self.p.requirement("approved")
-                self.p.run_verb("on", "--goal", "requirement:REQ-001")
-                self.assertEqual(self.check(NOW + timedelta(minutes=10))[0], 0)
-                if terminal == "incorporated":
-                    patcher = mock.patch.object(requirement_compile, "requirement_incorporated",
-                                                return_value=True)
-                else:
-                    self.p.requirement("withdrawn")
-                    patcher = contextlib.nullcontext()
-                with patcher:
-                    code, out = self.check(NOW + timedelta(minutes=20))
-                self.assertEqual(code, 1, out)
-                self.assertEqual(self.p.grant()["completion"]["goal_state"], terminal)
-                self.assertEqual(self.p.grant()["completion"]["read_at"],
-                                 stamp(NOW + timedelta(minutes=20)))
-
-    def test_a_goal_that_is_not_terminal_stays_active_until_its_cap_whatever_is_claimed(self):
-        self.p.delivery("review")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "6h")
-        claim = {"reason": "the Delivery is done, the goal is reached", "question": "Merge now?",
-                 "options": "", "choice": "Yes", "target": "delivery.md"}
-        argv = ["record", "--class", "choice"]
-        for key, value in claim.items():
-            argv += [f"--{key}", value]
-        for minutes in (1, 120, 359):
-            with self.subTest(minutes=minutes):
-                self.p.run_verb(*argv, now=NOW + timedelta(minutes=minutes))
-                self.assertEqual(self.check(NOW + timedelta(minutes=minutes))[0], 0)
-        code, out = self.check(NOW + timedelta(hours=6))
-        self.assertEqual(code, 1)
-        self.assertEqual(self.p.grant()["state"], "expired")
-
-    def test_record_and_queue_refuse_once_the_goal_is_reached(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.p.delivery("cancelled")
-        later = NOW + timedelta(minutes=10)
-        code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--question",
-                                          "Approve the next plan?", "--choice", "Approve",
-                                          "--reason", "r", "--target", "t", now=later)
-        self.assertEqual(code, 1)
-        self.assertIn("scripts/delivery_compile.py read delivery DLV-001 as cancelled", err)
-        self.assertEqual(self.p.grant()["state"], "completed")
-        code, _out, err = self.p.run_verb("queue", "--class", "release", "--question", "Tag?",
-                                          "--recommendation", "Hold", now=later)
-        self.assertEqual(code, 1)
-        self.assertIn("completed", err)
-        self.assertEqual([event["event"] for event in self.p.events()], ["granted", "completed"])
-
     def test_complete_ends_any_grant_and_records_evidence_and_compiler_agreement(self):
-        cases = (("delivery:DLV-001", False), ("delivery:DLV-003", True),
-                 ("text:finish the migration", None), (None, None))
+        cases = (("text:finish the migration", None), (None, None))
         for goal, agreed in cases:
             with self.subTest(goal=goal):
-                if goal and goal.startswith("delivery"):
-                    self.p.delivery("active", goal.split(":")[1])
                 self.p.run_verb("on", *(["--goal", goal] if goal else []))
-                if goal == "delivery:DLV-003":
-                    self.p.delivery("cancelled", "DLV-003")
                 code, out, err = self.p.run_verb("complete", "--evidence", "PR 41 merged")
                 self.assertEqual(code, 0, err)
                 completion = self.p.grant()["completion"]
@@ -1393,7 +1242,7 @@ class ContractTests(unittest.TestCase):
                                  "stop only when every remaining task waits on a queued question"):
                     self.assertIn(fragment.lower(), section)
 
-    def test_no_grant_or_delegation_waives_quality_or_delivery_closure(self):
+    def test_a_grant_merges_only_the_flow_s_own_head(self):
         """A broad delegation or an autopilot merge grant authorizes the flow's own steps only: the
         merge class is merge-pr on the recorded PR head, and closure stays the closure audit's (#461)."""
         merge = next(entry for entry in POLICY["classes"] if entry["id"] == "merge")
@@ -1408,8 +1257,6 @@ class ContractTests(unittest.TestCase):
                 if name in ("claude", "codex"):
                     text = text.split("## Autopilot", 1)[1]
                 self.assertIn("never a provider or Git merge of another head", text)
-                self.assertIn("`closure-audit` returns `closed`", text)
-                self.assertRegex(text, r"waives? (its )?evidence, integration, (the )?PR record or (Delivery )?closure")
 
     def test_the_procedure_records_a_decision_before_it_applies_it(self):
         for host in ("claude", "codex"):
@@ -1495,80 +1342,6 @@ class ContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "session entries"):
                 task_inputs.catalog(package)
 
-    def test_readable_goals_end_at_statuses_their_compilers_read(self):
-        ends = {kind["id"]: kind["end"] for kind in POLICY["goal_kinds"]}
-        self.assertEqual(set(autopilot.GOAL_READERS),
-                         {end["compiler"] for end in ends.values() if end != "none"})
-        self.assertLessEqual(set(ends["delivery"]["terminal_statuses"]), delivery_compile.STATUSES)
-        requirement = set(ends["requirement"]["terminal_statuses"])
-        self.assertLessEqual(requirement_compile.TERMINAL_STATUSES, requirement)
-        self.assertLessEqual(requirement, requirement_compile.STATUSES | {"incorporated"})
-        self.assertEqual(ends["text"], "none")
-
-
-class DecisionLogTests(unittest.TestCase):
-    """Under owner_gates at two_fixed_gates the Delivery's decision log holds autopilot's work."""
-
-    HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
-              " wait_minutes |\n|---|---|---|---|---|---|---|---|---|\n")
-    ANSWERED = ("| D-07 | queued | Approve Verification Contract revision 6? | Approve; Hold |"
-                " Approve | answered | Approve: Verification Contract revision 6 (autopilot"
-                " AP-20261001T210000Z-3f9a, class approval_gate) | AUTH-01 | 0 |\n")
-    QUEUED = ("| D-08 | rule_exception | Waive the coverage floor for AUTH-02? | Waive; Keep |"
-              " Keep | pending |  | AUTH-02 |  |\n")
-
-    def body(self) -> str:
-        return "## User Decisions\n\n" + self.HEADER + self.ANSWERED + self.QUEUED
-
-    def test_an_answered_autopilot_row_and_a_queued_pending_row_follow_the_table_rules(self):
-        stories = ["AUTH-01", "AUTH-02"]
-        self.assertEqual(delivery_compile.user_decision_findings(self.body(), stories), [])
-        self.assertEqual(delivery_compile.pending_decisions(self.body(), ["AUTH-02"]), ["D-08"])
-        self.assertEqual(delivery_compile.pending_decisions(self.body(), ["AUTH-01"]), [])
-        unwaited = self.body().replace("| AUTH-01 | 0 |", "| AUTH-01 |  |")
-        self.assertTrue(any("wait_minutes" in finding for finding
-                            in delivery_compile.user_decision_findings(unwaited, stories)))
-        named = self.body().replace("| AUTH-01 | 0 |", "| Verification Contract | 0 |")
-        self.assertTrue(any("by Story id" in finding for finding
-                            in delivery_compile.user_decision_findings(named, stories)))
-        # The class column holds a declared class: `queued` or an at-once class.
-        self.assertTrue(delivery_compile.user_decision_findings(
-            self.body().replace("| queued |", "| choice |"), stories))
-
-    def test_between_the_gates_the_answer_names_the_document_revision(self):
-        with tempfile.TemporaryDirectory() as raw:
-            docs = Path(raw) / "workspace" / "docs"
-            note = docs / "delivery/deliveries/dlv-001-night/delivery.md"
-            note.parent.mkdir(parents=True)
-            note.write_text("---\ntype: delivery\nid: DLV-001\ntitle: Night run\n"
-                            "status: active\n---\n\n# Night run\n\n" + self.body(),
-                            encoding="utf-8")
-            self.assertEqual(delivery_compile.between_gates_refusals(
-                docs, "Verification Contract revision 6", "DLV-001"), [])
-            self.assertTrue(delivery_compile.between_gates_refusals(
-                docs, "Environment Contract revision 2", "DLV-001"))
-
-    def test_every_autopilot_document_states_the_decision_log_rules(self):
-        rules = ("by story id", "`wait_minutes`", "`<document> revision n`",
-                 "`pending` row")
-        sources = {host: ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
-                   for host in ("claude", "codex")}
-        sources["orchestration"] = ROOT / "docs/orchestration.md"
-        for name, source in sources.items():
-            with self.subTest(source=name):
-                text = " ".join(source.read_text(encoding="utf-8").split())
-                section = text.split("## Autopilot", 1)[1].lower()
-                for rule in rules:
-                    self.assertIn(rule, section)
-        reference = " ".join((PACKAGE / "skill-content/deliver/references"
-                              "/switch-owner_gates-two_fixed_gates.md").read_text(
-            encoding="utf-8").split())
-        section = reference.split("## Under an autopilot grant", 1)[1]
-        for rule in ("is the owner's advance answer for its allowed classes",
-                     "counts as the owner's", "marked with the grant id",
-                     "is also written as a `pending` row"):
-            self.assertIn(rule, section)
-
 
 class PhaseStartTests(unittest.TestCase):
     """A phase_start decision runs the next entry only under a grant that allows it, after the
@@ -1577,63 +1350,16 @@ class PhaseStartTests(unittest.TestCase):
     def setUp(self) -> None:
         self.p = Project(self)
 
-    def start(self, entry: str, after: str) -> tuple[int, str, str]:
+    def start(self, entry: str) -> tuple[int, str, str]:
         return self.p.run_verb("record", "--class", "phase_start", "--question",
                                f"Start {entry}?", "--choice", "Start", "--reason",
-                               "the prior phase closed", "--target", "Delivery decisions",
-                               "--entry", entry, "--after", after)
+                               "the prior phase closed", "--target", "decisions")
 
     def test_phase_start_is_refused_without_the_class(self):
-        self.p.delivery("scope_approved")
         self.p.run_verb("on")
-        code, _out, err = self.start("execution-plan", "delivery:DLV-001")
+        code, _out, err = self.start("deliver")
         self.assertEqual(code, 1)
         self.assertIn("class 'phase_start' is not allowed by grant", err)
-        self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
-
-    def test_queued_phase_start_cannot_skip_its_readiness_check(self):
-        self.p.run_verb("on", "--allow", "phase_start")
-        self.p.delivery("scope_proposed")
-        args = ("queue", "--class", "phase_start", "--question", "Start execution?",
-                "--recommendation", "Start", "--entry", "execution-plan", "--after", "delivery:DLV-001")
-        self.assertEqual(self.p.run_verb(*args)[0], 0)
-        self.assertEqual(self.p.events()[-1]["event"], "queued")
-        self.p.delivery("scope_approved")
-        self.assertEqual(self.p.run_verb(*args)[0], 0)
-        event = self.p.events()[-1]
-        self.assertEqual((event["event"], event["entry"], event["after_state"]),
-                         ("decision", "execution-plan", "scope_approved"))
-
-    def test_phase_start_is_recorded_with_the_state_it_read_once_the_prior_phase_closed(self):
-        self.p.delivery("execution_approved")
-        self.p.run_verb("on", "--allow", "phase_start")
-        code, _out, err = self.start("deliver", "delivery:DLV-001")
-        self.assertEqual(code, 0, err)
-        event = self.p.events()[-1]
-        self.assertEqual((event["classes"], event["entry"], event["after"], event["after_state"]),
-                         (["phase_start"], "deliver", "delivery:DLV-001", "execution_approved"))
-        self.p.requirement("approved")
-        code, _out, err = self.start("backlog-plan", "requirement:REQ-001")
-        self.assertEqual(code, 0, err)
-        self.assertEqual(self.p.events()[-1]["after_state"], "approved")
-
-    def test_phase_start_is_refused_while_the_prior_phase_is_open(self):
-        self.p.run_verb("on", "--allow", "phase_start")
-        self.p.delivery("scope_proposed")
-        self.p.requirement("draft")
-        cases = ((("execution-plan", "delivery:DLV-001"),
-                  "execution-plan starts only after delivery DLV-001 reads scope_approved;"
-                  " it reads scope_proposed"),
-                 (("backlog-plan", "requirement:REQ-001"),
-                  "backlog-plan starts only after requirement REQ-001 reads approved; it reads draft"),
-                 (("delivery-plan", "delivery:DLV-009"), "finds no Delivery DLV-009"),
-                 (("deliver", "requirement:REQ-001"), "deliver needs --after <kind>:<id> with kind delivery"),
-                 (("requirement", "requirement:REQ-001"), "phase_start needs --entry, one of:"))
-        for (entry, after), fragment in cases:
-            with self.subTest(entry=entry, after=after):
-                code, _out, err = self.start(entry, after)
-                self.assertEqual(code, 1)
-                self.assertIn(fragment, err)
         self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
 
 
@@ -1647,7 +1373,7 @@ class ValidatorTests(unittest.TestCase):
         plugin = self.root / "plugins" / "software-engineering-team"
         for relative in ("skill-content/autopilot/data/autopilot-policy.json",
                          "skill-content/autopilot/scripts/autopilot.py",
-                         "scripts/delivery_compile.py", "scripts/requirement_compile.py"):
+                         "scripts/task_lane.py"):
             (plugin / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(PACKAGE / relative, plugin / relative)
         self.path = plugin / "skill-content/autopilot/data/autopilot-policy.json"
@@ -1673,7 +1399,7 @@ class ValidatorTests(unittest.TestCase):
 
         cases = (
             (duplicate("classes"), "duplicate class 'choice'"),
-            (duplicate("goal_kinds"), "duplicate goal kind 'delivery'"),
+            (duplicate("goal_kinds"), "duplicate goal kind 'text'"),
             (lambda value: value["classes"][0].update(default="sometimes"),
              "class 'choice' has unknown default 'sometimes'"),
             (only_allowed, "the never set is empty"),
@@ -1681,24 +1407,14 @@ class ValidatorTests(unittest.TestCase):
              f"default_duration_hours {maximum + 1} is above max_duration_hours {maximum}"),
             (lambda value: value.update(default_goal_cap_hours=maximum + 1),
              f"default_goal_cap_hours {maximum + 1} is above max_duration_hours {maximum}"),
-            (lambda value: value["goal_kinds"][0]["end"].update(terminal_statuses=[]),
-             "readable goal kind 'delivery' declares no distinct terminal statuses"),
-            (lambda value: value["goal_kinds"][1]["end"].pop("terminal_statuses"),
-             "goal kind 'requirement' end is none or holds exactly a compiler"),
-            (lambda value: value["goal_kinds"][0]["end"].update(compiler="scripts/ghost.py"),
+            (lambda value: value["goal_kinds"][0].update(
+                end={"compiler": "scripts/ghost.py", "terminal_statuses": ["done"]}),
              "names compiler 'scripts/ghost.py', which is no package script autopilot.py reads"),
             (lambda value: value.update(arming_ttl_minutes=0),
              "arming_ttl_minutes must be a positive whole number"),
             (lambda value: value["classes"][1].pop("description"),
              "every class holds exactly an id, a description and a default"),
             (lambda value: value.update(schema_version=2), "with schema_version 1"),
-            (duplicate("phase_starts"), "duplicate phase start 'backlog-plan'"),
-            (lambda value: value["phase_starts"][0]["after"].update(text=["done"]),
-             "phase start 'backlog-plan' names 'text', which is no readable goal kind"),
-            (lambda value: value["phase_starts"][0]["after"].update(requirement=[]),
-             "phase start 'backlog-plan' declares no distinct ready statuses after 'requirement'"),
-            (lambda value: value["phase_starts"][0].pop("after"),
-             "every phase start holds exactly an entry and a nonempty after"),
         )
         for mutate, fragment in cases:
             with self.subTest(fragment=fragment):
@@ -1711,7 +1427,7 @@ class ValidatorTests(unittest.TestCase):
 
     def test_a_skill_script_may_import_its_package_scripts_and_only_them(self):
         script = self.root / "plugins/software-engineering-team/skill-content/autopilot/scripts"
-        for module, rejected in (("delivery_compile", False), ("requests", True)):
+        for module, rejected in (("task_lane", False), ("requests", True)):
             with self.subTest(module=module):
                 (script / "probe.py").write_text(f"import {module}\n", encoding="utf-8")
                 findings: list = []

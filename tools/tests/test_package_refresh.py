@@ -68,7 +68,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             str(project),
             "--json",
         )
-        self.assertEqual(initialized["next_entry"], "requirement")
+        self.assertEqual(initialized["next_entry"], "deliver")
         generator = package / "scripts" / f"generate_{host}_project.py"
         generated = self.run_json(
             generator,

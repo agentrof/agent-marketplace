@@ -23,16 +23,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SETUP = ROOT / "plugins" / "software-engineering-team" / "scripts" / "setup_project.py"
 CHECK = ROOT / "plugins" / "software-engineering-team" / "scripts" / "setup_check.py"
 BACKLOG = ROOT / "plugins" / "software-engineering-team" / "scripts" / "backlog_compile.py"
-REQUIREMENT_ROUTE = ROOT / "plugins" / "software-engineering-team" / "scripts" / "requirement_route.py"
 SCRIPTS = SETUP.parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 import vault_check as vault_payload
-import delivery_git
 import setup_project as setup_module
 import setup_check as check_module
-import stage_package
-from tools.tests import backlog_fixture, fixture_cache
+from tools.tests import fixture_cache
 from tools.tests.git_fixture import init_repository, temporary_directory
 from unittest import mock
 
@@ -100,7 +97,7 @@ class SetupProjectTests(unittest.TestCase):
             first = self.run_script(SETUP, "--project-root", str(project), "--json")
             self.assertEqual(first.returncode, 0, first.stderr)
             payload = json.loads(first.stdout)
-            self.assertEqual(payload["next_entry"], "requirement")
+            self.assertEqual(payload["next_entry"], "deliver")
             runtime = project / ".agentrof" / "agent-marketplace" / ".runtime"
             self.assertEqual(Path(payload["runtime_root"]), runtime.resolve())
             self.assertTrue(runtime.is_dir())
@@ -132,16 +129,6 @@ class SetupProjectTests(unittest.TestCase):
                 capture_output=True, text=True, check=False,
             )
             self.assertEqual(portable.returncode, 0, portable.stderr)
-            before = self.run_script(
-                REQUIREMENT_ROUTE, "--project-root", str(project), "--json"
-            )
-            self.assertEqual(before.returncode, 1, before.stderr)
-            shutil.rmtree(project / ".agentrof")
-            after = self.run_script(
-                REQUIREMENT_ROUTE, "--project-root", str(project), "--json"
-            )
-            self.assertEqual(after.returncode, 1, after.stderr)
-            self.assertEqual(json.loads(after.stdout), json.loads(before.stdout))
 
             config = json.loads(
                 (project / "workspace/config.json").read_text(encoding="utf-8")
@@ -173,7 +160,7 @@ class SetupProjectTests(unittest.TestCase):
                 SETUP, "apply", "--project-root", str(project), "--json",
             )
             self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
-            self.assertEqual(json.loads(first.stdout)["next_entry"], "requirement")
+            self.assertEqual(json.loads(first.stdout)["next_entry"], "deliver")
 
             config_path = project / "workspace/config.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -268,12 +255,7 @@ class SetupProjectTests(unittest.TestCase):
             )
             self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
             payload = json.loads(applied.stdout)
-            self.assertEqual(payload["next_entry"], "requirement")
-            routed = self.run_script(
-                REQUIREMENT_ROUTE, "--project-root", str(project), "--json"
-            )
-            self.assertEqual(routed.returncode, 1)
-            self.assertEqual(json.loads(routed.stdout)["next_entry"], "requirement")
+            self.assertEqual(payload["next_entry"], "deliver")
             self.assertEqual(authored.read_bytes(), authored_before)
             refreshed_config = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertNotIn("custom_project_field", refreshed_config)
@@ -1091,7 +1073,6 @@ class SetupProjectTests(unittest.TestCase):
             review.unlink()
             self.git(project, "checkout", "--", relative)
             self.assertEqual(review.read_bytes(), converted)
-            self.assertFalse(stage_package.paths_are_committed([review]))
 
             applied = self.run_script(
                 SETUP, "apply", "--project-root", str(project), "--json"
@@ -1106,7 +1087,6 @@ class SetupProjectTests(unittest.TestCase):
                      "workspace/docs")
             self.git(project, "checkout", "HEAD", "--", "workspace/docs")
             self.assertEqual(review.read_bytes(), committed)
-            self.assertTrue(stage_package.paths_are_committed([review]))
             review.unlink()
             self.git(project, "checkout", "--", relative)
             self.assertEqual(review.read_bytes(), committed)
@@ -1239,8 +1219,7 @@ class SetupProjectTests(unittest.TestCase):
 
 @integration
 class WindowsLongPathsChoiceTests(unittest.TestCase):
-    """Item and Integration worktrees share the project repository's local Git config, and Git
-    for Windows leaves out of a checkout that still exits 0 every tracked file whose path reaches
+    """Git for Windows leaves out of a checkout that still exits 0 every tracked file whose path reaches
     260 characters, or whose directory reaches 248, unless core.longpaths is on. Native Windows
     setup asks before it turns that on; any other host asks nothing (#358). The platform is
     mocked, so every host runs these."""
@@ -1289,7 +1268,7 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
                 "preview": {
                     "current_value": None,
                     "set_command": "git config --local core.longpaths true",
-                    "worktree_root": str(delivery_git.worktree_paths(project, "DLV-001")["integration"]),
+                    "worktree_root": str(project),
                     "long_paths": [],
                 },
             }])
@@ -1325,7 +1304,7 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
         with temporary_directory() as temporary:
             project = Path(temporary).resolve()
             init_repository(project)
-            integration = delivery_git.worktree_paths(project, "DLV-001")["integration"]
+            integration = project
             reaching = self.track(project, integration, 260, "deep")
             short = self.track(project, integration, 259, "near")
             config = (project / ".git" / "config").read_bytes()
@@ -1339,7 +1318,7 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
             self.assertNotIn("git_config", [item["surface"] for item in applied["applied_operations"]])
             self.assertEqual(applied["warnings"], [
                 "core.longpaths stays off, so Git for Windows leaves these tracked paths out of"
-                f" Item and Integration worktrees under {integration}: {reaching} (file path 260 >= 260)"
+                f" the checkout under {integration}: {reaching} (file path 260 >= 260)"
             ])
             self.assertNotIn(short, applied["warnings"][0])
             code, checked = self.run_setup(project, "check")
@@ -1352,7 +1331,7 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
         with temporary_directory() as temporary:
             project = Path(temporary).resolve()
             init_repository(project)
-            integration = delivery_git.worktree_paths(project, "DLV-001")["integration"]
+            integration = project
             deep = self.directory(integration, 248, "deep")
             inside = self.stage(project, f"{deep}/a.txt")
             crossing = self.stage(project, f"{deep}/" + "y" * 20 + ".txt")
@@ -1369,26 +1348,10 @@ class WindowsLongPathsChoiceTests(unittest.TestCase):
             self.assertEqual(code, 0, applied)
             self.assertEqual(applied["warnings"], [
                 "core.longpaths stays off, so Git for Windows leaves these tracked paths out of"
-                f" Item and Integration worktrees under {integration}: {inside} (directory 248 >= 248),"
+                f" the checkout under {integration}: {inside} (directory 248 >= 248),"
                 f" {crossing} (directory 248 >= 248)"
             ])
             self.assertNotIn(beside, applied["warnings"][0])
-
-    def test_the_deepest_story_item_worktree_sets_the_limit(self):
-        with temporary_directory() as temporary:
-            project = Path(temporary).resolve()
-            init_repository(project)
-            backlog_fixture.make_approved_backlog(project / "workspace" / "docs", "CHECKOUTFLOW-01")
-            item = delivery_git.worktree_paths(project, "DLV-001", "CHECKOUTFLOW-01")["item"]
-            integration = delivery_git.worktree_paths(project, "DLV-001")["integration"]
-            self.assertGreater(len(str(item)), len(str(integration)))
-            reaching = self.track(project, item, 260, "deep")
-            self.assertLess(len(str(integration / reaching)), 260)
-            code, plan = self.run_setup(project, "inspect")
-            self.assertEqual(code, 0, plan)
-            preview = plan["choice_requests"][0]["preview"]
-            self.assertEqual((preview["worktree_root"], preview["long_paths"]),
-                             (str(item), [{"path": reaching, "reason": "file_path", "length": 260}]))
 
     def test_a_value_git_reads_as_true_asks_nothing(self):
         # "yes" is true only to Git's own boolean parsing, which a literal "true" would skip.

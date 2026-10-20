@@ -6,7 +6,7 @@ wake it when they finish: a host may deliver the completion notice to the top
 session instead of the role that started the work. The role names each
 output file the work writes and calls this command, which returns as soon as
 every file holds a line matching the final-result marker, and never blocks
-longer than the Delivery runner's wait bound, so the next model call finds
+longer than the wait bound, so the next model call finds
 the prompt cache warm. A call that returns pending is repeated at once.
 
 Exit codes: 0 every output is final, 3 some output is still pending, 2 usage.
@@ -21,15 +21,15 @@ import sys
 import time
 from pathlib import Path
 
-POLICY_PATH = (Path(__file__).resolve().parents[1]
-               / "skill-content/deliver/data/delivery-verification-policy.json")
+# Below the host's five-minute prompt-cache lifetime, so a repeated call finds the cache warm.
+WAIT_BOUND_SECONDS = 240.0
 DEFAULT_MARKER = r"^SELF-CHECK:"
 POLL_SECONDS = 0.5
 PENDING = 3
 
 
 def wait_bound() -> float:
-    return float(json.loads(POLICY_PATH.read_text(encoding="utf-8"))["wait_bound_seconds"])
+    return WAIT_BOUND_SECONDS
 
 
 def final(path: Path, marker: re.Pattern) -> bool:

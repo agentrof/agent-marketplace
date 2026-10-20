@@ -184,8 +184,8 @@ class SingleTeamDistributionTests(unittest.TestCase):
         self.assertTrue(all(snapshot == snapshots[0] for snapshot in snapshots))
 
         for relative in (
-            "scripts/experience_application_check.py",
-            "skill-content/experience-modeling/data/experience-schema.json",
+            "scripts/task_lane.py",
+            "skill-content/business-analysis/data/space-schema.json",
         ):
             expected = (self.root / "plugins" / fixtures.PLUGIN / relative).read_bytes()
             for host in build_distributions.HOSTS:
@@ -462,7 +462,7 @@ class CopiedDistributionTests(unittest.TestCase):
 
     def test_binary_payload_survives_autocrlf_checkout_and_build(self):
         relative = Path(
-            "skill-content/ui-ux-design/data/binary-contract.pdf"
+            "skill-content/deliver/data/binary-contract.pdf"
         )
         payload = (
             b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"
@@ -648,20 +648,17 @@ class DistributionRuleTests(unittest.TestCase):
 
     @integration
     def test_snapshot_and_provenance_bind_the_package_mode_contract(self):
-        relative = "scripts/backlog_compile.py"
+        relative = "scripts/task_lane.py"
         root = copy_root(shared_root(), self.base / "marketplace", with_dist=False)
         source = root / "plugins" / fixtures.PLUGIN / relative
-        original_mode = source.stat().st_mode
-        if not original_mode & 0o111:
-            self.skipTest("fixture filesystem has no executable mode")
         before = build_distributions.marketplace_snapshot(root)["build_id"]
         baseline = json.loads((
             shared_root() / "dist" / "claude" / fixtures.PLUGIN
             / build_distributions.PROVENANCE
         ).read_text(encoding="utf-8"))
-        self.assertIn(relative, baseline["executables"])
+        self.assertNotIn(relative, baseline["executables"])
 
-        source.chmod(original_mode & ~stat.S_IXUSR)
+        source.chmod(source.stat().st_mode | stat.S_IXUSR)
         checkout_mode_only = build_distributions.marketplace_snapshot(
             root
         )["build_id"]
@@ -669,13 +666,13 @@ class DistributionRuleTests(unittest.TestCase):
         mode_contract = root / "package-modes.json"
         mode_contract.write_bytes((json.dumps({
             "schema_version": 1,
-            "packages": {fixtures.PLUGIN: {"executables": []}},
+            "packages": {fixtures.PLUGIN: {"executables": [relative]}},
         }, indent=2) + "\n").encode("utf-8"))
         after = build_distributions.marketplace_snapshot(root)["build_id"]
         self.assertNotEqual(before, after)
         # A package's provenance lists exactly the executables this contract loads.
         changed = build_distributions.load_package_executables(root, fixtures.PLUGIN)
-        self.assertNotIn(relative, changed)
+        self.assertIn(relative, changed)
 
     def test_python_runtime_caches_never_enter_distributions(self):
         source = self.base / "plugins" / fixtures.PLUGIN
@@ -792,28 +789,8 @@ def catalog_model(host: str, *, besides: tuple = (), effort: str | None = None,
     raise AssertionError(f"the {host} catalog pins no model this case needs")
 # The owner's decisions on #349 of 1 Oct 2026: no role defaults to these efforts.
 UNPINNED_EFFORTS = {"max", "ultra"}
-# The class of the review panel readers and of the fix-pass writers.
-LENS_CLASS, MECHANICAL_CLASS = "routine_review", "mechanical"
-# The class a code-reviewer runs a security review on.
-SECURITY_CLASS = "security_review"
 DECLARED_CLASSES = json.loads((fixtures.REAL_REPOSITORY / "tools/data/models.json").read_text(
     encoding="utf-8"))["model_classes"]
-# Generated review panel reader variant: its canonical agent.
-LENS_VARIANTS = {
-    "backlog-reviewer-lens": "backlog-reviewer",
-    "design-system-reviewer-lens": "design-system-reviewer",
-    "solution-reviewer-lens": "solution-reviewer",
-}
-# Generated reader variant of the code review panel: its canonical agent.
-CODE_REVIEW_LENS_VARIANTS = {"code-reviewer-lens": "code-reviewer"}
-# Generated mechanical writer variant: its canonical agent.
-MECHANICAL_VARIANTS = {
-    "devops-engineer-mechanical": "devops-engineer",
-    "product-owner-mechanical": "product-owner",
-    "qa-engineer-mechanical": "qa-engineer",
-    "solution-architect-mechanical": "solution-architect",
-}
-REGISTRY = "skill-content/configure/data/process-switches.json"
 
 
 def setting_lines(root: Path, host: str, slot: str) -> list[str]:
@@ -856,9 +833,6 @@ SHARED_VARIANTS = {
         build_distributions.execution_profile_path(root, "codex"),
         lambda table: table["profiles"]["auto"].update(
             critical_decision={"model": codex_fast_model(), "effort": "max"})),
-    "no_mechanical_switch": lambda root: edit_json(
-        root / "plugins" / fixtures.PLUGIN / REGISTRY,
-        lambda data: data["switches"].pop("mechanical_pass_tier")),
 }
 
 
@@ -922,32 +896,12 @@ class ExecutionProfileTests(unittest.TestCase):
             for path in sorted(agents.glob("*.md"))
         }
 
-    def registry(self) -> Path:
-        return self.root / "plugins" / fixtures.PLUGIN / REGISTRY
-
     def assert_own_root(self) -> None:
         self.assertNotIn(self.root, _SHARED_ROOTS.values(), "change a copy, not a shared build")
 
-    def edit_variants(self, mutate) -> None:
-        self.assert_own_root()
-        data = json.loads(self.registry().read_text(encoding="utf-8"))
-        mutate(data["switches"]["review_panels"]["agent_variants"]["lens_panel"], data)
-        self.registry().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
     def rendered_classes(self, host: str = "claude") -> dict[str, str]:
-        """Every agent ``host`` renders with its class slot: canonical agents and
-        their switch variants, and on a host whose role file decides the model
-        an escalated variant per agent on a class that escalates and the
-        security review variant."""
-        rendered = {**self.classes(), **{variant: LENS_CLASS for variant in LENS_VARIANTS},
-                    **{variant: LENS_CLASS for variant in CODE_REVIEW_LENS_VARIANTS},
-                    **{variant: MECHANICAL_CLASS for variant in MECHANICAL_VARIANTS}}
-        if host == "codex":
-            rendered.update({f"{name}-escalated": f"{slot}_escalated"
-                             for name, slot in list(rendered.items())
-                             if DECLARED_CLASSES[slot]["escalates"]})
-            rendered["code-reviewer-security"] = SECURITY_CLASS
-        return rendered
+        """Every agent ``host`` renders, with its class slot: the canonical agents."""
+        return self.classes()
 
     def edit_table(self, host: str, mutate) -> None:
         self.assert_own_root()
@@ -1071,7 +1025,7 @@ class ExecutionProfileTests(unittest.TestCase):
         committed = shared_root() / "dist" / "claude" / fixtures.PLUGIN / "agents"
         self.assertEqual(build_distributions.compare_dirs(committed, self.render_agents("claude")),
                          [])
-        pinned = AUTO_MODELS["claude"][MECHANICAL_CLASS][0]
+        pinned = AUTO_MODELS["claude"]["routine_authoring"][0]
         family, version = build_distributions.load_adapters(self.root)["claude"].module.model_version(
             pinned)
         bumped = f"claude-{family}-{version[0] + 1}"
@@ -1098,164 +1052,6 @@ class ExecutionProfileTests(unittest.TestCase):
                 else:
                     self.assertEqual(model, setting_lines(self.root, "claude", slot)[0])
                     self.assertNotEqual(model, f"model: {bumped}")
-
-    def test_single_reviewers_keep_their_class_beside_their_lens_variants(self):
-        self.root = shared_root("codex_decision_fast")
-        fast = codex_fast_model()
-        classes = self.classes()
-
-        def codex_lines(agent: str) -> list[str]:
-            return ([f'model = "{fast}"', 'model_reasoning_effort = "max"']
-                    if classes[agent] == "critical_decision" else role_lines(self.root, classes[agent]))
-
-        for variant, agent in sorted({**LENS_VARIANTS, **CODE_REVIEW_LENS_VARIANTS}.items()):
-            with self.subTest(variant=variant):
-                base = frontmatter_lines(self.dist_agent("claude", agent))
-                self.assertEqual(base[2:4], setting_lines(self.root, "claude", classes[agent]))
-                claude = frontmatter_lines(self.dist_agent("claude", variant))
-                self.assertEqual(claude[0], f"name: {variant}")
-                self.assertEqual(claude[1], f"{base[1]} Lens reader variant for review panels.")
-                self.assertEqual(claude[2:4], setting_lines(self.root, "claude", LENS_CLASS))
-                self.assertEqual(claude[4:], base[4:])
-                # The variant keeps the role's body, boundaries and identity.
-                body = self.dist_agent("claude", agent).read_text(encoding="utf-8").split("\n---\n", 1)[1]
-                self.assertEqual(
-                    self.dist_agent("claude", variant).read_text(encoding="utf-8").split("\n---\n", 1)[1],
-                    body)
-                codex = frontmatter_lines(self.dist_agent("codex", variant))
-                self.assertEqual(
-                    [line for line in codex if line.startswith("model")],
-                    setting_lines(self.root, "codex", LENS_CLASS),
-                )
-        self.codex_json("apply", "--scope", "local")
-        files = self.role_files()
-        for variant, agent in sorted({**LENS_VARIANTS, **CODE_REVIEW_LENS_VARIANTS}.items()):
-            with self.subTest(codex=variant):
-                self.assertEqual(role_settings(files[variant]), role_lines(self.root, LENS_CLASS))
-                self.assertEqual(role_settings(files[agent]), codex_lines(agent))
-                # A variant keeps its base role's sandbox: the document reviewers read only.
-                self.assertEqual('sandbox_mode = "read-only"' in files[variant],
-                                 'sandbox_mode = "read-only"' in files[agent])
-                if variant in LENS_VARIANTS:
-                    self.assertIn('sandbox_mode = "read-only"', files[variant])
-
-    def test_builder_refuses_agent_variants_it_cannot_render(self):
-        self.use_copy(with_dist=True)
-        source = self.root / "plugins" / fixtures.PLUGIN
-        classes = set(json.loads((self.root / "tools/data/models.json").read_text(
-            encoding="utf-8"))["model_classes"])
-        self.assertEqual(
-            [name for _agent, name, _class, _text in build_distributions.agent_variants(source, classes)],
-            sorted(CODE_REVIEW_LENS_VARIANTS) + sorted(MECHANICAL_VARIANTS) + sorted(LENS_VARIANTS))
-        original = self.registry().read_bytes()
-        for mutate, fragment in (
-                (lambda variant, _data: variant.update(agents=["ghost-reviewer"]),
-                 "names unknown agent 'ghost-reviewer'"),
-                (lambda variant, _data: variant.update({"class": "extreme"}),
-                 "names unknown class 'extreme'"),
-                (lambda variant, _data: variant.update(description="Lens: reader"),
-                 "needs a one-line description without a colon"),
-                (lambda variant, _data: variant.update(agents=["backlog-reviewer", "backlog-reviewer"]),
-                 "collides with another agent"),
-                (lambda variant, _data: variant.pop("suffix"), "agent_variants must declare")):
-            with self.subTest(fragment=fragment):
-                self.registry().write_bytes(original)
-                self.edit_variants(mutate)
-                with self.assertRaisesRegex(ValueError, fragment):
-                    build_distributions.agent_variants(source, classes)
-        # The build refuses before it removes the generated tree.
-        with self.assertRaisesRegex(ValueError, "agent_variants must declare"):
-            build_distributions.replace_generated(self.root, self.root / "dist")
-        self.assertTrue(self.dist_agent("claude", "backlog-reviewer-lens").is_file())
-        self.registry().unlink()
-        self.assertEqual(build_distributions.agent_variants(source, classes), [])
-
-    def test_lens_class_panel_data_and_variants_are_build_inputs(self):
-        self.use_copy()
-        before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.set_slot("claude", LENS_CLASS, {
-            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"][LENS_CLASS][0],),
-                                   effort="high"), "effort": "high"})
-        reclassed = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertNotEqual(reclassed, before)
-        panels = (
-            self.root / "plugins" / fixtures.PLUGIN
-            / "skill-content/challenge-review/data/review-panels.json"
-        )
-        data = json.loads(panels.read_text(encoding="utf-8"))
-        data["review_steps"]["backlog_epic"]["default_panel"] = [[
-            lens for assignment in data["review_steps"]["backlog_epic"]["default_panel"]
-            for lens in assignment
-        ]]
-        panels.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        regrouped = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertNotEqual(regrouped, reclassed)
-        self.edit_variants(lambda variant, _data: variant["agents"].remove("solution-reviewer"))
-        self.assertNotEqual(
-            build_distributions.marketplace_snapshot(self.root)["build_id"], regrouped,
-        )
-
-    def test_writers_keep_their_class_beside_their_mechanical_variants(self):
-        settings = {host: setting_lines(self.root, host, MECHANICAL_CLASS)
-                    for host in build_distributions.HOSTS}
-        suffix = " Writer variant for passes that apply only the fixes a review verdict names."
-        classes = self.classes()
-        for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
-            self.assertNotEqual(classes[agent], MECHANICAL_CLASS)
-            for host in build_distributions.HOSTS:
-                with self.subTest(variant=variant, host=host):
-                    base_text = self.dist_agent(host, agent).read_text(encoding="utf-8")
-                    text = self.dist_agent(host, variant).read_text(encoding="utf-8")
-                    # The variant keeps the writer's body, boundaries and identity.
-                    self.assertEqual(text.split("\n---\n", 1)[1], base_text.split("\n---\n", 1)[1])
-                    base, lines = (frontmatter_lines(self.dist_agent(host, name))
-                                   for name in (agent, variant))
-                    self.assertEqual(lines[:2], [f"name: {variant}", base[1] + suffix])
-                    self.assertEqual(
-                        [line for line in lines[2:] if not line.startswith(("model", "effort"))],
-                        [line for line in base[2:] if not line.startswith(("model", "effort"))])
-                    self.assertEqual([line for line in lines if line.startswith(("model", "effort"))],
-                                     settings[host])
-        self.codex_json("apply", "--scope", "local")
-        files = self.role_files()
-        for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
-            with self.subTest(codex=variant):
-                self.assertEqual(role_settings(files[variant]), role_lines(self.root, MECHANICAL_CLASS))
-                self.assertEqual(role_settings(files[agent]), role_lines(self.root, classes[agent]))
-                self.assertNotIn("sandbox_mode", files[variant])
-                instructions = [line for line in files[variant].splitlines()
-                                if line.startswith("developer_instructions")]
-                self.assertEqual(instructions, [line for line in files[agent].splitlines()
-                                                if line.startswith("developer_instructions")])
-
-    def test_base_agents_and_role_files_do_not_depend_on_the_mechanical_switch(self):
-        def agents(root: Path) -> dict:
-            return {host: {path.name: path.read_bytes() for path in sorted(
-                (root / "dist" / host / fixtures.PLUGIN / "agents").glob("*.md"))}
-                for host in build_distributions.HOSTS}
-
-        # A Codex build also renders each variant's escalated variant.
-        mechanical = {host: set(MECHANICAL_VARIANTS) | ({f"{variant}-escalated" for variant
-                                                        in MECHANICAL_VARIANTS}
-                                                       if host == "codex" else set())
-                      for host in build_distributions.HOSTS}
-        self.codex_json("apply", "--scope", "local")
-        with_switch, role_files = agents(self.root), self.role_files()
-        # The same sources built without the mechanical_pass_tier switch.
-        without_root = shared_root("no_mechanical_switch")
-        without = agents(without_root)
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                self.assertEqual(set(with_switch[host]) - set(without[host]),
-                                 {f"{variant}.md" for variant in mechanical[host]})
-                self.assertEqual({name: with_switch[host][name] for name in without[host]},
-                                 without[host])
-        self.codex_json("apply", "--scope", "local", root=without_root)
-        after = self.role_files()
-        self.assertEqual({name: text for name, text in role_files.items()
-                          if name not in mechanical["codex"]},
-                         {name: after[name] for name in role_files
-                          if name not in mechanical["codex"]})
 
     def test_inherit_profile_omits_the_model_keeps_the_effort_and_survives_refresh(self):
         self.codex_json("apply", "--scope", "local")
@@ -1499,13 +1295,13 @@ class ExecutionProfileTests(unittest.TestCase):
 
     def test_model_and_effort_lines_are_the_named_exception_to_default_equivalence(self):
         # Pinned models change every role's settings with no Process Policy (#344),
-        # so invariant 30 and the release note must say they follow the catalog.
+        # so invariant 18 and the release note must say they follow the catalog.
         exception = ("the model and effort lines of rendered agents follow each host's model"
                      " catalog and execution profile, not default equivalence")
         repository = fixtures.REAL_REPOSITORY
         architecture = " ".join((repository / "docs/architecture.md").read_text(
             encoding="utf-8").split())
-        invariant = architecture.split(" 30. ", 1)[1].split(" 31. ", 1)[0]
+        invariant = architecture.split(" 18. ", 1)[1]
         self.assertIn(exception, invariant)
         # The rule names both of its exceptions in one place.
         self.assertIn("Two exceptions stand outside this rule:", invariant)
@@ -1547,7 +1343,7 @@ class ExecutionProfileTests(unittest.TestCase):
             self.assertIn(fragment, contracts["claude"])
         # On Codex only the mechanical class leaves the frontier model.
         self.assertEqual({model for slot, (model, _effort) in codex.items()
-                          if slot != MECHANICAL_CLASS}, {codex["critical_decision"][0]})
+                          if slot != "mechanical"}, {codex["critical_decision"][0]})
         self.assertIn(f"`mechanical` runs `{codex['mechanical'][0]}` at `{codex['mechanical'][1]}`;"
                       f" every other slot runs `{codex['critical_decision'][0]}`", contracts["codex"])
 

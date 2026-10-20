@@ -144,10 +144,6 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertEqual(current["output_language"], "Turkish")
             self.assertEqual(current["schema_version"], 2)
             self.assertEqual(authored.read_bytes(), authored_before)
-            docs = workspace / "docs"
-            self.assertTrue((docs / "operation" / "verification-contract.md").is_file())
-            self.assertTrue((docs / "operation" / "environment-contract.md").is_file())
-            self.assertTrue((docs / "delivery" / "governance" / "governance.md").is_file())
             rerun = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
             self.assertEqual(rerun.returncode, 0, rerun.stdout + rerun.stderr)
             self.assertEqual(json.loads(rerun.stdout)["operations"], [])
@@ -166,78 +162,6 @@ class ProjectConfigTests(unittest.TestCase):
             result = self.run_script(SETUP, "inspect", "--project-root", str(project))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("future schema_version", result.stderr)
-
-    @integration
-    def test_setup_moves_a_recognized_legacy_environment_contract_transactionally(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            workspace = project / "workspace"
-            (workspace / "environment").mkdir(parents=True)
-            (workspace / "config.json").write_text(json.dumps({
-                "team_id": "software-engineering-team",
-            }), encoding="utf-8")
-            legacy = workspace / "environment" / "contract.md"
-            legacy.write_text(
-                "---\ntype: environment-contract\nstatus: draft\nrevision: 1\n"
-                "env_command: ./tools/env\nenv_workdir: .\nscenarios:\n  - default\n"
-                "tolerated_warnings:\nservice_catalog:\n---\n\n# Environment\n",
-                encoding="utf-8",
-            )
-            inspected = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
-            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
-            operations = json.loads(inspected.stdout)["operations"]
-            self.assertTrue(any(item["action"] == "delete" and item["path"] == "workspace/environment/contract.md"
-                                for item in operations))
-            applied = self.run_script(SETUP, "apply", "--project-root", str(project))
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            canonical = workspace / "docs" / "operation" / "environment-contract.md"
-            self.assertTrue(canonical.is_file())
-            self.assertFalse(legacy.exists())
-
-    def test_legacy_command_migration_writes_drafts_the_vault_accepts(self):
-        """A migrated draft leaves every unset value absent, as a new contract does."""
-        sys.path.insert(0, str(SCRIPTS))
-        import operation_compile
-        import setup_project
-        import vault_check
-
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        # A retired config and the fields its drafts carry, where None means absent.
-        cases = {
-            "test and environment commands": (
-                {"test_command": "make test", "env_command": "./tools/env"},
-                {"verification": {"test_command": "make test"}, "environment": {"env_command": "./tools/env"}}),
-            "test and mutation commands": (
-                {"test_command": "make test", "mutation_command": "make mutation"},
-                {"verification": {"test_command": "make test", "mutation_disposition": "required",
-                                  "mutation_command": "make mutation", "mutation_rationale": None}}),
-            "mutation command only": (
-                {"mutation_command": "make mutation"},
-                {"verification": {"test_command": None, "mutation_disposition": "required",
-                                  "mutation_command": "make mutation"}}),
-            "empty commands": (
-                {"test_command": "", "env_command": ""},
-                {"verification": {"test_command": None}, "environment": {"env_command": None}}),
-        }
-        for name, (config, expected) in cases.items():
-            with self.subTest(case=name), tempfile.TemporaryDirectory() as temporary:
-                workspace = Path(temporary) / "workspace"
-                docs = workspace / "docs"
-                docs.mkdir(parents=True)
-                updates, deletions, blockers = setup_project.legacy_operation_updates(workspace, config)
-                self.assertEqual((deletions, blockers), ([], []))
-                for path, text in updates.items():
-                    path.parent.mkdir(parents=True, exist_ok=True)
-                    path.write_text(text, encoding="utf-8")
-                findings = []
-                vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
-                self.assertEqual([(finding.path, finding.message) for finding in findings
-                                  if finding.path.startswith("operation/")], [])
-                for kind, fields in expected.items():
-                    props, _body = operation_compile.parse(operation_compile.contract_path(docs, kind))
-                    self.assertEqual({key: props.get(key) for key in fields}, fields)
-
 
 if __name__ == "__main__":
     unittest.main()

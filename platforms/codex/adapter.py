@@ -20,8 +20,7 @@ MODEL_ID_SHAPE = r"[a-z0-9]+(?:[.-][a-z0-9]+)*"
 # This host's CLI in tools/data/host-cli-versions.json, the exact version CI
 # installs; no catalog model's min_cli_version may be newer.
 HOST_CLI_KEY = "codex"
-# A role file's model wins over a spawn-time model, so the build renders one
-# variant per escalated or purpose class instead.
+# A role file's model wins over a spawn-time model, so a role runs its own pins.
 SPAWN_MODEL = None
 # The drift check reads the catalog bundled with the CLI, from `codex debug
 # models --bundled`. A pinned source of this form names the CLI release whose

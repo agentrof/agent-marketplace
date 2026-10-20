@@ -1,16 +1,15 @@
 # Agent Marketplace
 
 Agent Marketplace ships one standalone, host-neutral Software Engineering Team
-for Claude Code and Codex. The team takes a user Requirement through the
-applicable analysis, design and backlog gates, then hands the approved backlog
-to the Delivery Flow.
+for Claude Code and Codex. The team turns each request into one task, one
+branch and one pull request, verified by the project's CI and one reviewer.
 
 ## Catalog
 
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 18 | 18 | 15 |
+| 1 | 11 | 7 | 11 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.
@@ -109,43 +108,19 @@ Check fails on `DESIGN.md`, `PRODUCT.md`, `docs/DESIGN.md`, `docs/PRODUCT.md`. D
 
 <!-- companions:end -->
 
-## Requirement and Delivery path
+## Fast lane
 
 ```text
-/setup -> /requirement -> required stages -> /backlog-plan
-        -> /delivery-plan -> /execution-plan -> /deliver
+/setup -> /deliver -> task -> branch -> pull request -> review -> merge
 ```
 
-The Requirement record owns the impact matrix. Only required stages run, reuse
-must cite an approved current package, and `not_applicable` requires a concrete
-rationale. The approved backlog is the handoff to Delivery; no timebox,
-velocity or release state is created.
+`/deliver` turns a request into one task under
+`workspace/docs/backlog/tasks/` with its acceptance criteria and tests, the
+owner approves it, and the owning developer role writes the change on its own
+branch. The project's CI and one `code-reviewer` verify the pull request; only
+a critical finding blocks. The flow is defined in
+`plugins/software-engineering-team/flows/fast-lane.md`.
 
-The current lifecycle and Git coordination contract is documented in
-[docs/requirement-delivery-protocol.md](docs/requirement-delivery-protocol.md).
-
-## Backlog layout
-
-```text
-workspace/docs/backlog/
-  backlog.md
-  reviews/round-1-backlog-review.md
-  epics/<epic-slug>/
-    epic.md
-    reviews/round-1-epic-review.md
-    stories/<story-slug>/
-      story.md
-      test-plan.md
-  _generated/{registry.json,board.md,dependency-map.md,test-coverage.md}
-```
-
-Each story names one accountable implementation role and any supporting roles
-with concrete contributions. The epic review derives from its epic and
-verifies its exact child story/test-plan set. The root review derives from the
-backlog and relates to the exact epic set while covering cross-epic overlap,
-dependency direction, ordering and global coverage. Test plans map acceptance
-criteria and business rules to stable Given/When/Then scenarios and required
-automation targets. Test execution remains a later delivery gate.
 `/issue-report` is a stateless support path for Agent Marketplace defects and
 improvements. It previews the exact GitHub payload in chat, files only after
 explicit approval and never stores issue state in the consuming project.

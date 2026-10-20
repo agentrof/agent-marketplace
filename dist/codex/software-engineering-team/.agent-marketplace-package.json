@@ -8,226 +8,61 @@
     ],
     "write": 1
   },
-  "executables": [
-    "scripts/backlog_compile.py",
-    "scripts/backlog_review_inputs.py"
-  ],
+  "executables": [],
   "files": {
     ".agent-marketplace-generated-distribution":
       "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474"
     ,
     ".codex-plugin/plugin.json":
-      "8585932f959ffc2e7244ee242d3b72e378650377cbd2c1378656684174faae57"
-    ,
-    "agents/analysis-challenger-escalated.md":
-      "13cf2479ec47b9ed1142952b546b2cd048bae6cfd12ee0ce33e10da552571f69"
+      "8e3eb443e901826a1e59770ff3591870a6073d879149f7a55fad8ed6de4993ed"
     ,
     "agents/analysis-challenger.md":
-      "38b4c1ff0638cf13f6fa925f50bb38ec52b61343b4857e0385a5048d8158574a"
-    ,
-    "agents/backend-developer-escalated.md":
-      "c904412d470fa9a4ba168db97ed18bcaa3c88e5e88d073a68c71d5ee4641d14e"
+      "d20d3b8020272d971848ec2ac90cf9ca7d37e2f1de4a565495e60122cbaf9da0"
     ,
     "agents/backend-developer.md":
-      "fb2181306d55df41a7fbc6b5fcb93f71e680970e18f65ff7300eb6fe3d61efdc"
-    ,
-    "agents/backlog-reviewer-escalated.md":
-      "fea312d066e342af6dda88dc31f1097999655785d904dcb58b078fc227133445"
-    ,
-    "agents/backlog-reviewer-lens-escalated.md":
-      "1723122f1f13f920036e77cabd27f4721f80f1d9d62f0c11299dd83cf4bf1720"
-    ,
-    "agents/backlog-reviewer-lens.md":
-      "7919dfd4f9ed50e5f9a91820497a0e6167c1f06e3ce01c4a38d9f0469dddf97c"
-    ,
-    "agents/backlog-reviewer.md":
-      "c25cdbb48323f54f4974c358d30c2d09bb28891924aa466913ec513e8cb3e9d0"
-    ,
-    "agents/business-analyst-escalated.md":
-      "87e4b2ff48a4df736de66ba0870cb214f60f38227a73b27517c25daae2b4f950"
+      "9edd7432b7e694a9d0e0e6c064811f1350a942e4348430c7d33ab2d21018d10a"
     ,
     "agents/business-analyst.md":
-      "5e78d9bf1f96e010fcba5916c882e5bd0cb36a2364664d0aeef56a4dd75a4d1f"
-    ,
-    "agents/code-reviewer-escalated.md":
-      "d1ac3a70105fa9bc09fa0adfad0ed7626e039bdbb6f2ba4c2f240e4672023382"
-    ,
-    "agents/code-reviewer-lens-escalated.md":
-      "153a0d004b41c9aff5b5c0f211ca680485219ecd0320ec52a8342e577941025b"
-    ,
-    "agents/code-reviewer-lens.md":
-      "72ae0fcdacd3fbbd92bcfd7bc739d0c6ea817656a38d7733c48cc20120e89751"
-    ,
-    "agents/code-reviewer-security.md":
-      "ded8a5ae52029b6a4e6b2cfea9a7ef925fd76e6a5aad4a498d9331265667112d"
+      "577f5b4f2f86dff89490695a895b6c14070169b69d99d9e67ff1da5261aedef0"
     ,
     "agents/code-reviewer.md":
-      "0e04df240c91560d798a97078f63c91b2f15273e5090cb0d118ce3fb341ec121"
-    ,
-    "agents/delivery-coordinator.md":
-      "fe51d5235e2f3dfdfcf9037f695d371161598259972ebd19bda160cabf958244"
-    ,
-    "agents/design-system-reviewer-escalated.md":
-      "1cb96b3de053d909b307e632f8259b06f50b54deb502786f95c929d5545619a0"
-    ,
-    "agents/design-system-reviewer-lens-escalated.md":
-      "12409a040ab4446496db5302241e3208a9d16400ef54cd0d115d98df392270a1"
-    ,
-    "agents/design-system-reviewer-lens.md":
-      "ec396ef1250eb7172e853b10ac5ad1239320129bb2eda0809267431f5919629b"
-    ,
-    "agents/design-system-reviewer.md":
-      "d3268bf18b57eb34c8ee46b1a91df8639ff4f0003855bc97997488da16d8962e"
-    ,
-    "agents/devops-engineer-escalated.md":
-      "fc9eb700f722790f20e69d77d146b29208f47204cf177e98b2399d535d0d2ef8"
-    ,
-    "agents/devops-engineer-mechanical-escalated.md":
-      "eb413e48f76e6cda7a2c6f97c0bd608c557b61db51d7ecfd6cdc29f1962fbce1"
-    ,
-    "agents/devops-engineer-mechanical.md":
-      "211c279a1f97c32178cb45d2820a7d09b3677ec9762f706dc500de3fb25283a6"
+      "8892c9ce34ab7a71b499fac08be07abaaa7d753b12fecc280d050bf3ef8cb1e4"
     ,
     "agents/devops-engineer.md":
-      "6f472f37ada9d97bd5606afc1bf69e0b571b69a28af3b7910e22e3018e80f12f"
-    ,
-    "agents/domain-expert-escalated.md":
-      "757be7b4ae325028195845cf48c57ea04e237587a0929258f8ff883a6ac3a681"
-    ,
-    "agents/domain-expert.md":
-      "e21d45315f901b34a231e724a084708a177de308e6c2887079398504c2566f08"
-    ,
-    "agents/experience-reviewer-escalated.md":
-      "79984a097531a211229d781c7a96bd41ae3736196e5aa5bf75764a7b751bfdb0"
-    ,
-    "agents/experience-reviewer.md":
-      "9be52cbfff1379a3d2cf35c3abc41b2fbcbf850cc093b9c7161a7c0fe774a79c"
-    ,
-    "agents/frontend-developer-escalated.md":
-      "743934e4d2b594d24bfa97426bcb98ee656cd510a062d08673f6cd36b219883a"
+      "84848883884d0cc972a3de819a0dc02d81f1bed27f1fcf43050f7a0d9d1743d4"
     ,
     "agents/frontend-developer.md":
-      "1a0d70d3141ae6ab4e87620bab37d8f8a0e9c53a127b514958b365436e05b06c"
-    ,
-    "agents/product-owner-escalated.md":
-      "52b9f49dfb8ee0ddbaa29c845f3ce6dcb2210e60d8ef2ab8c149e7a128698b11"
-    ,
-    "agents/product-owner-mechanical-escalated.md":
-      "d5cc2f92f627913513b5765427af50bd7b4084d0ba9fdbe6406cd927229adf6e"
-    ,
-    "agents/product-owner-mechanical.md":
-      "41cbcd4c461bc83a1f71af738b2d34e02bdf08c8a20b65aecf207b41227c5d5d"
-    ,
-    "agents/product-owner.md":
-      "1bd59d26eb4a04ffd6996ebffffbc59cc0b5354667d6f1e8ac0d4330696517e1"
-    ,
-    "agents/qa-engineer-escalated.md":
-      "59d9aed979df520ead576fd6982d98e5539a505d3b6796cb09c30a6f4b80db8f"
-    ,
-    "agents/qa-engineer-mechanical-escalated.md":
-      "cfb37e8d71092ca945f0283b2dc085f237a5f196168cbfa74efa4cdda5f447ef"
-    ,
-    "agents/qa-engineer-mechanical.md":
-      "8174fb5c668e5412df9454a036c05f353296a2661603d312d54366345f1f3571"
+      "2d5ad30fb854399cce47ae9998852d9fb84a175d05d5f2ac1620e3c1088d1654"
     ,
     "agents/qa-engineer.md":
-      "0779606e15a835e9f3704a3d35e13b21afe253cb45a160a21ce4987608a858ac"
+      "79a22e550b979da330effadd60ea9917494747b8241ad3c6be0ce88421b89e1c"
     ,
     "agents/security-reviewer.md":
       "5b0f0832122279bb069d9301528c9656a1b9f6f327db5957295710308b4e0227"
     ,
-    "agents/software-architect-escalated.md":
-      "f0e8cee7a6b4e0f606ab22b99b1a0fb86102afc0429a04dc4ff13cd70f02f806"
-    ,
     "agents/software-architect.md":
-      "d3726c38f417f8fa422e02f3d2098b5b8155b41e4984bf3c8544dcd8f592b443"
-    ,
-    "agents/solution-architect-escalated.md":
-      "83cd10f0e510e742178d7421d4f415dea72be00b3c69c63db6203403b135a92f"
-    ,
-    "agents/solution-architect-mechanical-escalated.md":
-      "f441bd9df436d5f3298c6967d93862d71a2267b9fadc6dcd939b6d000a87142b"
-    ,
-    "agents/solution-architect-mechanical.md":
-      "d153dd01ed786e93d7aa9063eae90a1453af93bf045deb287c8e36b8fbc31aed"
+      "4a792c538a9c9da8c5df29e137070705d8dfa245004af0571ac007285f5ad953"
     ,
     "agents/solution-architect.md":
-      "79d583eb2dabcf37c2881cf797501668e1c229d402ca83d787006511d2728b33"
-    ,
-    "agents/solution-reviewer-escalated.md":
-      "111320d6e02c120ff8c1333a7df17dfe83f51a6136c90d5ae5f68259d049bb28"
-    ,
-    "agents/solution-reviewer-lens-escalated.md":
-      "2ae6b94ba659b38f8b1ed32b31a7fd0670e1476c3a068814c32954c4f78f0b3e"
-    ,
-    "agents/solution-reviewer-lens.md":
-      "42c5b0022bfb1ee962e814af94ddc1b328ce7a7d0eb0c4f6412b771b61795d38"
+      "25c047e222fa4ab51498d5e3d7baa5a33ae0a8c81e92e7b3cae560ec1f3e0791"
     ,
     "agents/solution-reviewer.md":
-      "63a47a4a5a859414f42305c25c1a6ffb58d6a84afc68e156a38724c0a45682c6"
-    ,
-    "agents/ux-designer-escalated.md":
-      "c9112a50adeaaeb8c4a1e5b4e4e4d635f69af388e684f94adb2954771980b4d5"
-    ,
-    "agents/ux-designer.md":
-      "8e68ac8581dd0f54c77bca49f45fa05ad583ea8f191b717f0b9d76209bf734a6"
+      "7c2fdff067466a210a8cc7d6bb58f73cc96b9395078867709da27408059a919f"
     ,
     "constitution.md":
       "67bd2b8cac8ead82129171c81607249a00e415f3a6bfc1002c388c4b3176548d"
     ,
-    "flows/backlog-planning.md":
-      "0a1b3917cd1baa5f1c114bb74414e9a1b49a892380722f9bcc5f9ee4e9ab2ec2"
-    ,
-    "flows/business-analysis.md":
-      "3ffad4ae7c6d98ba582a6919f71e96c35ce3825fda295a3ec8382b04414a778a"
-    ,
-    "flows/delivery-execution.md":
-      "3b3a58e9b47097fddee3b87f56d83399cf44bbe0ba41cf9d7879ff6a188417eb"
-    ,
-    "flows/delivery-governance.md":
-      "7ba050e9e0ed730fbb0cad1163ae3815ae626fe9dcbf47c3833d8a774c6e9d98"
-    ,
-    "flows/delivery-planning.md":
-      "4d8eb69023a0724ec9e280e0e880d60c410f62444df9826d011c7c032448670d"
-    ,
-    "flows/design-system.md":
-      "e8a2e62a5ae71310896555d053e5c6d72801c63f93f85fc050e3da1ef1ca7659"
-    ,
-    "flows/design.md":
-      "fe5af168a850e2d931b241616ac88095c092780acd4b786bec108c88ba5ed36d"
-    ,
-    "flows/execution-planning.md":
-      "0c62d8f9d574c18f42ff3f082ea1c4ee3511205bba35ef20f38d607f0d01b6ce"
-    ,
-    "flows/experience-design.md":
-      "fa05e6f3b4edb8c8891461e142694b61d0f02fa27fab2a140987bdf80c92c830"
-    ,
     "flows/fast-lane.md":
-      "eadefdf487b9786f87b0fa027767f6e59c0bc1b4b939794883de2b62c7b84115"
-    ,
-    "flows/operation.md":
-      "26b336ebc9fb9737b681e76e6ef87886b331ac40588dfc8457b7c8584e7c9d64"
-    ,
-    "flows/requirement.md":
-      "893e51d4c1bd25ad25bf8ce64a6979176199ae62002537cf2dfe3b99a8a3861e"
-    ,
-    "flows/solution-design.md":
-      "9db7fdf7ba27d9615b5fd94102507d366cba114cf3a9b8e9bad274083c4f538d"
+      "5ebf4565b5114bfd2a6ad01eb3988833e17cf8d7efdfe0114c077005984cace2"
     ,
     "hooks/hooks.json":
       "d8f59a3b7f2a956263e77f87b9ae2a2977093e19d6b41f4f81cf21f77f6900f0"
     ,
     "host-contract.md":
-      "cd4cd311bd1d7f1b796c82a5f0aa14aa63e14fc1ada0870e5eeebc6e129148db"
+      "7075fbb59607bfdfa06be1c0978ac10072fe1d595b5803cc7638f4915bb9491f"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
-    ,
-    "scripts/architecture_compile.py":
-      "010687b9683ed985944716eafdd6419c9406a9058eecea0d08fd4d12020af2f0"
-    ,
-    "scripts/artifact_check.py":
-      "d95f51158f98e56fab55a083f240a2de612ae5cf5f2b73aeaee848721793e860"
     ,
     "scripts/atomic_file.py":
       "2835d96b91f37e472a73f1540aead9aa3d0a9165db4fa0f2cb457373aa629320"
@@ -236,64 +71,16 @@
       "0d519c668272376b009da01e1e4a9a959a7f8c7939e327e9a0d63344fcee144a"
     ,
     "scripts/await_outputs.py":
-      "a05fb85979416b9eec3a40c43ccfbd328d2337882dcfe3c95615e2e62c4eac8f"
-    ,
-    "scripts/ba_compile.py":
-      "dda27e86797325f102125b9902a30db665ed13527fa4955af28013ec52a5a7d9"
-    ,
-    "scripts/backlog_compile.py":
-      "234a7a36a9215a02dcb6a01ccbadd008898f734ceadd43217180065a95cb961f"
-    ,
-    "scripts/backlog_input_policy.py":
-      "2da777e916bd53440dd74b8dc1e5d666f291a84812677649a58628623f67ebcb"
-    ,
-    "scripts/backlog_migration.py":
-      "17bd222aec9cc63532efba42afddbcc0d94796e5e5a62224e150a735d11d8b8b"
-    ,
-    "scripts/backlog_rebind.py":
-      "15ffafe9b656bec133ba7f922af00dfb42edf531ed892d233b2e3ab9f2aed188"
-    ,
-    "scripts/backlog_review_inputs.py":
-      "8946155c66764a34302c8bc401a28811f1aec7368be53ea6198e5ae6bc5a6c30"
+      "d82184a2c9bb1f7529c2042aa2fd030bec9dc8b2f2cb49c7daa364f2375e643f"
     ,
     "scripts/context_catalog.py":
       "aacb4e627c4bdca9dab654744b81190774c3acdfeaf54d30893bdbdfe93ebd6a"
     ,
     "scripts/context_history.py":
-      "34a83efbed28af7b0211c8a5985f483e0de8bd2f1792b2678351025348506f54"
+      "0223ced93f8c9c656f8456d371523fc0cf89dad6d01ff0a6202ce29593acf510"
     ,
     "scripts/context_pack.py":
       "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
-    ,
-    "scripts/delivery_closure.py":
-      "cd2134c3d3190e2506d71f2315039e94f4dfc80d3ae85033c614cbd82d84d013"
-    ,
-    "scripts/delivery_compile.py":
-      "b581a7b9cfd91cc3e970cc5ed57c5f5315e4dbd3dfaeefd4725d705f805c09dd"
-    ,
-    "scripts/delivery_git.py":
-      "fc3097e1a84c1f305d705c310a7b48735f75694f826358b51218617e1f858827"
-    ,
-    "scripts/delivery_governance.py":
-      "59aa342f9c1e476c1b282520b1446733e704c9b2de06bf6f59758256c5cdce76"
-    ,
-    "scripts/delivery_provider.py":
-      "6332887c15451a8695e6c911a6e3073d691b049d092f4f06d399b1777dc8a506"
-    ,
-    "scripts/delivery_result.py":
-      "1ca45984c3c373674dc79e6272686847a89cd56366596c4cd3f836e3c8dc75d5"
-    ,
-    "scripts/delivery_verification.py":
-      "ce4d339f53209310712d67709a6c83d2363be4df5593cc4405b8b46d9482d578"
-    ,
-    "scripts/design_system_compile.py":
-      "bf6557f0cfd28cdd18232d1abfc87d3ba5ffbc39306bf6c3f7364b329c1ed1c7"
-    ,
-    "scripts/experience_application_check.py":
-      "08154e054f80b33423aebefe80524c0a8117f172609771f21c188f2f0d56638d"
-    ,
-    "scripts/experience_compile.py":
-      "d080e439061cbdd0df29b64556f383ca757b2e75b527b7c4ec31b302907b3d19"
     ,
     "scripts/file_issue.py":
       "99bb5ce4c91560911d0155f8ac34cc75ca05943bb0b2de3b41c5e035d6e1d28b"
@@ -314,55 +101,37 @@
       "0055612b763ed5d5549432f86d2b978d6d3ff5af243e18e8b6d558f6d8d1f659"
     ,
     "scripts/impact_closure.py":
-      "900141118ce34721f29b7c4f2a893cc140b20ea36049991a6341eca1646f57a3"
-    ,
-    "scripts/landscape_check.py":
-      "afd0b167c4f8b2d685ed4e4041a66178a706cece248d19dcb566814e0f534c43"
-    ,
-    "scripts/lane_table.py":
-      "76813fe8472a76223f3127f8862d0fe592e7efb7934ed6a900c4f977bdd84808"
+      "59655c06858179d1a37b08311d55dd8a06cf17d61526027ab90d109390a654a2"
     ,
     "scripts/marketplace_paths.py":
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/model_class.py":
-      "ba7c94ac9c4ffc243d7665e7d4a186beb52be5e88cfb87c1da950b4c1dec437b"
-    ,
-    "scripts/operation_compile.py":
-      "db9a4a7df2eded33bfe73ae5fa684db9e211fd07a04cd81df13b08330682b0c2"
+      "1ce1d1f6cce15fec224b930c0e21babf9103a69988d2d8212e100801c8c895de"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/process_policy.py":
-      "aeea78d6a3324bc01d8b63c432df02872a1d4a1d56c9b5be4a669f67dcb391c4"
-    ,
-    "scripts/production_reachability.py":
-      "6b86b0f15f01cc25b2e5dc5b48471e8f6c1e901965e4702952a1bc08be739a53"
+      "13828d1bea43582665e2a7d90719e377b0de65d133d3ddf0608cabfd5588ad8c"
     ,
     "scripts/project_config.py":
       "d20cad53bed9b8d85cf264eee7631a579a3e579392ac74e3782827811e6c6d10"
     ,
     "scripts/project_context.py":
-      "875630c752abab00578400b4603cd867af28dbf7c7c4832e1d37751f9b532d54"
+      "0a705d6d27acb30820258cb373a2fb9e6548a69630851026a4e3dd1b4d6d22d2"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
     ,
     "scripts/project_paths.py":
-      "655019285aa2ba281e80d9a7432d21631fac192e4660500eab51d045beef3d9e"
+      "40891b6797eb8c6437e4be9173571d451512d9af85fc47aba19db60e09c1f0b8"
     ,
     "scripts/reader_manifest.py":
-      "476b613c1612e8937c32f89b42bd0503805d21c730bb90ef14966b436fffece2"
-    ,
-    "scripts/requirement_compile.py":
-      "0921d5d76da1e09a73de0cab668d2fa5f9b685bd434a1e4544cddd8f87d631f4"
-    ,
-    "scripts/requirement_route.py":
-      "a6343f84ecec31095e660d4ea8cfde2711d859304c14fd1f0be04ad409f81131"
+      "48c0c108f09060eccbcd749ffcaa13b53fd8c1e96f31f920a8b2e61fcc9a52ce"
     ,
     "scripts/role_settings.py":
-      "de9223bdc1e7a33986ecff02e7390d345f8b28060590786175dce55b412bf87e"
+      "475aca567d9cdd762ce51b60c47b6bcf7a9dfce64f062bc4d96212c4fb144526"
     ,
     "scripts/runtime_floor.py":
       "511eaa656636b33440f7eb752c960934fc516d81deeeb06b1f009268128ce283"
@@ -371,22 +140,19 @@
       "c5f573942e2a79c8c3907a0081940309e3325521c03d62841b9718de4dc6dbb4"
     ,
     "scripts/setup_check.py":
-      "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
+      "107f2d03643069116211bf51ec9ce10e32787abac7b08b957aee2318ed03c876"
     ,
     "scripts/setup_companions.py":
       "90a99648460071f38b037d8a55819ecbf0b1acc373e360c2d305fde7a19a7c56"
     ,
     "scripts/setup_project.py":
-      "3767aa981779685c3ad3a1b074894daec77c21b45ab3aa41b75573c9f77f6ecf"
-    ,
-    "scripts/stage_package.py":
-      "c11bac2a55602b51c4660e542c67783fc19d772eb29c84b90d6d9a35c6949248"
+      "71bbedfbe7199867d21763b37713b85ff78e4f80165244d09af4386673c53879"
     ,
     "scripts/step_timing.py":
-      "9074dc24c1eb57a0c0b7ef9dde98a17bd5b79ea553233a600a54cbcb32a865c5"
+      "2472f5fe71b3b6a56bd9e510884e184fa520424983a57f273694c31b275bac89"
     ,
     "scripts/task_inputs.py":
-      "ca6614f0fee6841923d79331a2b1067a3be75a45d396b239312adc715e0647f0"
+      "b7cafa9774d1e1eb3d4584a16ad05fe65b6f832265d2b02b7a33954b0dc66380"
     ,
     "scripts/task_lane.py":
       "0bd97333648665ceb733aaef5f464abb42105b88bf1e4a4d86e3f775fede93ee"
@@ -412,20 +178,17 @@
     "scripts/vault_query.py":
       "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
     ,
-    "scripts/verification_reference.py":
-      "14bab75a4fa06b6a5d2faec37a18a661e7bc352ba5f3455ff8c94c89a8379f6e"
-    ,
     "skill-content/autopilot/SKILL.md":
-      "2dc65f45c97ee20af622e5fe9e420833bfcf14e2670753f051131c572e90db77"
+      "6a8382c27ee236ea9fb14aea73249d3956b46f3ab94715a1d65df0f8bd36df77"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
-      "e32aa7a9c6611c11a1933c2c6e9ec99c7b0199d09440865b155a6ba30e2f702e"
+      "cde9d72c1ae4a029e2afce76fc4cdfd4939582537e38a36d8e05c91e11f66a18"
     ,
     "skill-content/autopilot/references/transport-recovery.md":
       "7a3ea3f0b5b5235315d2532f8c44427e27d3f30790491330d24246c1421b87b2"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "5b14fb0fff640e740313ab2ed5dc48f37486acacf64d53262b6497a1e3421883"
+      "44015377f1b818dc9cde50a678c3fae87f03a6b7000a83a2fb0a78b4e93ad7bc"
     ,
     "skill-content/autopilot/scripts/autopilot_recovery.py":
       "80f96c50339cf002d9ca9d3ef5c9a7d0d9d6806c1950f61ddb793acf917b3e56"
@@ -436,119 +199,17 @@
     "skill-content/autopilot/scripts/transport_recovery_host.py":
       "05b57df14c4d46d311129887b9a4537c68dfcc5ee96f26e54f5862cf01b8946e"
     ,
-    "skill-content/backlog-plan/SKILL.md":
-      "d2840e479bb5f412fca3efbe8627eddf2ecd9da0515c8106209dd4e0bd77cec3"
-    ,
-    "skill-content/backlog-plan/data/light-backlog-path.json":
-      "ae308dd202b208bfa17dae2bc95ae785a22d4f9876ddddde0933578bacf9bc7f"
-    ,
-    "skill-content/backlog-plan/data/review-scope-budget.json":
-      "6bcbd98535f3475d4e66dfe911e63ede1742133e3bd0ee745d784662a7dcb62b"
-    ,
-    "skill-content/backlog-plan/data/root-review-delta.json":
-      "138e5358888aa3b4271d931448ec1a0bff54fb7e7589789e099c601ba04a7aad"
-    ,
-    "skill-content/backlog-plan/references/switch-backlog_path-light_when_eligible.md":
-      "510c26008702271b82dcc99989236cf195cb46b6d1c9a25d59a553c4bfc4d279"
-    ,
-    "skill-content/backlog-plan/references/switch-backlog_schema_migration-receipt_only.md":
-      "ee85661290a83f87dd02091cfd8449245d2249a641566f25fe4fdace9bb4e0f6"
-    ,
-    "skill-content/backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md":
-      "4126c93245f53e049273a3fdb3394c6bc74158d1ba6c8f6a6c991dabd089bca5"
-    ,
-    "skill-content/backlog-plan/references/switch-remediation_bookkeeping-compiler.md":
-      "313ab796866f57e5e7af10e3deae11b4006ec940b62df080dffc6576f1247af6"
-    ,
-    "skill-content/backlog-plan/references/switch-remediation_writers-per_epic.md":
-      "7f304f26209ab6de320846e32235ebc3162fc3e6b4e64d55cb19980ab10ef602"
-    ,
-    "skill-content/backlog-plan/references/switch-review_manifest_scope-bounded.md":
-      "dc84f3e14ceda303a735f0394dfa7fb4c3f8a2ba5d94cca203bfec69495cec3c"
-    ,
-    "skill-content/backlog-plan/references/switch-review_scope_record-both_scopes.md":
-      "9d551295d58fcc117722874726c5198b1a1d5c8b00d2a166319b316d4bfddcba"
-    ,
-    "skill-content/backlog-plan/references/switch-root_review_scope-revision_delta.md":
-      "f8d577ac73eaad621c16580a22d7eb2d1d604635918bf51c7ffa44489d2a3230"
-    ,
-    "skill-content/backlog-plan/references/switch-source_rebind-receipt_when_unchanged.md":
-      "f819a517d5a0950ac566d9f6ec8a2041fa8d95b0965fca6805f622f9ae50dc6f"
-    ,
     "skill-content/business-analysis/SKILL.md":
-      "2847ac9940f93cac7fb9d045dcba0b7bdcff5162f40949fece8161de6c7d195c"
+      "6f3e6f23087367e0255bc40b4e5ee24e1ad84fb80ae8a651c50f3b270275932b"
     ,
     "skill-content/business-analysis/data/space-schema.json":
       "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
     ,
-    "skill-content/business-analysis/references/switch-dependent_rebind_gate-with_source.md":
-      "fd7def8a4eeddae350f92e164b78006736817d8a22c89b4e1358d65b4d959616"
-    ,
-    "skill-content/business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md":
-      "95c085c1aa2b5fa1f98074250468c469d014216d4361a8017a647d3125246a93"
-    ,
-    "skill-content/challenge-review/SKILL.md":
-      "0ec0116e2f8cadd9fadc4d8f15e2c2301579718df61e7f6e3e072031a16113ec"
-    ,
-    "skill-content/challenge-review/data/review-panels.json":
-      "e09e6679dfb6dbd996b2460248a0b8d5cac1de87ff6c48d8570c40ccc10313a1"
-    ,
-    "skill-content/challenge-review/references/expert-casting.md":
-      "c43557a3cd48d3734c614e8a78c8d94d18df37e5f0e5a56c610962ca89f86f02"
-    ,
-    "skill-content/challenge-review/references/lens-bank.md":
-      "468169da1c43ecca6f7a955383b5b85d9dd24efbc6734f480cb9ef26f4c53fd1"
-    ,
-    "skill-content/challenge-review/references/switch-context_pack-role_digest.md":
-      "d4a89209d70c18854e415f506547b068759b52f0dd51759447443e764a184de4"
-    ,
-    "skill-content/challenge-review/references/switch-mechanical_pass_tier-mechanical.md":
-      "dff49cc85afdc1b621ef4f07cf3aa59046a84f222d7d97c08747ba73180c759f"
-    ,
-    "skill-content/challenge-review/references/switch-reader_waves-all_at_once.md":
-      "3902b589453f594c79c32b3f20d9d9126e825f8ab9e6f905ef934b7084157d97"
-    ,
-    "skill-content/challenge-review/references/switch-review_fanout-per_unit.md":
-      "36dab9063dec312ca07b2ba2244245ea793ab6be9a39b860422fa9d4f6885fb7"
-    ,
-    "skill-content/challenge-review/references/switch-review_levels-concurrent_when_independent.md":
-      "eaaeb28e96e4421ece56bc4bd1b868b4ab41dffba9bd5b1d57d24d3d4c7a1778"
-    ,
-    "skill-content/challenge-review/references/switch-review_loop-blocking_delta.md":
-      "06b835974aa8cd232b94d8efede5946f40388324eed013373d00ebccaee05dd6"
-    ,
-    "skill-content/challenge-review/references/switch-review_panels-lens_panel.md":
-      "ee24f92fef8272fffb1284e2b4741fe3f79adeab60648de1d8c9b9ca3b6ffa12"
-    ,
-    "skill-content/challenge-review/references/switch-review_rounds-single_pass.md":
-      "d77e71fb65b21a986bbd88c7a88a5a37dae3245158702b46fcae6627697de988"
-    ,
-    "skill-content/challenge-review/references/switch-review_scope-impact_closure.md":
-      "f16995fd7cdb5370b9a798d7ae8e4269124cad3d4f7d396dbd11d69f4f58f212"
-    ,
-    "skill-content/challenge-review/references/switch-step_budgets-enforced.md":
-      "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
-    ,
-    "skill-content/challenge-review/references/switch-step_timing-recorded.md":
-      "d78cf4a428847614c3e88f04f57f17ffaa142cdc0b29fd221c0902bb340fd96f"
-    ,
-    "skill-content/challenge-review/references/triage.md":
-      "f07174787b4ff740668c4a6a2e48ab99b0a6519dc51c9338f17671579dfaa0df"
-    ,
     "skill-content/code-review/SKILL.md":
-      "6f229210ed2fb79bffffc8670b27479a6cb17720aa6f9de26b266e788e888332"
-    ,
-    "skill-content/code-review/data/change-size-measures.json":
-      "17ea0436e1415053881944c49f9d645918b4d889c92fe837636e871082e8b7e3"
-    ,
-    "skill-content/code-review/data/code-review-panel.json":
-      "32735dceafa375129973ead0d3232d54b790cdfd2b83b49f7a22f8c09011a367"
-    ,
-    "skill-content/code-review/data/lens-triggers.json":
-      "8df834b33b1a9bcb4f93747993db6721e50179f2b3066a4b886aafd73343444d"
+      "44ae72d03dbb163f45b2982892115ea75a751b7c2d14a7acc88cc1cc71b195d0"
     ,
     "skill-content/code-review/references/passes.md":
-      "372cbfaaa74921b9b9c36302ae228d766fb123ddc3644290a48c51af3556f7de"
+      "5bf8b48ba8551e494215e6d20f1d7ec67b65a8b9956dfab1f41c5262e80cacc6"
     ,
     "skill-content/code-review/references/pitfalls.md":
       "9e235a5582e48c9f33fe91d16f617c320c308d87ac964f7a25e90bd83f87023c"
@@ -556,158 +217,47 @@
     "skill-content/code-review/references/smells.md":
       "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
     ,
-    "skill-content/code-review/references/switch-code_review_panel-beside_official.md":
-      "8a622320bff9536734856bf97d443f5103e0745f4d7196a6cc629faa5bf5bf87"
-    ,
-    "skill-content/code-review/references/switch-code_review_panel-risk_scoped.md":
-      "76ed4b4a89d772f474dd5f36b3cd4572361512e3a7b2d16ae90479bea27a9d0f"
-    ,
-    "skill-content/code-review/references/switch-item_review_scale-by_change_size.md":
-      "60e30321f786976ae5682a3f4d1551babfba4dd87ed7b981e44a5331fe018721"
-    ,
-    "skill-content/code-review/references/switch-repair_review-before_freeze.md":
-      "468900afff495e6077aa3c6b0f2199eee9824ac3fe4541532147ff2277193d8c"
-    ,
-    "skill-content/code-review/references/switch-review_loop-blocking_delta.md":
-      "d923de39a2b7c0b8d5e88268613fc0a8ef8d251ee7557a41d124e18da7dcaae1"
-    ,
     "skill-content/configure/SKILL.md":
-      "bad92d40cf4f3761e5c967618e43ef8ac061e6e34d4ae3964a3717c5f922f4cf"
+      "15b31626110c633f2b8e0b4d0f415346a13f5abcd1c92dba579967b9b8ff240b"
     ,
     "skill-content/configure/data/process-switches.json":
-      "5fff3d9f113ae52d756c1df51f75c31ab373c5b46bf9486a0f6262e941adc639"
-    ,
-    "skill-content/configure/data/purpose-variants.json":
-      "cc60fba8d1f514ad3ba3917b4b6a6b053ad829090be02ef4aa98062f12c3e30b"
-    ,
-    "skill-content/configure/data/step-baseline.json":
-      "8dd6d87d3d42a1da291e7d6863dcc068afd320ea577f1f6fd3070d8b0fa2ed1d"
+      "69940bfb7d1824e5fb1bdd2d55ae7b398184e30ceecda44cd39cae29ed4b3a7a"
     ,
     "skill-content/configure/data/step-budgets.json":
       "dd99177f7ffc6e91fe189b9d5cc2eae518071e90b1d73a67913400c7aa955a74"
     ,
     "skill-content/configure/references/config-contract.md":
-      "d91ce0cdd594a5f5e42cc43b02f144cacbbf019ccf6e6acdd9750480bfd33145"
+      "04c96bfe7ad53da5053eaa074890c888f4a175d3a4ac82cbd2a8a79e39b7dc05"
     ,
     "skill-content/configure/references/process-policy.md":
-      "9fd544dba7eef124f189a9b4177f029992ddd908cf77264ac94e64e9c114d80c"
+      "169753a9510ee7cb5f61ebd14931b0c5d23a151bd06c2a9bda6406fadb2f6bba"
     ,
     "skill-content/configure/references/role-models.md":
-      "27eb4815c428b9fd907f7089162aa520222b36f9da72fca7d2e2034f48265d7f"
-    ,
-    "skill-content/configure/references/switch-execution_planning-single_source_bundle.md":
-      "d9cd3b9a72a9831caa012d32f02553e4fe39976859b9e3d02bd3c8ab624b2c81"
-    ,
-    "skill-content/deliver-governed/SKILL.md":
-      "58c1ae78fce335cf06291f410753c0d2e53e7e1d92c6c0fd07ddb78aacc02230"
+      "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
     ,
     "skill-content/deliver/SKILL.md":
-      "f660d1de9f2de446bdd53a1d8efb479b091d6442204edab07566f63e07f1867b"
-    ,
-    "skill-content/deliver/data/assertion-kinds.json":
-      "363444381c22a9a1453172f615690be2cacb2bac7c6cb90fde0ab11dc12eac53"
-    ,
-    "skill-content/deliver/data/delivery-control-record-contract.json":
-      "ed6ef88af635fc5b414a6d5d71e6b8a4dcc81cdb42780be07b075d4530024cfe"
-    ,
-    "skill-content/deliver/data/delivery-document-contract.json":
-      "3622f51af1377ecd8f7d189dde601b708fe51db5342490faf54d8821b1c60984"
-    ,
-    "skill-content/deliver/data/delivery-protocol-1.json":
-      "448c7a970a9ae38bb9348b96a2cfa2f2833b895e28bc84c5a3c87e622ce5b0d9"
-    ,
-    "skill-content/deliver/data/delivery-provider-contract.json":
-      "c2bd8bf6db8515aee2dc3b857a644484c6b0f1eed0954f55884c466ee08a3035"
-    ,
-    "skill-content/deliver/data/delivery-receipt-contract.json":
-      "4b47d51cd4c24d0aa448c2ccd5aef23c48da807c226543b2868f8b0c86e6e731"
-    ,
-    "skill-content/deliver/data/delivery-result-contract.json":
-      "aed924d779a393fa090f27af3c46e8c9bfa3dab37ed4a78669fbe149abf99385"
-    ,
-    "skill-content/deliver/data/delivery-verification-policy.json":
-      "be1cb41ff4f2855f4a0812783febaabc48bd56e7a950c14b94f6637c8308b49e"
-    ,
-    "skill-content/deliver/data/owner-decision-classes.json":
-      "ce9f4eb4c264c77cc1e80f949b6ba36444dd508f86d95edbbc30aa60e3e00495"
+      "02901f6c5c443467cb77209bec9cfeccf1cf77b22c3177e28468b3078b98974a"
     ,
     "skill-content/deliver/data/role-routing.json":
-      "2c4761c26218bf034f0b2b588a73882ce0884d5fe916157e50d2b35c9d6962f0"
+      "d3e91945ea95e903003f17f14fea5548c1c0dcf026fc7e72dd3b08a0335070b6"
     ,
     "skill-content/deliver/data/targets.json":
       "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
     ,
-    "skill-content/deliver/references/switch-finding_disposition-follow_up_issue.md":
-      "66df82e9c43f34df2d50d9d121c74d672615fedf7f975a68f75718dd81f3e25e"
-    ,
-    "skill-content/deliver/references/switch-implementation_schedule-parallel_lanes_v1.md":
-      "0b6725ebb1a3bee1c5784e03885e8071a01b36d84099d75c74e5a4ebd7d46ca9"
-    ,
-    "skill-content/deliver/references/switch-item_cost_report-per_step.md":
-      "672c1048caeb63e8f8b96bcaeb3146641f49e885cedcaa0b5881b6f11068bc13"
-    ,
-    "skill-content/deliver/references/switch-item_verification-single_verifier.md":
-      "68eab21ce07986d909142013dd26f5dd8b301892939ff124052ba371bd570312"
-    ,
-    "skill-content/deliver/references/switch-lane_isolation-scratch_clone.md":
-      "3920124ab9a7e4eaef529604e4f0e2cc5d67bf9cf435f1516864047ed82e07a9"
-    ,
-    "skill-content/deliver/references/switch-lane_table-recorded.md":
-      "8e61c8b52ec05569e66745c87aad15b3692561c233d41bc67e5e514f9fda3821"
-    ,
-    "skill-content/deliver/references/switch-level_change_map-assertion_map.md":
-      "35de974de8307022aa984d97140214342336abde13ea0cd3d48ce04a63306b78"
-    ,
-    "skill-content/deliver/references/switch-own_target_reuse-accept_record.md":
-      "f2e6ccfeda48730b6ee85fabd0e297ca2ba344ca1aecda7b32cc13a8a987de03"
-    ,
-    "skill-content/deliver/references/switch-own_target_reuse-spot_run.md":
-      "04cbf0a3cee8377d9a9ffe783b7372f7dda9ca5dac1fe5b853ffe65b01b900f0"
-    ,
-    "skill-content/deliver/references/switch-owner_gates-two_fixed_gates.md":
-      "eb0e0b39f5dfa30cd0eaeff1f3114a13094c6672e386a63e463605fd3e6876e0"
-    ,
     "skill-content/deliver/references/switch-pr_proof-local_record.md":
       "74fffb6893e144f59f5c16fffc15ec281c199639b1a4dbe418f53966becbbfb5"
     ,
-    "skill-content/deliver/references/switch-pre_handoff_regression-touched_suites.md":
-      "82d2e72baf6a83acf8cb258db92d6a0ac5b9de28f9b3bd5a28f1adc4cfae7fd7"
-    ,
     "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "5cede00d18c9c40c48dfafe78e39d4c48ec29f3bea728080668d1499cc7e1991"
+      "065a4b33c072658d21d50f94dd145ecbe437f5b95f48d86ecb272b84dd56b363"
     ,
-    "skill-content/deliver/references/switch-provisional_claims-during_plan_revision.md":
-      "ddc02ad48cbf5b91a33557b97363f6a2dfdc83245a4e71f3109bd93e5e612b45"
+    "skill-content/deliver/references/switch-review_scope-impact_closure.md":
+      "d7a87291bd575b063f79cfe878fb0516e2407fce77a01db3c0538e6bc682ea22"
     ,
-    "skill-content/deliver/references/switch-regression_plan_revision-current_approved.md":
-      "487cedfffcba65c9c333f0153b57bfa7fb346e6bcc03e00ca599adf72f5d2b62"
+    "skill-content/deliver/references/switch-step_budgets-enforced.md":
+      "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
     ,
-    "skill-content/deliver/references/switch-repair_pass-scoped_repair.md":
-      "52112f6d123b364b9d16b40b2860e0ce9c8b4d930ae6fba80ff1f4346bbc9f66"
-    ,
-    "skill-content/deliver/references/switch-step_baseline-median.md":
-      "96516e846ae45bc97219d2b000fbb544d3bbe1dbd8ef3609e4d60a27946a427d"
-    ,
-    "skill-content/deliver/references/switch-test_engines-partitioned.md":
-      "718714d0b07687b4d670499555397d5bac780a749b3dcd50736a6f3e5b0fafa7"
-    ,
-    "skill-content/deliver/references/switch-test_group_report-refuse_missing_groups.md":
-      "31adbc02589467c3c80939317d5f9ea7fbc98940de747f349375ecdac4b11b73"
-    ,
-    "skill-content/delivery-plan/SKILL.md":
-      "756235abed604fdb70486df6c9f0c684a6bd995e5257bdf2bc7b6fb85ed007c5"
-    ,
-    "skill-content/delivery-plan/references/switch-delivery_path-light_when_eligible.md":
-      "60bb840f83751edd2c1a289143b0ad3a094edaa43543a0bda3b8892cbf686271"
-    ,
-    "skill-content/demo/SKILL.md":
-      "8cd155dfb8f548ae0716fba785f8df7733645a7c808d8b781dfd2f5fe2567e0d"
-    ,
-    "skill-content/design-system/SKILL.md":
-      "605b2a47c861b0f3fdd35202506582bfa7db8d1a55d45a4607b88129281d1aaa"
-    ,
-    "skill-content/design-system/data/standalone-template.html":
-      "13536cf36955facf8576d166d640ae13414f768720c1bed21263617426931b63"
+    "skill-content/deliver/references/switch-step_timing-recorded.md":
+      "0d4e563158e27d724752b6b87fabaccaa6f6f6bef9420a0de8f1e451cdbe1fee"
     ,
     "skill-content/docker-compose/SKILL.md":
       "758e65bc4bf542ed5be998718708e381b8bc3af79162faefbbc5afb2b9a5424b"
@@ -726,42 +276,6 @@
     ,
     "skill-content/docker-compose/references/seed-scenarios.md":
       "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
-    ,
-    "skill-content/execution-plan/SKILL.md":
-      "4b989a0e2b1b35bad75e7603ec9394aa5a34a730f5d9381f2cae09afe063b6b7"
-    ,
-    "skill-content/execution-plan/data/fact-ownership.json":
-      "119a6b31a052c0771671456b19b75d98a14a321773b8469b7d5678b0d142dc10"
-    ,
-    "skill-content/execution-plan/references/switch-delivery_path-light_when_eligible.md":
-      "8b1109f3cf7eb75520da15f07947aeb75e1e822f0334b632c48a64b86a457f49"
-    ,
-    "skill-content/execution-plan/references/switch-execution_planning-single_source_bundle.md":
-      "5a8883d7e6cc59096a0f5e3a2c477b094045af2fe075a59bbb94320f6cdb7786"
-    ,
-    "skill-content/execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md":
-      "de0d35734aa0f3af259cd6027e3fd691855d596ffdc8514de67a87dfdc3b69a9"
-    ,
-    "skill-content/execution-plan/references/switch-provisional_claims-uncontested_delta.md":
-      "0d68ff56c46f43848ffdf0b166797ba2a4c2bf20053f56cac6370f1849a4ddda"
-    ,
-    "skill-content/execution-plan/references/switch-source_rebind-receipt_when_unchanged.md":
-      "96b378464c1c0b2ff8da6414487e4434e432376a3473659c2abb6d661bef9d25"
-    ,
-    "skill-content/experience-design/SKILL.md":
-      "721a37f9c549e35afe63f9a4c3f871c11b179e176734fa020b09c41aa20b6698"
-    ,
-    "skill-content/experience-modeling/SKILL.md":
-      "74fb2f0add3d794dbe0b28cfde7446a5bf6fc90b0ceb07b9799cdfae103d365d"
-    ,
-    "skill-content/experience-modeling/data/experience-schema.json":
-      "c05089c16ae0708f42fc3ca1a199dd83fd04403dd98ac3305e2be881f0b70b64"
-    ,
-    "skill-content/experience-modeling/references/artifact-recovery.md":
-      "6ac6c2f37d61267d9838e44f050af8673a5252866d7a6c451c30e1f4371faeb8"
-    ,
-    "skill-content/experience-modeling/references/switch-rebind_review_scope-source_delta.md":
-      "0372714a2c8ad14219fa871377b4f9080313a1a3887f59f66f3434d9a96a102c"
     ,
     "skill-content/issue-report/SKILL.md":
       "053421143e9eaa980d17057b48e38a11cf529480f6901714de0b11cf2f6214a2"
@@ -817,39 +331,6 @@
     "skill-content/organize-docs/SKILL.md":
       "3e162775f2d478a4e37a0c14974389cefff970ef26e65cf2701605f47856f878"
     ,
-    "skill-content/product-planning/SKILL.md":
-      "de3d260b6829f5b96647915c4a184e261badb369c9c32feac83884c6ac3d1956"
-    ,
-    "skill-content/product-planning/data/story-size-measures.json":
-      "5a1b6d644cecbed97a872c3921a1354bb94277c4f8ae32161181cd9723c36af8"
-    ,
-    "skill-content/product-planning/data/test-cost-limits.json":
-      "0584be762eca0ee0cf7d1286253e6e5fb97bcbe33afbdf1c3b74ed931e7e0c79"
-    ,
-    "skill-content/product-planning/references/flow-metrics.md":
-      "891e42fcf0eb759a0307491ceca79e247bab0e1a81c4bcbade51c36ad621a2e0"
-    ,
-    "skill-content/product-planning/references/living-experience-contract.md":
-      "7f7985b91205870b18fee297b106f2eb05016a0c0e9e81ac801104d706326d3f"
-    ,
-    "skill-content/product-planning/references/prioritization.md":
-      "d3931963973a535ab15e4cda4b550271788b0717182742c91d6b0c93411b219e"
-    ,
-    "skill-content/product-planning/references/slicing-patterns.md":
-      "133710c7ea873588dab8559850ad3ac372dc8d2cd66d98bfe305ed82ad59226e"
-    ,
-    "skill-content/product-planning/references/structured-records.md":
-      "f45ee12e8807c62bcfa12bf2623d0a272b32e289b23683a97617c64fdd2672db"
-    ,
-    "skill-content/product-planning/references/switch-story_size_budget-propose_split.md":
-      "2518ebe50edf8d0778395117c6147346dad8f543d6380e5f1a50e9292ec75c0f"
-    ,
-    "skill-content/product-planning/references/switch-test_cost_budget-flag_serial_rows.md":
-      "caf72e4bbb5e075afa2fd243af939e35a4a66ef635a8af67e77b6c04513b5da0"
-    ,
-    "skill-content/product-planning/references/switch-test_levels-declared.md":
-      "bafc8ba731f71dca028e65033492722b98ffef07683d4ed83d9c9d8e0d0f6e52"
-    ,
     "skill-content/python-fastapi/SKILL.md":
       "b335164b3bc4bdc80be739b1a99606881577ae198307d0ce89c9a819e1d51421"
     ,
@@ -861,57 +342,6 @@
     ,
     "skill-content/python-fastapi/references/review-checklist.md":
       "ac56808afa550eada9c15099b4233ffa7456a42f9da23e3508f128a3e1b493c5"
-    ,
-    "skill-content/qa-verification/SKILL.md":
-      "bd1ed92067fbd371f153ae937f2f3c9da719ba3ce77cb47251d6e20813882648"
-    ,
-    "skill-content/qa-verification/data/runtime-lifecycle.json":
-      "eb763f3c91ea9a6fd60b14a3415d19604acd2b4af73d9ea91069ad5efbf4126c"
-    ,
-    "skill-content/qa-verification/references/coverage-audit.md":
-      "ba4abc9c13305ed09b51194b8ef5665ff946b99c13efcf04ac5537c8bf33fb11"
-    ,
-    "skill-content/qa-verification/references/exploratory.md":
-      "43aad71b88ddcf23d2b53c4a268f057c4471fa7395c88b7cb4de728f686f0ca3"
-    ,
-    "skill-content/qa-verification/references/mutation.md":
-      "619d535ef451a5359c98c97ae321cb2999038446cd17228c0c3e6eb0abdbd488"
-    ,
-    "skill-content/qa-verification/references/report-format.md":
-      "086c02917f1fcff3f89481d42b3d0422ee95235439b0873bd73b0b8cce70f601"
-    ,
-    "skill-content/qa-verification/references/runtime-protocol.md":
-      "d0d2c0eb1d15ee5dc59720bf87211e9b710df83fd9e29aa8702bddc261d680a4"
-    ,
-    "skill-content/qa-verification/references/switch-item_live_gate-tooling_items.md":
-      "11a5756a7c190c377f21189b7479801a92a88e5f4b450886ca45f7b1be6af193"
-    ,
-    "skill-content/qa-verification/references/switch-item_qa_tier-change_tier_per_item.md":
-      "549947c59c6a87988af1fc6a646414d85177c1f68c8249a05d9522bd99f47b74"
-    ,
-    "skill-content/qa-verification/references/switch-live_case_reuse-delta_since_green.md":
-      "f2fa961e2f18c72a5a54db840fa1f3bb652dc10ea4b1c7cc2ae892aba6f3c3e4"
-    ,
-    "skill-content/qa-verification/references/switch-live_verification-delivery_integration.md":
-      "ed6466d9de716ec45f7be300d68aaaed903e7866e5a8cb23b87aa6430f0149d8"
-    ,
-    "skill-content/qa-verification/references/switch-pass_carry_over-per_item.md":
-      "a290434fd8c09de832f6cda91d2126f2c22400d76223d884c12a553788e785b6"
-    ,
-    "skill-content/qa-verification/references/switch-qa_gate_order-gate_first.md":
-      "77ec83ef7c481c79826ca6627c6b45a7cdb7450144ed8b67f28e5443bbb5073f"
-    ,
-    "skill-content/qa-verification/references/switch-qa_preflight-lifecycle_first.md":
-      "17ebceb80d9b99adc922cff9e3b67b56af932391c08a881603d23668a9bcb5a3"
-    ,
-    "skill-content/qa-verification/references/switch-runtime_lifecycle-long_lived.md":
-      "9f26bbe77234b48d6f4363713df02101b93d005c4c3d7651a161088ed5b56c95"
-    ,
-    "skill-content/qa-verification/references/test-design.md":
-      "c8ef52eb9cbb30c14fcb905b49b92a9e88489ba9a842b75834da615d7fb330cd"
-    ,
-    "skill-content/qa-verification/scripts/scenario_report.py":
-      "2818167bd6ad24a2b5a749d7ecaead0e3805351f4eaeac04e0905b3d652f96b6"
     ,
     "skill-content/react-typescript/SKILL.md":
       "ff247db8ea0452aa6c654fe970db48786ea52005528c1e9ee5ca4903b5cdd747"
@@ -940,36 +370,6 @@
     "skill-content/react-typescript/references/tokens.md":
       "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a"
     ,
-    "skill-content/requirement/SKILL.md":
-      "bcbc588c7690c4bd789d28c4cae0e9768e2a26c17f415d8dc99610c9ba7a4e0f"
-    ,
-    "skill-content/requirement/references/switch-requirement_fact_check-pre_approval_reader.md":
-      "532c07a576429aaafdfbf5e89e910bad32dbfbbcb371c415a794dfabdee0a0f5"
-    ,
-    "skill-content/requirements-analysis/SKILL.md":
-      "67dca388f5ffb7212ba7d1ae5f3e2adaa9e211e2b082f28036a4066472e12452"
-    ,
-    "skill-content/requirements-analysis/references/decomposition.md":
-      "7159a25a15adcb103f327e5ee2e231546dbb750867ccbb16c0bb073903e0d03d"
-    ,
-    "skill-content/requirements-analysis/references/elicitation.md":
-      "f54269d3e32b41e53f8d85415d988236dc1b3304a4d89ff52604907327587d0f"
-    ,
-    "skill-content/requirements-analysis/references/modeling.md":
-      "9ec0d37ac04ddd74c10ce772e54ab1462c81619e7ac6277a632693ae8890e737"
-    ,
-    "skill-content/requirements-analysis/references/nfr-elicitation.md":
-      "154730b8b546e3e0e538e6eb3dab21b1304d5a2657148352cda02e19e0c2ecb8"
-    ,
-    "skill-content/requirements-analysis/references/research-methods.md":
-      "fa08b909a2863a7162a9199f21c234c3c58da40afb3cb31e5ad05a109fdc172f"
-    ,
-    "skill-content/requirements-analysis/references/space-standard.md":
-      "cc8eab275082721a22c16d4d0d545e62faefdab626e7cdfefffc899f8abb28c8"
-    ,
-    "skill-content/requirements-analysis/references/switch-calculation_examples-required.md":
-      "d80a7689c022cca319bfa34a9d98816889a9f0c6968e2cb7ceb5dfd911060852"
-    ,
     "skill-content/retrospective/SKILL.md":
       "715bf4011315f40e85d9cf2b4a7c9ad061ddac0c6b04eca97b9499d4b8c275a5"
     ,
@@ -983,22 +383,19 @@
       "822e5d19a3e5be6924a904918c5f9f356c5fea074bbc0ff344f8a6011950fda6"
     ,
     "skill-content/setup/SKILL.md":
-      "b5ec2c00dc33dfdf1eeb33f413ae2f110febd4eed82f8b256b331ec61353b76f"
+      "858918baf26b442c9722496dc982a460df9cafb50f1863f240fb568ed263a4fd"
     ,
     "skill-content/setup/data/companions.json":
       "9a51eff45f55b8f1f094d7cf294930b57d4048dc4b835d86d9963e6faafe2d37"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "598c71d4a7c4d0b72d8a57d2bc18898292583a7c692d3d227d0e12a50218a39b"
+      "e1f9fa41e0138d9ab22c5fdf8d6670cb027d232e89a16c06ae8e18f2b929018c"
     ,
     "skill-content/setup/references/windows-long-paths.md":
-      "f6ce03aee49421cf7fd313388af3a9c9e2eb74f3e20a8019be0d4703cfca5705"
-    ,
-    "skill-content/sketch/SKILL.md":
-      "9a2a84b499d3f2632bde2e6ccb6c1e0f46887cdc4d644bb77181a11ebe7bd586"
+      "bc73c5b81da276b332fba05681869b48537e530f1dd01387aa9fbf4db1241fa2"
     ,
     "skill-content/software-architecture/SKILL.md":
-      "5944f0a6c14b43a82ae5c9e212b8b2db9ca5607522533c3e6cddfbc947158564"
+      "5aee54ff6733ee8d7984e86ec377921ab1b9bc0eb8bb4ff7fc9ad028c0fd5e6d"
     ,
     "skill-content/software-architecture/references/api-design.md":
       "b9d5f25154fd170da480ae40151db662edaa17b43afc07bc164f86f29c8c5055"
@@ -1007,7 +404,7 @@
       "83f0dbd77e2b70a436518efc0162cd069dd345bdf921a446880ab2f747688cf7"
     ,
     "skill-content/software-architecture/references/cross-cutting.md":
-      "580608a33dc8e5392c7462ddde46600c9af88912b4cbaa150fe5730e3d38f83f"
+      "f95749667c9b4142c37499a9c1a66b9fa6dcdd4f7cd61ecba9db9ce4af0d437a"
     ,
     "skill-content/software-architecture/references/decision-records.md":
       "c7a58d15cff6bb27ca100573de7930d186366a827a2429c9ac63f6971c80d044"
@@ -1021,29 +418,8 @@
     "skill-content/software-architecture/references/service-boundaries.md":
       "cb1a7f5d9b887b6c1d7102451909efe59acb24b1ecc42bcf802bbdebc2294355"
     ,
-    "skill-content/software-architecture/references/switch-execution_planning-single_source_bundle.md":
-      "bc1c129c154a2b632af6b243c8661fccf73f96499bec9817dbfcf6e8261ac6cb"
-    ,
-    "skill-content/solution-architecture/SKILL.md":
-      "5f40e11f95bb8764e57cfb1f5f3d626620418daee739d70a579b31f562a7d5ba"
-    ,
-    "skill-content/solution-architecture/references/challenge-lenses.md":
-      "e3dbbf796d045221d66c57969571abdb58fb2bb0ca88cab23fb5f5c2baf83c84"
-    ,
-    "skill-content/solution-architecture/references/evaluation-method.md":
-      "4527cbb9c8a788830e3143c23d7362095a1f1dea82e0d33e49d98c989c747f4c"
-    ,
-    "skill-content/solution-architecture/references/landscape-docs.md":
-      "de227981e6ba33a906c37286efb853e718560ad9918ff511e96e705b422d5ceb"
-    ,
-    "skill-content/solution-architecture/references/worked-engagement.md":
-      "0fadb4587700c566b9e6738e79c194b4f86831a13e970ac354dc8fbb1c8fe1bf"
-    ,
     "skill-content/solution-design/SKILL.md":
-      "f5e7a43f63c7c3ded8bcc54d6c8cf5cfa151bbaecdd36c00206cfc85179570bd"
-    ,
-    "skill-content/solution-design/references/engagement-session.md":
-      "5a97cbd36d89e6d45c6e03f9c2bfe3cc4c312bc123d7c491a36d9fe8ad777649"
+      "831fdff40e88a0c4a22a38e11390e25998f271fb83a75dbaf07578dcff9aa19c"
     ,
     "skill-content/sql-database-design/SKILL.md":
       "d0946aedfe3e4d8dc5a063cbba8df3be7c65b49882996491b03eac96d604a159"
@@ -1076,49 +452,13 @@
       "2a883309e014134ae221cc510074ddd4f115396ed042d95a3ff0db0447efdf8e"
     ,
     "skill-content/ui-ux-design/SKILL.md":
-      "8ade23b6f3103035b9958a23aa476446d537c9d44af9674f97aa50a8e32980b0"
-    ,
-    "skill-content/ui-ux-design/data/charts.csv":
-      "a7efabbc4134978ca452780e3603da87836d89f7cb614a840f4d0b43c044fdf7"
-    ,
-    "skill-content/ui-ux-design/data/colors.csv":
-      "5a6cb6c5d6f19b5f5e51865ae1e643e4baa05d04304d0bab976f064632149a6a"
-    ,
-    "skill-content/ui-ux-design/data/icons.csv":
-      "a1e15d32021b79c08da3d8acf675150aaeea4c5fe838efcd1c51a5c8a7584ee0"
-    ,
-    "skill-content/ui-ux-design/data/landing.csv":
-      "121a2cac7cf21050234b5f80e7b4e182f10123536032e0f9ad862ad3aec9677d"
-    ,
-    "skill-content/ui-ux-design/data/products.csv":
-      "50506839d8bacdb133d57ccdc8a4a668f9ac14ecfbeb8cf03a569e6d6cc0e135"
-    ,
-    "skill-content/ui-ux-design/data/stacks/html-tailwind.csv":
-      "d186b7caba84ed43a876c30718adee2369dc425fccbb1a64be140ed319d98704"
-    ,
-    "skill-content/ui-ux-design/data/stacks/react.csv":
-      "fa69e0adfc474c8e89baa78eb8c461919d8035dc5f8a59de9dfed56748b56f79"
-    ,
-    "skill-content/ui-ux-design/data/stacks/shadcn.csv":
-      "395c2e415ef6f48a474acccdc8eb2c7258a6ed751a5037ba171a2d8823e02ded"
-    ,
-    "skill-content/ui-ux-design/data/styles.csv":
-      "246d807aa70f7b46e2b79ebeeedefbf1c44f8b9a5f0c964f8f02db9e6e63f368"
-    ,
-    "skill-content/ui-ux-design/data/typography.csv":
-      "e5eb2efe5d6801223152e98759ba26e23002cd464617aeac83b6fabe53abc457"
-    ,
-    "skill-content/ui-ux-design/data/ui-reasoning.csv":
-      "06e4369445388ba9b7a57347510b125b7a2145bbf8546a327ba50292503b204a"
-    ,
-    "skill-content/ui-ux-design/data/ux-guidelines.csv":
-      "e01943c433b2cad3040f19389b3b0455673758a569b7a927b5bedf65c989cb96"
+      "72c6936575954f2ce962efb268062f47a6fd342a0160677368e81abce4b35244"
     ,
     "skill-content/ui-ux-design/references/design-rationale-method.md":
-      "8ef57c220ad22040fe2031094a965225b78f0f0dea328ace2ea7ef781b80be7f"
+      "45afbb79a359f5f2d30320503d999d03404a4acf8eb5c9fd327a08aa8ed58f6a"
     ,
     "skill-content/ui-ux-design/references/recipes.md":
-      "a00e7194bc9b73e02598c0c1fa3226e454b6834cc28a9bce81419120d70e71b4"
+      "41c78e4e7f74edaadcf8f027572a138c527457d7632035b300d66d7eba340d74"
     ,
     "skill-content/ui-ux-design/references/token-architecture.md":
       "93d7f2d8cf242123528866c258441281a9e970f9184b8fc948da97df9e0a038b"
@@ -1126,26 +466,11 @@
     "skill-content/ui-ux-design/references/ux-quick-reference.md":
       "7d7ffaf6b4d0577cc557ce4d49201416809b5515d3551687c90ed2c494f443ee"
     ,
-    "skill-content/ui-ux-design/scripts/core.py":
-      "9ac50d35986715b13539fc5361ddde3aa9cf1e4476ccedac7e164a94a01f1bba"
-    ,
-    "skill-content/ui-ux-design/scripts/design_system.py":
-      "f1a5542a935160e3e87c87e41170dc8c95c215f9c9c96ffd9bcf3f44eb7182a9"
-    ,
-    "skill-content/ui-ux-design/scripts/search.py":
-      "03e6a9afbb7c4d38dfe3434cba4750a6439e858d4aeea34e9810e8cca917f5cf"
-    ,
     "skills/autopilot/SKILL.md":
       "76e901f4591b4d61c54b81ed9a20f90c29b63d0b772f606a66c6b0fc1adee332"
     ,
     "skills/autopilot/agents/openai.yaml":
       "0f2bc579c6d541b0a3744be0898a672006bbc9e82c7e41d14c6b77c608b562e7"
-    ,
-    "skills/business-analysis/SKILL.md":
-      "d99cc20f5cef536748b6ace0c5eadfca757e25cffd14a679c7dd332787ab005c"
-    ,
-    "skills/business-analysis/agents/openai.yaml":
-      "9227266d15fcc5a31b29d5b6cc1b433ba900cbd434655f48b7410f1b4076be79"
     ,
     "skills/configure/SKILL.md":
       "4ac5c2a5e96145e5b8dd26088847b8750262c22cddc0d4ee0f23e28015449372"
@@ -1159,24 +484,6 @@
     "skills/deliver/agents/openai.yaml":
       "4130db751c6120762a5383b11716fb7c01763610add6f57067f067cc1f60c806"
     ,
-    "skills/demo/SKILL.md":
-      "1fc987bda09784f270b9126e5507747af3c51541f8cbc5e7758652029ea42402"
-    ,
-    "skills/demo/agents/openai.yaml":
-      "425dab209400426dd3edc50f48ed67282670305fb6a9ccf8044c2d97a1a0cfcb"
-    ,
-    "skills/design-system/SKILL.md":
-      "a5dd703581157c39b0b60757e1d3fbb8b11c389c5a1388c3bfb2df2a5a290d9b"
-    ,
-    "skills/design-system/agents/openai.yaml":
-      "20d5c60a85fa4d9fd589e55fa2a99121878d76365c43bc1700729226c3f2f4c1"
-    ,
-    "skills/experience-design/SKILL.md":
-      "465abfddb12c4cfffd246c45dbf3889a04ecc27f443db2b84bb7d6680dccbc78"
-    ,
-    "skills/experience-design/agents/openai.yaml":
-      "3a8fb8a35ab62aa1a82d46299b5dbd61389e685cb7ee33929c51116d92f9facf"
-    ,
     "skills/issue-report/SKILL.md":
       "9209e4719a09c23d113119a42605fd1490d8720a928ac3d4d1eb4eb393ca729f"
     ,
@@ -1188,12 +495,6 @@
     ,
     "skills/organize-docs/agents/openai.yaml":
       "cca2b149e6f99fea1ad7ddb5b5fb3e41c6b1a5cb561a2f97a7314d1f04747c67"
-    ,
-    "skills/requirement/SKILL.md":
-      "4e2dd981b631f4af4f5dd5efa0cea1cf63f349165a9e0091bceb3e5da98e9e80"
-    ,
-    "skills/requirement/agents/openai.yaml":
-      "22e7450df2a2e5162a13fbfcc2ff080632098160ad420d41ea374942f71de0ad"
     ,
     "skills/retrospective/SKILL.md":
       "76a832f57a3cd6dcde484006793601963d9e0cf7222ef986a63b8af2ad232fec"
@@ -1207,29 +508,14 @@
     "skills/setup/agents/openai.yaml":
       "7c533d07a527237a4ac3e25af85734213f458daa1c3f9eda901d5b37846ad62f"
     ,
-    "skills/sketch/SKILL.md":
-      "e9cb7ed991e3252e743a80304b3ad189c5d25147ee9356046865c1d50c91f46b"
-    ,
-    "skills/sketch/agents/openai.yaml":
-      "53aa4e23ca98df710468a2d372a99da58908f782358773acc60a3b306989dabd"
-    ,
-    "skills/solution-design/SKILL.md":
-      "89dfa1149cd2e39de0dc1f8d49cbef026f8e61f92094ff97e81be0da8c6b76a1"
-    ,
-    "skills/solution-design/agents/openai.yaml":
-      "a7126597ce9ea9103be1d443ab748322ddf880e7438ec38fd9d7d13db4134c34"
-    ,
     "templates/AGENTS.override.md":
-      "6d6e4668598e93a813e7cd9a96cd3e2d3794170f2334c8f7284faf26b2457234"
+      "27bbc2fd64223f6e2b52887b61b083106a76f9fae3b022a606d72b79c0fd1bd8"
     ,
     "templates/CLAUDE.md":
-      "107b7b4cd7862dc27130223c22ccc1d305d18e03a176ae9eb7557e83eddc0fb1"
+      "6ecabe5c834981c3ad140cf7ba69a50e80d5ee6f55cd2d6ad4f1248da63a0c94"
     ,
     "templates/ci-tests.yml":
-      "0d05078ab3c81a50c20b8a08ce2f1bef6c8fe7b01d7c6230e122e1b140a49cc7"
-    ,
-    "templates/delivery-closure.yml":
-      "95b17a41a98cce16ca195a869a018eb94cfba4c13516d60f87d3272633baca0c"
+      "cd4e817fabcf4d15aff21ee9dbd713542f2e8ea9987d78c9f5c45fca6db5e48d"
     ,
     "templates/gitignore":
       "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e"
@@ -1244,7 +530,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/model-classes.json":
-      "f23ebbe94b5bb7d3c7622c69fe7a2d09e21afa948f3225a8870385a4345a3bbf"
+      "dd5d74812a280a4814ada8c0335fc824704f33cc91b2d39b990a6c1921773b6f"
     ,
     "templates/project-context-policy.json":
       "1064215323cacff3ba2748f6992ac5d43026183c4f30e43b1633d579800d951f"
@@ -1259,19 +545,16 @@
       "0ceaf50730dcd8ed779a9deb32dda64b3b24f2ec808985ce1286c473dd1c631d"
     ,
     "templates/project-instructions/team.md":
-      "f2514f8c3b16405e1fb87671ebc12ddeaf4649af090ad3e7dbb121d562143d53"
+      "efbffd43cbf53fceaa4831de42742002c78550fca47511d85b4d0cea96b2e16b"
     ,
     "templates/project-instructions/user-context.json":
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
-    "templates/reader-launch-prompts.json":
-      "07dcd548a59bd2b19e22d2fdf1592009f12a655b4ce1d1001325c94c6a1dd88e"
-    ,
     "templates/task-input-contract.md":
-      "c0d6b90d546a1277663a5a8d68c63dbcd209c1e5475d2df5c26c1e1e45a2753f"
+      "c4f61face4a0ce92d536cc9fd312b54c5d89d1aec147b617254f6523b69db414"
     ,
     "templates/task-input-policy.json":
-      "446519a98c41904a0df07c72e2fde271d5198337bd11d34d5290200ce41a4e3f"
+      "ebb99f73ef30b3439cf90b858e7085d85dd2c044ff24d60236cad30787bd54d3"
     ,
     "templates/vault-index-policy.json":
       "d44d46600e86a49f6b054d6a79ce989ff8b43740357fa8c8b0cfe9b015755584"

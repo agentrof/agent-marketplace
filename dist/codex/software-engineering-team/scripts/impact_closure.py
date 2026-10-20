@@ -75,9 +75,6 @@ VIEW_SPECS = (
      "capability registry, component catalog and topology"),
     ("system-architecture/decision-log.md", "architecture decisions"),
     ("system-architecture/_generated/*", "architecture catalog"),
-    ("design-system/MASTER.md", "design master; its uses_design back-links"),
-    ("experience-design/_generated/application-registry.json",
-     "current application receipt and process packages"),
     ("delivery/process-policy.md", "process switches in force"),
 )
 
@@ -313,30 +310,6 @@ def frontmatter_tier(vault, edges: Edges, keys, records: dict | None = None) -> 
             if key in SELF_KEYS:
                 continue
             for value in frontmatter_values(note.fm[key]):
-                if key == "dependency_refs":
-                    import backlog_compile
-                    names = value.split(" -> ")
-                    detail = None
-                    if len(names) != 2 or any(not backlog_compile.ID_RE.fullmatch(name) for name in names):
-                        detail = "malformed directed dependency edge"
-                        targets = []
-                    else:
-                        targets = [resolve_reference(vault, name, owners) for name in names]
-                        if any(target not in vault.notes or note_type(vault.notes[target]) != "story"
-                               for target in targets):
-                            detail = "dependency endpoint is missing, ambiguous or has the wrong type"
-                        else:
-                            declared = {resolve_reference(vault, link, owners) for link in
-                                        frontmatter_values(vault.notes[targets[0]].fm.get("depends_on", []))}
-                            if targets[1] not in declared:
-                                detail = "directed dependency is not declared by its source"
-                    if detail:
-                        unresolved.append({"path": note.rel, "reason": "unresolved_relation",
-                                           "key": key, "value": value, "detail": detail})
-                    else:
-                        for target in targets:
-                            edges.add(note.rel, target, key, "frontmatter")
-                    continue
                 target = resolve_reference(vault, value, owners)
                 if target in vault.index and target != note.rel:
                     edges.add(note.rel, target, key, "frontmatter")
@@ -492,9 +465,6 @@ def suggested_fix(gap: dict) -> str:
         return (f"declare the typed relation {gap['source']} names to {path} by identifier"
                 " in the front matter of the citing note")
     if reason == "unresolved_relation":
-        if gap.get("key") == "dependency_refs":
-            return (f"correct `dependency_refs` {gap.get('value')} in {path} against the owning "
-                    f"dependency declarations: {gap.get('detail', 'its endpoints do not resolve')}")
         return (f"correct or remove `{gap.get('key')}` {gap.get('value')} in {path}:"
                 " its target does not resolve")
     return f"correct the relations of {path}"
@@ -505,101 +475,13 @@ def suggested_fix(gap: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _split(text: str) -> tuple[dict, str]:
-    props, body_line, error = parse_frontmatter(text)
-    if error:
-        raise ValueError(error)
-    return props, "\n".join(text.splitlines()[body_line - 1:]).lstrip("\n")
-
-
-def _backlog(path: Path, text: str) -> str:
-    import backlog_compile
-    return backlog_compile.digest_text(text)
-
-
-def _delivery(path: Path, text: str) -> str:
-    import delivery_compile
-    return delivery_compile.content_hash(*_split(text))
-
-
-def _delivery_review(path: Path, text: str) -> str:
-    import delivery_compile
-    return delivery_compile.content_hash(
-        *_split(text), exclude=delivery_compile.MUTABLE - {"pull_request_url"})
-
-
-def _requirement(path: Path, text: str) -> str:
-    import requirement_compile
-    return requirement_compile.semantic_hash(*_split(text))
-
-
-def _experience(path: Path, text: str) -> str:
-    import experience_compile
-    if path.name != "experience.md":
-        raise ValueError("an experience stamp covers its package root only")
-    return experience_compile.source_digest(path.parent)
-
-
-def _operation(path: Path, text: str) -> str:
-    import operation_compile
-    return operation_compile.receipt_hash(*_split(text))
-
-
-def _governance(path: Path, text: str) -> str:
-    import delivery_governance
-    return delivery_governance.governance_hash(*_split(text))
-
-
-# Each owning compiler's own approval digest; a stamp is proven when the
-# digest of the scheme that wrote it matches the note's current bytes.
-APPROVAL_SCHEMES = {
-    "backlog": _backlog,
-    "delivery": _delivery,
-    "delivery_review": _delivery_review,
-    "requirement": _requirement,
-    "experience": _experience,
-    "operation": _operation,
-    "governance": _governance,
-}
-
-
 def approval_state(note) -> dict | None:
     """None for an unstamped note, else the stamp and whether bytes still match."""
     stamp = note.fm.get("source_hash")
     if not isinstance(stamp, str) or not stamp:
         return None
-    text = note.path.read_text(encoding="utf-8")
-    for name, scheme in APPROVAL_SCHEMES.items():
-        try:
-            if scheme(note.path, text) == stamp:
-                return {"approval_hash": stamp, "scheme": name, "proven": True}
-        except Exception:  # noqa: BLE001 - a scheme that cannot parse is no proof
-            continue
+    # No packaged compiler stamps approvals, so no stamp is proven.
     return {"approval_hash": stamp, "scheme": None, "proven": False}
-
-
-def ba_package_proofs(docs: Path, only=None) -> dict:
-    """Notes of approved analysis spaces whose package hash still matches (``only`` limits the spaces)."""
-    proofs: dict = {}
-    root = docs / "business-analysis"
-    if not root.is_dir():
-        return proofs
-    import ba_compile
-    for space in sorted(p for p in root.iterdir() if p.is_dir()):
-        if only is not None and not any(rel.startswith(f"business-analysis/{space.name}/") for rel in only):
-            continue
-        overview = space / "space.md"
-        if not overview.is_file():
-            continue
-        props = parse_frontmatter(overview.read_text(encoding="utf-8"))[0]
-        stamp = props.get("package_hash")
-        if props.get("package_status") != "approved" or not stamp:
-            continue
-        proven = ba_compile.package_hash(space) == stamp
-        for path in space.rglob("*.md"):
-            proofs[path.relative_to(docs).as_posix()] = {
-                "approval_hash": stamp, "scheme": "analysis_package", "proven": proven}
-    return proofs
 
 
 # ---------------------------------------------------------------------------
@@ -607,36 +489,10 @@ def ba_package_proofs(docs: Path, only=None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def architecture_proofs(docs: Path, notes) -> dict:
-    """A sealed architecture record is proven by its immutable ledger snapshot:
-    the record carries no stamp, the snapshot keeps the sealed source hash."""
-    root = Path(docs) / "system-architecture"
-    proofs: dict = {}
-    sealed = [note for note in notes if note.rel.startswith("system-architecture/")
-              and note.fm.get("revision_state") == "sealed"]
-    if not sealed:
-        return proofs
-    import architecture_compile
-    for note in sealed:
-        record_id = architecture_compile.stable_id(note.fm)
-        snapshot = root / "_ledger" / "records" / record_id / f"r{note.fm.get('revision')}.json"
-        try:
-            saved = json.loads(snapshot.read_text(encoding="utf-8")).get("source_hash")
-        except (OSError, ValueError, AttributeError):
-            continue
-        if isinstance(saved, str) and saved:
-            proofs[note.rel] = {"approval_hash": saved, "scheme": "architecture",
-                                "proven": architecture_compile.source_hash(note.path) == saved}
-    return proofs
-
-
 def proofs_for(docs: Path, notes, only=None) -> dict:
     """Approval proof per stamped note (``only`` limits the notes checked)."""
     notes = list(notes)
-    proofs = {rel: state for rel, state in ba_package_proofs(docs, only).items()
-              if only is None or rel in only}
-    proofs.update(architecture_proofs(docs, [note for note in notes
-                                             if only is None or note.rel in only]))
+    proofs = {}
     for note in notes:
         if only is not None and note.rel not in only:
             continue

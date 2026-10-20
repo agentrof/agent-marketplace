@@ -6,29 +6,26 @@ exposure: internal
 
 # Software Architecture
 
-Decision rules for Delivery-owned System Architecture: component/module/facet
-records, boundaries, contract conventions, budgets, and cross-cutting choices,
-one active Delivery Item delta at a time.
+Decision rules for System Architecture: component/module/facet records,
+boundaries, contract conventions, budgets, and cross-cutting choices, one task
+delta at a time.
 
 ## When to Use
 
-Load only for an active Delivery Item whose `architecture_impact` is required.
-Materialize `workspace/docs/system-architecture/` adaptively with
-`architecture_compile.py`: root, exact Solution component hubs, recursive
-modules and only the needed interface/data/security/runtime/reliability/
-observability facets. Upstream accepted Solution component decisions bind every
+Load for a task that changes architecture, and for the architect's pre-check.
+Grow `workspace/docs/system-architecture/` adaptively: root, exact Solution
+component hubs, recursive modules and only the needed interface/data/security/
+runtime/reliability/observability facets. Upstream accepted Solution component decisions bind every
 delta; a contradiction escalates instead of deviating. Do NOT load for store
 schema detail; the sql-database-design and nosql-database-design siblings own
 that. Do NOT load for implementation; realization lives in component-selected
 method skills.
 Read `obsidian-vault`; its taxonomy and ledger rules govern docs mutations.
 
-Each root, component hub and leaf record carries Delivery Item provenance,
-stable identity and revision. Existing records change only through
-`begin-revision --item-ref`; ledger snapshots are durable and generated
-registries are disposable. Decisions and standards declare `affected_scopes`;
-the compiler derives their lowest common ancestor path. Cross-component
-connections live at the architecture root.
+Each root, component hub and leaf record carries the task that changed it and a
+stable identity; Git history keeps its revisions. Decisions and standards
+declare `affected_scopes`. Cross-component connections live at the
+architecture root.
 
 Vault traceability is typed and cross-subtree. Living docs and ADRs use
 `derives_from`, `implements`, `satisfies` and `constrained_by` to cite the
@@ -45,7 +42,7 @@ relation renderer after each architecture delta.
 - Solution Design is the sole owner of the project topology: app count,
   component boundaries, sourcing, names and selected technologies. This skill
   never selects a default topology or changes it.
-- Apply the accepted component catalog exactly. If a Delivery Item exposes a
+- Apply the accepted component catalog exactly. If a task exposes a
   missing boundary or a topology contradiction, stop and return it to Solution
   Design with the concrete forcing evidence.
 - Architectural styles are guard rails inside an accepted built component,

@@ -20,8 +20,6 @@ sys.path.insert(0, str(ROOT / "plugins/software-engineering-team/scripts"))
 
 import context_catalog  # noqa: E402
 import context_history  # noqa: E402
-import operation_compile  # noqa: E402
-import requirement_compile  # noqa: E402
 import impact_closure  # noqa: E402
 import project_context  # noqa: E402
 import vault_index  # noqa: E402

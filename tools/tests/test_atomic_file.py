@@ -27,14 +27,8 @@ SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import architecture_compile  # noqa: E402
 import atomic_file  # noqa: E402
-import delivery_compile  # noqa: E402
-import experience_application_check  # noqa: E402
-import experience_compile  # noqa: E402
-import operation_compile  # noqa: E402
 import project_config  # noqa: E402
-import requirement_compile  # noqa: E402
 import setup_project  # noqa: E402
 import vault_check  # noqa: E402
 from tools.tests.git_fixture import init_repository  # noqa: E402
@@ -84,20 +78,8 @@ class AtomicWriterModeTests(unittest.TestCase):
             "workspace config": lambda path, text: project_config.atomic(
                 path, {"text": text},
             ),
-            "requirement": requirement_compile.atomic_text,
-            "delivery": delivery_compile.atomic_text,
-            "operation": operation_compile.atomic_text,
-            "architecture": architecture_compile.atomic,
             "project instructions": instructions.atomic_write,
             "codex projection": projection.atomic_write,
-            "experience compiler": lambda path, text: (
-                experience_compile.atomic_write_bytes(path, text.encode("utf-8"))
-            ),
-            "experience application": lambda path, text: (
-                experience_application_check._atomic_write(
-                    path, text.encode("utf-8"),
-                )
-            ),
             "vault payload reconcile": reconcile_payload,
         }
 

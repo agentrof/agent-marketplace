@@ -10,9 +10,8 @@ package class map and the project's `workspace/config.json` overrides, as
 `role_settings.resolve` reads them.
 
 A host whose `spawn_model` is `alias` takes the model's family alias and the
-effort on the spawn itself; on a host whose role file decides, the resolver
-names the rendered variant pinned to the slot (`<agent>-escalated`, or a
-purpose variant), and the spawn passes no model.
+effort on the spawn itself; on a host whose role file decides, the agent runs
+its own pins and the spawn passes no model.
 
     model_class.py resolve --class routine_review --role code-reviewer \\
         --task TK-012 --project-root . --host <host> --json
@@ -38,22 +37,6 @@ def escalates(size: str | None, rigor: str | None, risks: list[str]) -> bool:
     return size == "l" or rigor == "high" or bool(risks)
 
 
-def pick_agent(class_map: dict, config: dict, host: str, role: str, slot: str) -> str | None:
-    """The rendered agent that runs ``role`` on ``slot`` on this host, if any.
-
-    The role itself when its class is the slot's; else a variant rendered for
-    the slot whose agent is the role.
-    """
-    rows = role_settings.resolve(class_map, config, host)
-    if rows.get(role, {}).get("class") == slot:
-        return role
-    variants = class_map["hosts"][host]["variants"]
-    for name, variant in sorted(variants.items()):
-        if variant["agent"] == role and rows[name]["class"] == slot:
-            return name
-    return None
-
-
 def resolve(class_map: dict, config: dict, host: str, model_class: str | None = None, *,
             role: str | None = None, size: str | None = None, rigor: str | None = None,
             risks: list[str] | None = None) -> dict:
@@ -62,8 +45,8 @@ def resolve(class_map: dict, config: dict, host: str, model_class: str | None = 
     ``model_class`` defaults to the role's own class. The result names the
     class, the slot, whether it escalated, the model and effort in force, the
     agent to spawn and the `spawn` fields the spawn call passes; ``note``
-    says when the host has no variant for the slot, so the agent runs its own
-    pins.
+    says when the host cannot set the slot at spawn time, so the agent runs
+    its own pins.
     """
     if host not in class_map["hosts"]:
         raise ValueError(f"unknown host {host!r}; hosts are {', '.join(sorted(class_map['hosts']))}")
@@ -102,14 +85,11 @@ def resolve(class_map: dict, config: dict, host: str, model_class: str | None = 
         if setting["effort"] is not None:
             result["spawn"]["effort"] = setting["effort"]
     elif role is not None:
-        agent = pick_agent(class_map, config, host, role, slot)
-        if agent is None:
-            row = role_settings.resolve(class_map, config, host)[role]
+        row = role_settings.resolve(class_map, config, host)[role]
+        if row["class"] != slot:
             result.update(model=row["model"], effort=row["effort"],
-                          note=f"no {role} variant renders {slot} on {host};"
+                          note=f"{host} cannot run {role} on {slot};"
                                f" it runs its own {row['class']} pins")
-        else:
-            result["agent"] = agent
     return result
 
 
@@ -126,7 +106,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("resolve", help="the model, effort and agent of one spawn")
     p.add_argument("--class", dest="model_class", help="the spawn's purpose class;"
                    " defaults to the role's own class")
-    p.add_argument("--role", help="the role spawned, which names its rendered variant")
+    p.add_argument("--role", help="the role spawned")
     p.add_argument("--host", required=True)
     p.add_argument("--task", help="a fast-lane task id; its size and rigor apply")
     p.add_argument("--project-root", default=".")

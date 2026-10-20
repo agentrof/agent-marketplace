@@ -5,7 +5,7 @@ role's own class, or the class the step names, one level up for a task of
 size `l`, at rigor `high` or on a risk flag when the class escalates. The
 slot's model and effort come from the package class map and the project's
 overrides. Claude takes the family alias and effort at spawn time; Codex
-names the rendered variant pinned to the slot. Rendered Claude roles leave
+runs each role's own pins. Rendered Claude roles leave
 the CLAUDE.md chain out and deny the tools a role never needs.
 """
 
@@ -97,55 +97,23 @@ class ResolverTests(unittest.TestCase):
     def test_project_overrides_take_precedence_over_the_package(self):
         config = {"class_models": {"claude": {"routine_review": {"effort": "low"},
                                               "critical_decision_escalated": {"effort": "max"}}},
-                  "role_classes": {"product-owner": "critical_decision"}}
+                  "role_classes": {"business-analyst": "critical_decision"}}
         self.assertEqual(role_settings.config_errors(config, self.map), [])
         reviewer = self.resolve("claude", role="code-reviewer", config=config)
         self.assertEqual((reviewer["model"], reviewer["effort"]), ("claude-sonnet-5-5", "low"))
-        moved = self.resolve("claude", role="product-owner", config=config)
+        moved = self.resolve("claude", role="business-analyst", config=config)
         self.assertEqual((moved["class"], moved["spawn"]),
                          ("critical_decision", {"model": "opus", "effort": "high"}))
-        escalated = self.resolve("claude", role="product-owner", config=config, rigor="high")
+        escalated = self.resolve("claude", role="business-analyst", config=config, rigor="high")
         self.assertEqual((escalated["slot"], escalated["effort"]),
                          ("critical_decision_escalated", "max"))
         # A step's own class beats the role's moved class.
-        named = self.resolve("claude", "mechanical", role="product-owner", config=config)
+        named = self.resolve("claude", "mechanical", role="business-analyst", config=config)
         self.assertEqual(named["slot"], "mechanical")
         # `session` leaves the model to the session and keeps the effort.
         session = {"class_models": {"claude": {"mechanical": {"model": "session"}}}}
         self.assertEqual(self.resolve("claude", "mechanical", config=session)["spawn"],
                          {"effort": "high"})
-
-    def test_codex_names_the_variant_pinned_to_the_slot(self):
-        variants = self.map["hosts"]["codex"]["variants"]
-        self.assertEqual(self.map["hosts"]["claude"]["variants"], {})
-        roles = {role: name for name, roles in self.map["roles"].items() for role in roles}
-        for name, variant in variants.items():
-            with self.subTest(variant=name):
-                if name == "code-reviewer-security":
-                    self.assertEqual(variant, {"agent": "code-reviewer", "slot": "security_review"})
-                else:
-                    self.assertEqual(name, f"{variant['agent']}-escalated")
-                    self.assertEqual(variant["slot"], f"{roles[variant['agent']]}_escalated")
-        self.assertNotIn("delivery-coordinator-escalated", variants)
-        own = self.resolve("codex", role="code-reviewer")
-        self.assertEqual((own["agent"], own["spawn"], own["note"]), ("code-reviewer", {}, None))
-        self.assertEqual(self.resolve("codex", role="code-reviewer", size="l")["agent"],
-                         "code-reviewer-escalated")
-        self.assertEqual(self.resolve("codex", "security_review", role="code-reviewer")["agent"],
-                         "code-reviewer-security")
-        self.assertEqual(self.resolve("codex", role="delivery-coordinator", size="l")["agent"],
-                         "delivery-coordinator")
-        # A slot no variant of the role renders runs the role's own pins, said aloud.
-        lone = self.resolve("codex", "security_review", role="product-owner")
-        own_pins = role_settings.resolve(self.map, {}, "codex")["product-owner"]
-        self.assertEqual((lone["agent"], lone["model"], lone["effort"]),
-                         ("product-owner", own_pins["model"], own_pins["effort"]))
-        self.assertIn("no product-owner variant renders security_review on codex", lone["note"])
-        # A moved role's escalated variant follows it.
-        moved = {"role_classes": {"code-reviewer": "critical_decision"}}
-        result = self.resolve("codex", role="code-reviewer", config=moved, risks=["secrets"])
-        self.assertEqual((result["agent"], result["slot"]),
-                         ("code-reviewer-escalated", "critical_decision_escalated"))
 
     def test_unknown_inputs_are_refused(self):
         for kwargs, fragment in (
@@ -255,7 +223,7 @@ class RenderedClaudeAgentTests(unittest.TestCase):
                                      AGENT_TOOLS["browser_disallowed_mcp"])
                 else:
                     self.assertEqual(denied[-1], "mcp__*")
-                self.assertEqual("Agent" in denied, name != "delivery-coordinator")
+                self.assertIn("Agent", denied)
 
 
 if __name__ == "__main__":

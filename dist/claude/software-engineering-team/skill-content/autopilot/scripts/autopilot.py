@@ -428,39 +428,8 @@ def current(directory: Path, now: datetime) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
-def read_delivery_goal(docs: Path, target: str) -> dict:
-    import delivery_compile
-
-    root = delivery_compile.find_delivery(docs, target)
-    if root is None:
-        return {"found": False, "error": f"finds no Delivery {target}"}
-    props, _body = delivery_compile.split_note(root / "delivery.md")
-    state, unknown = delivery_compile.delivery_state(root, props)
-    if unknown is not None:
-        # Without a merge state the tracked status is no answer, so the read fails as for delivery.md.
-        raise RuntimeError(unknown)
-    return {"found": True, "state": str(state), "error": None}
-
-
-def read_requirement_goal(docs: Path, target: str) -> dict:
-    import requirement_compile
-
-    for path in requirement_compile.requirement_paths(docs):
-        if requirement_compile.requirement_id(path) != target:
-            continue
-        payload = requirement_compile.status_requirement(path)
-        state = str(payload.get("status"))
-        # Planning ends when the approved Requirement is in the approved backlog.
-        if state == "approved" and payload.get("incorporated"):
-            state = "incorporated"
-        return {"found": True, "state": state, "error": None}
-    return {"found": False, "error": f"finds no Requirement {target}"}
-
-
-GOAL_READERS = {
-    "scripts/delivery_compile.py": read_delivery_goal,
-    "scripts/requirement_compile.py": read_requirement_goal,
-}
+# A readable goal kind maps its compiler to a reader here; no packaged compiler declares one.
+GOAL_READERS = {}
 
 
 def read_goal(project: Path, goal: dict) -> dict | None:
@@ -992,23 +961,8 @@ def split_options(text: str | None) -> list[str]:
 
 
 def phase_start(policy: dict, project: Path, args: argparse.Namespace) -> dict:
-    """The next entry a phase_start decision runs, once its owning compiler reads the prior phase closed."""
-    starts = {entry["entry"]: entry["after"] for entry in policy["phase_starts"]}
-    if args.entry not in starts:
-        raise Refusal(f"phase_start needs --entry, one of: {', '.join(starts)}")
-    kind, _, target = (args.after or "").partition(":")
-    if kind not in starts[args.entry] or not target:
-        raise Refusal(f"{args.entry} needs --after <kind>:<id> with kind"
-                      f" {' or '.join(starts[args.entry])}")
-    ready = starts[args.entry][kind]
-    goal = next(entry for entry in policy["goal_kinds"] if entry["id"] == kind)
-    read = read_goal(project, {"end": {**goal["end"], "terminal_statuses": ready},
-                               "target": target})
-    if not read["terminal"]:
-        state = read["state"] if read.get("found") else read.get("error")
-        raise Refusal(f"{args.entry} starts only after {kind} {target} reads"
-                      f" {' or '.join(ready)}; it reads {state}; queue the question")
-    return {"entry": args.entry, "after": args.after, "after_state": read["state"]}
+    """A phase_start decision needs a compiler that reads the prior phase closed; none ships."""
+    raise Refusal("phase_start: no packaged compiler reads a closed phase; queue the question")
 
 
 def cmd_record(args: argparse.Namespace, now: datetime) -> int:
@@ -1434,15 +1388,11 @@ def parser() -> argparse.ArgumentParser:
     record.add_argument("--choice", required=True)
     record.add_argument("--reason", required=True)
     record.add_argument("--target", required=True)
-    record.add_argument("--entry", help="phase_start: the entry the decision runs next")
-    record.add_argument("--after", help="phase_start: <kind>:<id> of the phase that closed")
     record.set_defaults(handler=cmd_record)
     queue = verbs.add_parser("queue")
     queue.add_argument("--recommendation", required=True)
     queue.add_argument("--blocks")
     queue.add_argument("--hold", metavar="REASON", help="keep the question pending despite an allowed recommendation")
-    queue.add_argument("--entry", help="phase_start: the entry the decision runs next")
-    queue.add_argument("--after", help="phase_start: <kind>:<id> of the phase that closed")
     queue.set_defaults(handler=cmd_queue)
     for verb in (record, queue):
         verb.add_argument("--class", dest="class_", action="append", required=True,

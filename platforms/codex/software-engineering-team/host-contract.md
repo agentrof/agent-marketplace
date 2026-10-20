@@ -48,66 +48,17 @@
   recommendation and tradeoffs. `request_user_input` takes at most three
   questions per call and two to three options per question, and Codex adds a
   free-form `Other` option itself.
-- Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside a
-  Delivery only at gate A, gate B, an early gate or for an at-once class, and
-  queue every other question in the Delivery's `User Decisions`. Present each
-  gate through `request_user_input` in calls of at most three questions, with
-  the recommended option first and the tradeoffs in the option descriptions.
 - When the canonical workflow says `spawn`, use the matching project-scoped
   custom agent from `.codex/agents/` and wait for every required agent before
   synthesis. Never run overlapping writers concurrently.
-- Under switch `review_panels` at `lens_panel`, run a review panel's lens
-  readers in parallel: start every reader of the panel before waiting on any
-  of them, then wait for all of them before triage.
-- Under switch `code_review_panel` at `beside_official`, or at `risk_scoped`
-  when its manifest carries a panel, run the code review
-  panel beside the official reviewer: start the official `code-reviewer`,
-  every `code-reviewer-lens` reader of the panel and QA before waiting on any
-  of them, then wait for all of them before the calibration and `merge-panel`.
-- Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
-  run at the same time only when their approved lane scopes are disjoint.
-  Start every lane that waits for no producer before waiting on any of them,
-  start each consumer lane as soon as every producer it waits for has
-  finished, and wait for every lane before the coordinator's commit.
-- Under switch `execution_planning` at `single_source_bundle`, start every
-  reader of an execution-plan bundle before waiting on any of them, then wait
-  for all of them before triage.
-- Under switch `reader_waves` at `all_at_once`, start a review or recheck
-  wave only after closing every finished agent thread with `close_agent`, a
-  writer between its passes included: Codex counts every open spawned thread,
-  finished or not, against the session's thread cap,
-  `agents.max_concurrent_threads_per_session` or its older alias
-  `agents.max_threads`. Then start every reader of the wave before waiting on
-  any of them, and wait for all of them before triage. When fewer threads are free than the wave has readers, start
-  the readers with the largest inputs first, say so in the progress message,
-  and start each remaining reader as soon as a reader finishes and is closed.
-  Every wave's progress message names the wave size and how many of its
-  readers run at once. A closed writer's next pass starts fresh from its task
-  manifest and the returned findings.
 - Under switch `review_scope` at `impact_closure`, run the owning
   compiler's structural check the flow names before starting any reader, so
   no reader is spent on a package the compiler refuses, and give each reader
   its impact closure in full and every approved, unchanged note outside it as
   its hash-bound summary.
-- Under switch `review_fanout` at `per_unit`, start one reader per changed
-  unit of a review before waiting on any of them, wait for all of them, then
-  start the one aggregator with their findings and the compilers' cross-unit
-  facts, and wait for it before triage.
-- Under switch `review_levels` at `concurrent_when_independent`, start the
-  readers of every review level the flow declares independent before waiting
-  on any of them, then wait for all of them before triage; approval still
-  waits for every level.
 - Under switch `context_pack` at `role_digest`, give each started role the
   pack `context_pack.py build` returns for its entry, role and mode in place
   of the full required reads.
-- Depending on the model, the provider's prompt cache can drop a role's
-  context five minutes after the model call that last used it, and a model
-  call after that pays the full price for the whole context again. So a role
-  that waits inside its turn never blocks one tool call longer than the
-  Delivery runner's 240-second `wait` bound: it runs `delivery_verification.py
-  wait` with a shell timeout above that bound, starts a verification command
-  that can run longer as a background process that keeps its output in a
-  file, and never waits through `sleep`, a polling loop or a longer timeout.
 - During setup or a package refresh, regenerate the host projection, run the
   generated project check and preserve authored vault files. The generator owns
   only portable instruction roots, local project memory and the role files it
@@ -129,16 +80,9 @@
   risk flag. `mechanical` runs `gpt-6-luna` at `high`; every other slot runs
   `gpt-6.1-sol`, from `low` for `orchestration` to `xhigh` for
   `security_review`. A role file's `model` takes precedence over a spawn
-  request, so every build renders, besides each role on its own class, an
-  `<agent>-escalated` variant for every role on a class that escalates and
-  the purpose variant `code-reviewer-security` on `security_review`;
-  `model_class.py resolve` names the agent to start, and the spawn passes no
-  model. Every build also ships the `-lens` variants of the read-only
-  document reviewers and `code-reviewer-lens` on `routine_review`; only
-  review panels under switch `review_panels` at `lens_panel` and the code
-  review panel under switch `code_review_panel` at `beside_official` or
-  `risk_scoped` start them, and the reviewers themselves keep their own
-  class.
+  request, so a role always runs its own class's pins; when the slot a task
+  asks for differs, `model_class.py resolve` returns those pins with a note,
+  and the spawn passes no model.
   The pinned models need Codex 0.159.1 or later, the first release whose
   bundled model catalog lists `gpt-6.1-sol`; `gpt-6-luna` is bundled from
   0.157.0.
@@ -153,8 +97,8 @@
   `/configure models`, which records only overrides in
   `workspace/config.json`: `class_models`, per host and slot a `model`, an
   exact model ID of this host's model list or `session`, and an `effort`,
-  either one optional, and `role_classes`, which moves any role, the
-  generated variants included, to another class on every host. Setup writes
+  either one optional, and `role_classes`, which moves any role to another
+  class on every host. Setup writes
   neither key and drops the retired `tier_models` and `role_tiers`. A role's
   class comes from `role_classes`, else the package; the slot's model and
   effort come from `class_models`, else the package's `auto` profile, and a
@@ -222,24 +166,6 @@
   command with `--restore-model <model>` in place of `--inherit-model
   <model>`, which renders those roles with their pin again and drops the
   record, then stop and report both errors.
-- Every build also ships the `-mechanical` variants of the document writers
-  `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `mechanical` class, `gpt-6-luna` at effort `high`. Only switch
-  `mechanical_pass_tier` at `mechanical` starts them, for a pass that applies
-  the fixes a review names; the writers themselves keep their own class, and
-  no review, re-check or calibration runs on a variant. Start the variant for
-  every `apply_findings` pass; never resume the base writer for one, so the
-  pass record shows the variant's class. To measure another model, apply
-  `--execution-profile inherit` in a scratch copy of the project, set the
-  candidate model as the session's `model`, and set a candidate effort as
-  `model_reasoning_effort` in that copy's `-mechanical` role files.
-- Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
-  is planned inside `/delivery-plan` with one owner gate, presented through
-  `request_user_input`, and handed over to `/deliver-governed DLV-###`; `/execution-plan
-  DLV-###` stays for a plan revision and for a Delivery that left the light
-  path, so the public entries do not change.
-- Delivery execution is available only through the exact public entries
-  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver-governed DLV-###`.
 
 ## Autopilot
 
@@ -300,37 +226,17 @@
     with the queued list of `autopilot.py report`.
 - An entry that ends by naming the next entry asks no question, and without
   a grant it still stops there. Under a grant, running that next entry is a
-  question of class `phase_start` whose recommended option is to run it. Run
-  `autopilot.py record --class phase_start --entry <next entry> --after
-  <kind>:<id>` naming the Requirement or Delivery whose phase just closed. It
-  refuses unless the grant allows `phase_start`, the entry is listed in the
-  policy's `phase_starts`, and the owning compiler reads that phase in a
-  ready state: `backlog-plan` after an `approved` Requirement,
-  `delivery-plan` after an `incorporated` Requirement or a `merged` or
-  `cancelled` Delivery, `execution-plan` after a `scope_approved` Delivery
-  and `deliver` after an `execution_approved` one. Before `delivery-plan`
-  after a Delivery, `closure-audit` must also have returned `closed`. Only
-  after `record` succeeds, invoke the next entry as the user would and run
-  its gates under the same grant; otherwise queue it and stop as before. A
-  grant never starts a new Requirement: that needs the user's request.
+  question of class `phase_start`: `autopilot.py record` refuses it and
+  `queue` keeps it queued, so stop there as before.
 - A grant, broad delegation or time pressure authorizes running the
   prescribed flow and never waives its evidence, integration, PR record or
   closure. The `merge` class takes only the flow's own `merge-pr` on the
-  recorded PR head, never a provider or Git merge of another head, and a
-  Delivery is complete only when `closure-audit` returns `closed`. A quality
+  recorded PR head, never a provider or Git merge of another head. A quality
   exception is taken only at its explicit flow gate, never under a grant
   alone.
 - When `check` reports the grant inactive, expired or completed, ask through
   `request_user_input` again, queued questions first. Roles never ask the user
   and never read the grant.
-- Inside a Delivery that keeps a `User Decisions` table, write an autopilot
-  decision as an `answered` row whose answer states the choice and is marked
-  with the grant id: `blocks` names the Items that waited by Story id,
-  `wait_minutes` records how long they waited, and an approval between the
-  gates names its document as `<document> revision N` in the answer. Write
-  every queued question there too, as a `pending` row of class `queued` or its
-  at-once class with the Items it holds in `blocks`, so the Delivery's
-  refusals apply.
 - The question matcher covers `request_user_input` and
   `request_user_input_async`. In Codex 0.159.x, `send_user_message_async`,
   which persistent-mode instructions name, is an older model-catalog name that

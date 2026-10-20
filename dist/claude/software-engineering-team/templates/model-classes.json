@@ -195,8 +195,7 @@
         }
       },
       "refuse": {},
-      "spawn_model": "alias",
-      "variants": {}
+      "spawn_model": "alias"
     },
     "codex": {
       "classes": {
@@ -400,109 +399,7 @@
           "verified": "2026-10-01"
         }
       },
-      "spawn_model": null,
-      "variants": {
-        "analysis-challenger-escalated": {
-          "agent": "analysis-challenger",
-          "slot": "routine_review_escalated"
-        },
-        "backend-developer-escalated": {
-          "agent": "backend-developer",
-          "slot": "routine_authoring_escalated"
-        },
-        "backlog-reviewer-escalated": {
-          "agent": "backlog-reviewer",
-          "slot": "routine_review_escalated"
-        },
-        "backlog-reviewer-lens-escalated": {
-          "agent": "backlog-reviewer-lens",
-          "slot": "routine_review_escalated"
-        },
-        "business-analyst-escalated": {
-          "agent": "business-analyst",
-          "slot": "complex_authoring_escalated"
-        },
-        "code-reviewer-escalated": {
-          "agent": "code-reviewer",
-          "slot": "routine_review_escalated"
-        },
-        "code-reviewer-lens-escalated": {
-          "agent": "code-reviewer-lens",
-          "slot": "routine_review_escalated"
-        },
-        "code-reviewer-security": {
-          "agent": "code-reviewer",
-          "slot": "security_review"
-        },
-        "design-system-reviewer-escalated": {
-          "agent": "design-system-reviewer",
-          "slot": "routine_review_escalated"
-        },
-        "design-system-reviewer-lens-escalated": {
-          "agent": "design-system-reviewer-lens",
-          "slot": "routine_review_escalated"
-        },
-        "devops-engineer-escalated": {
-          "agent": "devops-engineer",
-          "slot": "routine_authoring_escalated"
-        },
-        "devops-engineer-mechanical-escalated": {
-          "agent": "devops-engineer-mechanical",
-          "slot": "mechanical_escalated"
-        },
-        "domain-expert-escalated": {
-          "agent": "domain-expert",
-          "slot": "routine_review_escalated"
-        },
-        "experience-reviewer-escalated": {
-          "agent": "experience-reviewer",
-          "slot": "routine_review_escalated"
-        },
-        "frontend-developer-escalated": {
-          "agent": "frontend-developer",
-          "slot": "routine_authoring_escalated"
-        },
-        "product-owner-escalated": {
-          "agent": "product-owner",
-          "slot": "routine_authoring_escalated"
-        },
-        "product-owner-mechanical-escalated": {
-          "agent": "product-owner-mechanical",
-          "slot": "mechanical_escalated"
-        },
-        "qa-engineer-escalated": {
-          "agent": "qa-engineer",
-          "slot": "routine_authoring_escalated"
-        },
-        "qa-engineer-mechanical-escalated": {
-          "agent": "qa-engineer-mechanical",
-          "slot": "mechanical_escalated"
-        },
-        "software-architect-escalated": {
-          "agent": "software-architect",
-          "slot": "critical_decision_escalated"
-        },
-        "solution-architect-escalated": {
-          "agent": "solution-architect",
-          "slot": "critical_decision_escalated"
-        },
-        "solution-architect-mechanical-escalated": {
-          "agent": "solution-architect-mechanical",
-          "slot": "mechanical_escalated"
-        },
-        "solution-reviewer-escalated": {
-          "agent": "solution-reviewer",
-          "slot": "critical_decision_escalated"
-        },
-        "solution-reviewer-lens-escalated": {
-          "agent": "solution-reviewer-lens",
-          "slot": "routine_review_escalated"
-        },
-        "ux-designer-escalated": {
-          "agent": "ux-designer",
-          "slot": "routine_authoring_escalated"
-        }
-      }
+      "spawn_model": null
     }
   },
   "model_classes": {
@@ -544,34 +441,17 @@
       "solution-architect",
       "solution-reviewer"
     ],
-    "mechanical": [
-      "devops-engineer-mechanical",
-      "product-owner-mechanical",
-      "qa-engineer-mechanical",
-      "solution-architect-mechanical"
-    ],
-    "orchestration": [
-      "delivery-coordinator"
-    ],
+    "mechanical": [],
+    "orchestration": [],
     "routine_authoring": [
       "backend-developer",
       "devops-engineer",
       "frontend-developer",
-      "product-owner",
-      "qa-engineer",
-      "ux-designer"
+      "qa-engineer"
     ],
     "routine_review": [
       "analysis-challenger",
-      "backlog-reviewer",
-      "backlog-reviewer-lens",
-      "code-reviewer",
-      "code-reviewer-lens",
-      "design-system-reviewer",
-      "design-system-reviewer-lens",
-      "domain-expert",
-      "experience-reviewer",
-      "solution-reviewer-lens"
+      "code-reviewer"
     ],
     "security_review": [
       "security-reviewer"

@@ -16,7 +16,7 @@ def compact(project: Path, value: dict) -> dict:
     if len(raw) <= budget:
         return value
     digest = "sha256:" + hashlib.sha256(raw).hexdigest()
-    from delivery_verification import runtime_anchor, safe_runtime_path
+    from project_paths import runtime_anchor, safe_runtime_path
     directory = runtime_anchor(project.resolve()).resolve() / ".agentrof/agent-marketplace/.runtime/reader-manifests"
     directory = safe_runtime_path(project.resolve(), directory)
     directory.mkdir(parents=True, exist_ok=True)
@@ -49,7 +49,7 @@ def expand(project: Path, value: dict) -> dict:
     if reference is None:
         return value
     path = Path(reference["path"])
-    from delivery_verification import runtime_anchor, safe_runtime_path
+    from project_paths import runtime_anchor, safe_runtime_path
     directory = runtime_anchor(project.resolve()).resolve() / ".agentrof/agent-marketplace/.runtime/reader-manifests"
     safe_runtime_path(project.resolve(), path, file_only=True)
     if path.parent != directory or not path.is_file():

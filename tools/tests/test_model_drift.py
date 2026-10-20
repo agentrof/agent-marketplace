@@ -323,8 +323,6 @@ class ModelDriftTests(unittest.TestCase):
         self.assertEqual(strong["slots"], list(json.loads(build_distributions.execution_profile_path(
             self.root, "codex").read_text(encoding="utf-8"))["profiles"]["auto"]))
         self.assertIn("code-reviewer", strong["roles"])
-        self.assertIn("backlog-reviewer-lens", strong["roles"])
-        self.assertIn("product-owner-mechanical", strong["roles"])
         self.assertNotIn("efforts", strong)
         fast = codex["models"]["gpt-6-luna"]
         self.assertEqual((fast["newer"], fast["listed"], fast["drift"]), ([], True, False))
@@ -508,9 +506,6 @@ class ModelDriftTests(unittest.TestCase):
             self.assertIn(f"- Class slot `{slot}` runs effort `xhigh`, which `gpt-6.1-sol` does"
                           " not list", out)
         self.assertNotIn("runs effort `high`", out)
-        self.assertIn(f"`{model_drift.AB_REFERENCE}`", out)
-        self.assertIn("## Measurement", (ROOT / model_drift.AB_REFERENCE).read_text(
-            encoding="utf-8"))
         self.assertIn("`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` for the session", out)
         self.assertIn("--execution-profile inherit`, then start the session", out)
         for row in ("| codex | critical_decision | | `gpt-6-sol` | | | |",

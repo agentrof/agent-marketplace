@@ -411,16 +411,16 @@ class CITestPlannerTests(unittest.TestCase):
     def test_known_runtime_and_regression_changes_select_dependency_closure(self):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)
-        paths = ["plugins/software-engineering-team/scripts/delivery_git.py",
-                 "tools/tests/test_delivery_git.py",
+        paths = ["plugins/software-engineering-team/scripts/process_policy.py",
+                 "tools/tests/test_process_policy.py",
                  ".changes/delivery-regression.json",
-                 "dist/codex/software-engineering-team/scripts/delivery_git.py",
-                 "dist/claude/software-engineering-team/scripts/delivery_git.py"]
+                 "dist/codex/software-engineering-team/scripts/process_policy.py",
+                 "dist/claude/software-engineering-team/scripts/process_policy.py"]
         selected, mode, _reason = ci_tests.select_ids("impact", paths, policy, ids, ci_tests.ROOT)
         self.assertEqual(mode, "impact")
         self.assertLess(len(selected), len(ids))
-        self.assertTrue({test_id for test_id in ids if ".test_delivery_git." in test_id} <= set(selected))
-        self.assertTrue({test_id for test_id in ids if ".test_delivery_compile." in test_id} <= set(selected))
+        self.assertTrue({test_id for test_id in ids if ".test_process_policy." in test_id} <= set(selected))
+        self.assertTrue({test_id for test_id in ids if ".test_writer_line_endings." in test_id} <= set(selected))
         unknown = paths + ["tools/tests/test_new_unknown.py"]
         self.assertEqual(ci_tests.select_ids("impact", unknown, policy, ids, ci_tests.ROOT)[1], "full")
 
@@ -515,16 +515,12 @@ class CITestPlannerTests(unittest.TestCase):
     def test_repository_policy_runs_one_lane_per_system_and_keeps_native_windows_regressions(self):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)
-        required = {"tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
-                    "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"}
         # Shard counts follow the measured weights, so only the lane shape is pinned.
         self.assertEqual({name: (lane["os"], lane["python"], lane["workers"], lane["groups"])
                           for name, lane in policy["lanes"].items()},
                          {"linux": ("ubuntu-latest", policy["python"], 3, ["all"]),
                           "macos": ("macos-latest", policy["python"], 3, ["macos"]),
                           "windows": ("windows-latest", policy["python"], 3, ["windows"])})
-        self.assertEqual(set(policy["lanes"]["windows"]["required_tests"]), required)
-        self.assertTrue(required <= set(ci_tests.group_ids(["windows"], policy, ids)))
         # Linux runs every test; macOS and Windows name each test that proves behavior of
         # their own system, never a whole module.
         for group in ("platform", "macos", "windows"):
@@ -803,14 +799,13 @@ class CITestPlannerTests(unittest.TestCase):
     def test_acceleration_contracts_have_impact_and_native_windows_coverage(self):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _ = ci_tests.inventory(ci_tests.ROOT)
-        modules = {"tools.tests.test_delivery_verification", "tools.tests.test_performance_contracts",
-                   "tools.tests.test_task_inputs", "tools.tests.test_ci_local",
+        modules = {"tools.tests.test_task_inputs", "tools.tests.test_ci_local",
                    "tools.tests.test_vault_hook_git_sync"}
         native = ci_tests.group_ids(["windows"], policy, ids)
         # Each keeps its Windows-specific tests on Windows; Linux runs all of them.
         self.assertEqual({ci_tests.module_of(test_id) for test_id in native} & modules, modules)
         selected, _mode, _reason = ci_tests.select_ids("impact",
-            ["plugins/software-engineering-team/scripts/delivery_git.py"], policy, ids, root=ci_tests.ROOT)
+            ["plugins/software-engineering-team/scripts/process_policy.py"], policy, ids, root=ci_tests.ROOT)
         self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(selected))
 
     def test_fixture_measurement_is_a_delta_for_each_test(self):

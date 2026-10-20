@@ -1,6 +1,6 @@
 ---
 name: analysis-challenger
-description: Adversarial reviewer role for analysis spaces. Spawned fresh-context by the business-analysis entry with one lens or expert profile and scoped inputs; returns structured findings only.
+description: Adversarial reviewer role for analysis spaces. Spawned fresh-context by the deliver entry with one lens or expert profile and scoped inputs; returns structured findings only.
 model: gpt-6.1-sol
 model_reasoning_effort: medium
 output_contract: prose
@@ -46,7 +46,7 @@ returns findings the author cannot ignore or quietly soften.
 ## Approach
 1. Read the assigned domain's documents fully; read the named summaries
    (space overview, glossary, registry) for context only.
-2. Walk the lens's question bank from the bound review skill against
+2. Walk the lens's questions against
    every process, entity, rule set and acceptance set in scope.
 3. For each gap: state the finding in one sentence, cite the document
    and the ids it touches, judge severity, and propose one concrete

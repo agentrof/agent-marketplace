@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import stat
 import subprocess
 from pathlib import Path
 
@@ -40,3 +41,27 @@ def main_worktree(root: Path) -> Path:
         if (candidate / "workspace" / "config.json").exists():
             return candidate
     return candidates[0]
+
+
+def runtime_anchor(root: Path) -> Path:
+    return main_worktree(root) if (root / ".git").is_file() else root
+
+
+def safe_runtime_path(root: Path, path: Path, *, file_only: bool = False) -> Path:
+    """Reject aliases before accessing runtime, including native Windows junctions."""
+    anchor = runtime_anchor(root.resolve()).resolve()
+    if path != anchor and anchor not in path.parents:
+        raise RuntimeError("runtime path must remain inside its main worktree")
+    for parent in (path, *path.parents):
+        if parent == anchor:
+            break
+        try:
+            metadata = parent.lstat()
+        except FileNotFoundError:
+            continue
+        if (stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0)
+                & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)):
+            raise RuntimeError("runtime path must not contain symlinks or junctions")
+        if parent == path and file_only and (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1):
+            raise RuntimeError("runtime files must be regular and unshared")
+    return path

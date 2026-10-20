@@ -32,11 +32,8 @@ names, followed by one verb:
   across a daylight-saving change; one that passes before `on` runs is
   refused. `--until` also takes an ISO time; a time without an offset is the
   local clock.
-- `on --goal delivery:DLV-001`: until the owning compiler reads the Delivery
-  as merged or cancelled. `--goal requirement:REQ-001` ends when the
-  Requirement is incorporated into the approved backlog, resolved with no
-  change, superseded or withdrawn. `--goal text:"finish the migration"` ends
-  only through `complete`, `off` or its cap. A goal-bound grant without
+- `on --goal text:"finish the migration"`: ends only through `complete`,
+  `off` or its cap. A goal-bound grant without
   `--for` or `--until` ends at the latest at the default goal cap; with one,
   at the earlier of that time and its goal.
 - `on --allow release,phase_start` adds excluded classes; `on --deny merge`
@@ -48,10 +45,9 @@ names, followed by one verb:
 
 A grant authorizes running the flows as prescribed and never waives what a
 flow requires: no grant, broad delegation or time pressure waives evidence,
-integration, the PR record or Delivery closure. The `merge` class takes only
-the flow's own merge step on its recorded PR head, never a provider or Git
-merge of another head, and a Delivery is complete only when its
-`closure-audit` returns `closed`.
+integration or the PR record. The `merge` class takes only the flow's own
+merge step on its recorded PR head, never a provider or Git merge of another
+head.
 
 Each class is `allowed` or `excluded` by default, or `never`, which no grant
 can allow. The classes, goal kinds, default duration, default goal cap and
@@ -65,10 +61,9 @@ record before continuing. Keep an excluded effect in its own question when
 it is independent of an allowed decision. `record` takes `--class` once per class a decision
 touches and refuses when one of them is not allowed.
 
-`record --class phase_start` and automatic `queue` decisions require `--entry`
-and `--after <kind>:<id>`, a policy `phase_starts` entry and the owning compiler's
-ready state. Open phases or missing inputs keep questions queued. Without the
-class the session stops at the next entry; the host contract gives the procedure.
+No packaged compiler reads a phase as closed, so `record --class phase_start`
+refuses and `queue` keeps a `phase_start` question queued. The session stops
+at the next entry; the host contract gives the procedure.
 
 ## Only the user arms a grant
 

@@ -47,26 +47,19 @@ class HostSmokeContracts(unittest.TestCase):
                                   if path.is_dir())
                 self.assertEqual(packages, [smoke.TEAM])
 
-    def test_installed_package_smoke_requires_product_and_delivery_entrypoints(self):
+    def test_installed_package_smoke_requires_setup_and_fast_lane_entrypoints(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "package"
             root.mkdir()
             for relative in (
                 "scripts/setup_project.py", "scripts/setup_check.py",
-                "scripts/requirement_route.py", "scripts/backlog_compile.py",
-                "scripts/stage_package.py", "scripts/ba_compile.py",
-                "scripts/landscape_check.py", "scripts/design_system_compile.py",
-                "scripts/experience_compile.py",
-                "scripts/experience_application_check.py",
-                "scripts/architecture_compile.py",
-                "scripts/delivery_compile.py", "scripts/delivery_git.py",
-                "scripts/delivery_provider.py",
+                "scripts/task_lane.py", "scripts/task_inputs.py", "flows/fast-lane.md",
             ):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("", encoding="utf-8")
-            with self.assertRaisesRegex(smoke.SmokeFailure, "delivery_compile.py"):
-                (root / "scripts/delivery_compile.py").unlink()
+            with self.assertRaisesRegex(smoke.SmokeFailure, "task_lane.py"):
+                (root / "scripts/task_lane.py").unlink()
                 smoke.exercise_package(root, Path(temporary) / "project", os.environ.copy())
 
     def test_package_execution_disables_local_bytecode_caches(self):
@@ -75,14 +68,7 @@ class HostSmokeContracts(unittest.TestCase):
             root.mkdir()
             for relative in (
                 "scripts/setup_project.py", "scripts/setup_check.py",
-                "scripts/requirement_route.py", "scripts/backlog_compile.py",
-                "scripts/stage_package.py", "scripts/ba_compile.py",
-                "scripts/landscape_check.py", "scripts/design_system_compile.py",
-                "scripts/experience_compile.py",
-                "scripts/experience_application_check.py",
-                "scripts/architecture_compile.py", "scripts/delivery_compile.py",
-                "scripts/delivery_git.py", "scripts/delivery_provider.py",
-                "skill-content/experience-modeling/data/experience-schema.json",
+                "scripts/task_lane.py", "scripts/task_inputs.py", "flows/fast-lane.md",
             ):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -143,10 +129,10 @@ class HostSmokeContracts(unittest.TestCase):
                 expected = ROOT / "dist" / host / smoke.TEAM
                 installed = Path(temporary) / smoke.TEAM
                 shutil.copytree(expected, installed)
-                script = installed / "scripts/backlog_compile.py"
+                script = installed / "scripts/task_lane.py"
+                script.chmod(script.stat().st_mode | 0o100)
                 if not build_distributions.is_executable(script):
                     self.skipTest("fixture filesystem has no executable mode")
-                script.chmod(script.stat().st_mode & ~0o111)
                 with self.assertRaisesRegex(smoke.SmokeFailure, "mode differs"):
                     smoke.verify_installed_package(installed, expected, host)
 

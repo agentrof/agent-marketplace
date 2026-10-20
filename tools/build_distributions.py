@@ -27,14 +27,11 @@ ADAPTER_API_VERSION = 1
 FEATURE_BRANCH_PREFIX_RE = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*/")
 # The purpose classes every host maps to a model and effort, and the risk flags
 # that escalate a class one level; a class that escalates has a second slot,
-# `<class>_escalated`, and a host that cannot set a model at spawn time gets
-# one `<agent>-escalated` variant per agent on such a class.
+# `<class>_escalated`.
 MODEL_CLASSES_RELPATH = "tools/data/models.json"
 MODEL_CLASSES_SCHEMA_VERSION = 2
 ESCALATED = "escalated"
 CLASS_ID_RE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
-# A team's purpose variants: an agent spawned for another class's purpose.
-PURPOSE_VARIANTS_RELPATH = "skill-content/configure/data/purpose-variants.json"
 EXECUTION_PROFILE_FILE = "execution-profiles.json"
 EXECUTION_PROFILE_SCHEMA_VERSION = 4
 AUTO_EXECUTION_PROFILE = "auto"
@@ -867,69 +864,19 @@ def model_id_shape(adapter: HostAdapter, catalog: dict) -> str:
 
 
 def package_roles(source: Path) -> dict[str, str]:
-    """Every agent every host renders, switch variants included, with its class."""
-    roles = {}
+    """Every agent every host renders, with its class."""
     agents = source / "agents"
-    for path in sorted(agents.glob("*.md")) if agents.is_dir() else ():
-        roles[path.stem] = parse_frontmatter(path)[0]["model_class"]
-    for _agent, name, model_class, _description in agent_variants(source):
-        roles[name] = model_class
-    return roles
-
-
-def spawn_variants(
-    source: Path, classes: dict, adapter: HostAdapter,
-) -> list[tuple[str, str, str, str]]:
-    """The variants a host renders because it cannot set a model at spawn time.
-
-    Each entry is (source agent, variant name, slot, description suffix): an
-    `<agent>-escalated` variant per agent on a class that escalates, and each
-    purpose variant on its class. A host that sets the model at spawn time
-    renders none: the spawn passes the resolved model and effort instead.
-    """
-    if getattr(adapter.module, "SPAWN_MODEL", None) is not None:
-        return []
-    variants = [
-        (name, f"{name}-{ESCALATED}", f"{model_class}_{ESCALATED}",
-         "Escalated variant for large, high-rigor or risky work.")
-        for name, model_class in sorted(package_roles(source).items())
-        if classes[model_class]["escalates"]
-    ]
-    variants.extend(purpose_variants(source, set(classes)))
-    return variants
-
-
-def purpose_variants(source: Path, classes: set[str]) -> list[tuple[str, str, str, str]]:
-    """Each purpose variant the team declares: (agent, name, class, description)."""
-    path = source / PURPOSE_VARIANTS_RELPATH
-    if not path.is_file():
-        return []
-    try:
-        variants = json.loads(path.read_text(encoding="utf-8"))["variants"]
-        declared = [(agent, f"{agent}-{suffix}", spec["class"], spec["description"])
-                    for suffix, spec in sorted(variants.items()) for agent in spec["agents"]]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
-        raise ValueError(f"{path}: each purpose variant must declare class, description"
-                         " and agents") from exc
-    canonical = {agent.stem for agent in (source / "agents").glob("*.md")}
-    for agent, name, model_class, _description in declared:
-        if agent not in canonical:
-            raise ValueError(f"{path}: purpose variant names unknown agent {agent!r}")
-        if model_class not in classes:
-            raise ValueError(f"{path}: purpose variant {name!r} names unknown class"
-                             f" {model_class!r}")
-    return declared
+    return {path.stem: parse_frontmatter(path)[0]["model_class"]
+            for path in (sorted(agents.glob("*.md")) if agents.is_dir() else ())}
 
 
 def class_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dict:
     """Return the class map of every host that each build ships.
 
-    ``roles`` names every agent all hosts render, switch variants included,
-    under its class; ``model_classes`` says which classes escalate and
+    ``roles`` names every agent all hosts render under its class; ``model_classes`` says which classes escalate and
     ``risk_flags`` which flags escalate them. Per host, ``classes`` carries
     each slot's pinned model, package effort and every effort the model
-    takes; ``variants`` the agents only that host renders, each with the
-    agent it varies and its slot; ``spawn_model`` how a spawn sets its model
+    takes; ``spawn_model`` how a spawn sets its model
     (``alias``: the model's family name, null: the role file decides);
     ``models`` is the host's catalog with each model's family, efforts and
     the oldest host CLI that runs it, ``efforts`` the host's vocabulary and
@@ -954,8 +901,6 @@ def class_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dic
         hosts[host] = {
             "spawn_model": getattr(adapter.module, "SPAWN_MODEL", None),
             "classes": slots,
-            "variants": {name: {"agent": agent, "slot": slot}
-                         for agent, name, slot, _text in spawn_variants(source, classes, adapter)},
             "models": {model_id: {"family": entry["family"],
                                   "efforts": list(entry["efforts"]),
                                   "min_cli_version": entry["min_cli_version"]}
@@ -983,62 +928,6 @@ def write_class_map(
     ) + "\n").encode("utf-8"))
 
 
-def agent_variants(
-    source: Path, classes: set[str] | None = None,
-) -> list[tuple[str, str, str, str]]:
-    """Return every generated agent variant the process switch registry declares.
-
-    Each entry is (canonical agent, variant name, class, description suffix).
-    A variant exists in every build whether or not a project selects its
-    switch value; tools/validate.py reports the registry's full shape.
-    ``classes``, when given, are the class ids a variant may name.
-    """
-    path = source / PROCESS_SWITCHES_RELPATH
-    if not path.is_file():
-        return []
-    try:
-        switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
-        declared = [
-            (agent, f"{agent}-{variant['suffix']}", variant["class"], variant["description"])
-            for _switch, spec in sorted(switches.items())
-            for _value, variant in sorted((spec.get("agent_variants") or {}).items())
-            for agent in variant["agents"]
-        ]
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
-        raise ValueError(f"{path}: agent_variants must declare suffix, class, description and agents") from exc
-    canonical = {agent.stem for agent in (source / "agents").glob("*.md")}
-    names = [name for _agent, name, _class, _description in declared]
-    for agent, name, model_class, description in declared:
-        if agent not in canonical:
-            raise ValueError(f"{path}: agent variant names unknown agent {agent!r}")
-        if classes is not None and model_class not in classes:
-            raise ValueError(f"{path}: agent variant {name!r} names unknown class {model_class!r}")
-        if name in canonical or names.count(name) > 1:
-            raise ValueError(f"{path}: agent variant {name!r} collides with another agent")
-        if not isinstance(description, str) or not description.strip() \
-                or ":" in description or "\n" in description:
-            raise ValueError(f"{path}: agent variant {name!r} needs a one-line description without a colon")
-    return declared
-
-
-def variant_source(text: str, where: Path, name: str, slot: str, description: str) -> str:
-    """Return an agent's text renamed onto its variant's class slot."""
-    match = FRONTMATTER_RE.match(text)
-    if match is None:
-        raise ValueError(f"{where}: missing YAML frontmatter")
-    lines = []
-    for line in match.group(1).splitlines():
-        key = line.split(":", 1)[0].strip()
-        if key == "name":
-            line = f"name: {name}"
-        elif key == "model_class":
-            line = f"model_class: {slot}"
-        elif key == "description":
-            line = f"{line.rstrip()} {description.strip()}"
-        lines.append(line)
-    return "---\n" + "\n".join(lines) + "\n---\n" + text[match.end():]
-
-
 def generate_agents(
     root: Path, source: Path, target: Path, adapter: HostAdapter,
     execution_profile: dict[str, dict[str, str]],
@@ -1052,18 +941,6 @@ def generate_agents(
     }
     for path in sorted(agents.glob("*.md")):
         write_artifacts(target, adapter.module.agent_artifacts(context, path))
-    classes = load_model_classes(root)["model_classes"]
-    texts = {path.stem: path.read_text(encoding="utf-8") for path in agents.glob("*.md")}
-    with tempfile.TemporaryDirectory(prefix="agent-marketplace-variants-") as raw:
-        # Switch variants first: an escalated variant may vary one of them.
-        for group in (agent_variants(source, set(classes)),
-                      spawn_variants(source, classes, adapter)):
-            for agent, name, slot, description in group:
-                texts[name] = variant_source(
-                    texts[agent], agents / f"{agent}.md", name, slot, description)
-                variant = Path(raw) / f"{name}.md"
-                variant.write_bytes(texts[name].encode("utf-8"))
-                write_artifacts(target, adapter.module.agent_artifacts(context, variant))
 
 
 def user_context_files(root: Path) -> list[str]:
@@ -1569,11 +1446,6 @@ def validate_canonical(root: Path) -> None:
                 )
             if "model" in fields:
                 problems.append(f"{agent}: canonical agents use model_class, not model")
-        try:
-            agent_variants(source, classes)
-            purpose_variants(source, classes)
-        except ValueError as exc:
-            problems.append(str(exc))
         for path in sorted(
             candidate for candidate in source.rglob("*")
             if candidate.is_file() and not candidate.is_symlink()

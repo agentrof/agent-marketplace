@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-import backlog_compile  # noqa: E402
 import impact_closure  # noqa: E402
 
 
@@ -55,14 +54,6 @@ VAULT = {
 
 def vault_bytes(docs: Path) -> dict:
     return {p.relative_to(docs).as_posix(): p.read_bytes() for p in docs.rglob("*") if p.is_file()}
-
-
-def stamp(path: Path) -> str:
-    text = path.read_text(encoding="utf-8").replace("status: draft\n", "status: approved\n", 1)
-    digest = backlog_compile.digest_text(text)
-    path.write_text(text.replace("status: approved\n", f"status: approved\nsource_hash: {digest}\n", 1),
-                    encoding="utf-8")
-    return digest
 
 
 class ImpactClosureTest(unittest.TestCase):
@@ -127,53 +118,6 @@ class ImpactClosureTest(unittest.TestCase):
         self.assertIn({"path": "backlog/story-h.md", "reason": "unresolved_relation",
                        "key": "related_to", "value": "[[backlog/gone|Gone]]"}, gaps)
         self.assertNotIn("backlog/story-b.md", {gap["path"] for gap in gaps})
-
-    def dependency_graph(self, edge):
-        (self.docs / "backlog/source.md").write_text(note("story", "Source", extra="id: ST-901",
-            relations={"depends_on": [("backlog/target", "Target")]}))
-        (self.docs / "backlog/target.md").write_text(note("story", "Target", extra="id: ST-902"))
-        (self.docs / "backlog/review.md").write_text(note("backlog-review", "Review", extra=
-            "dependency_refs:\n  - " + json.dumps(edge)))
-        vault = impact_closure.load_vault(self.docs)
-        return impact_closure.graph(vault, impact_closure.closure_policy(vault.policy))
-
-    def test_declared_dependency_edge_resolves_both_endpoints_without_false_gap(self):
-        edges, gaps, _tiers = self.dependency_graph("ST-901 -> ST-902")
-        self.assertFalse([gap for gap in gaps if gap.get("key") == "dependency_refs"])
-        self.assertIn(("backlog/source.md", "backlog/target.md", "depends_on"), edges.tiers)
-        self.assertIn(("backlog/review.md", "backlog/source.md", "dependency_refs"), edges.tiers)
-        self.assertIn(("backlog/review.md", "backlog/target.md", "dependency_refs"), edges.tiers)
-
-    def test_invalid_dependency_edge_syntax_endpoints_and_direction_remain_gaps(self):
-        for edge in ("ST-901 ST-902", "ST-901 -> ST-902 -> ST-903", " -> ST-902", "ST-901 -> ",
-                     "ST-901->ST-902", "ST-901 -> ST-999", "ST-902 -> ST-901"):
-            with self.subTest(edge=edge):
-                _edges, gaps, _tiers = self.dependency_graph(edge)
-                found = [gap for gap in gaps if gap.get("key") == "dependency_refs"]
-                self.assertEqual(len(found), 1)
-                self.assertEqual(found[0]["value"], edge)
-                self.assertEqual(found[0]["reason"], "unresolved_relation")
-        (self.docs / "backlog/duplicate.md").write_text(note("story", "Duplicate", extra="id: ST-902"))
-        _edges, gaps, _tiers = self.dependency_graph("ST-901 -> ST-902")
-        self.assertEqual(len([gap for gap in gaps if gap.get("key") == "dependency_refs"]), 1)
-
-    def test_many_valid_dependency_edges_share_endpoints_without_false_diagnostics(self):
-        references = []
-        for target in range(12):
-            (self.docs / f"backlog/target-{target}.md").write_text(note("story", "Target",
-                extra=f"id: ST-{2000 + target}"))
-        for origin in range(20):
-            (self.docs / f"backlog/source-{origin}.md").write_text(note("story", "Source",
-                extra=f"id: ST-{1000 + origin}", relations={"depends_on": [
-                    (f"backlog/target-{target}", "Target") for target in range(12)]}))
-            references.extend(f"ST-{1000 + origin} -> ST-{2000 + target}" for target in range(12))
-        (self.docs / "backlog/review.md").write_text(note("backlog-review", "Review", extra=
-            "dependency_refs:\n" + "\n".join("  - " + json.dumps(value) for value in references)))
-        vault = impact_closure.load_vault(self.docs)
-        edges, gaps, _tiers = impact_closure.graph(vault, impact_closure.closure_policy(vault.policy))
-        self.assertFalse([gap for gap in gaps if gap.get("key") == "dependency_refs"])
-        declared = [edge for edge in edges.tiers if edge[0].startswith("backlog/source-") and edge[2] == "depends_on"]
-        self.assertEqual(len(declared), 240)
 
     def test_catalog_scenario_alias_resolves_its_owning_note_and_keeps_ambiguity(self):
         path = self.docs / "backlog/test-plan.md"
@@ -281,35 +225,13 @@ class ImpactClosureTest(unittest.TestCase):
         self.assertIn({"path": "backlog/story-g.md", "reason": "text_only_relation",
                        "source": "backlog/story-t.md", "tiers": ["text"]}, result["graph_gaps"])
 
-    def test_unchanged_approved_note_is_proven_by_hash(self) -> None:
-        digest = stamp(self.docs / "backlog/story-g.md")
-        result = self.closure(f"{REQ}.md")
-        self.assertIn({"path": "backlog/story-g.md", "approval_hash": digest,
-                       "scheme": "backlog"}, result["proven_unchanged"])
-        self.assertNotIn("backlog/story-g.md", result["unstamped"])
-        self.assertIn("backlog/story-f.md", result["unstamped"])
-
-    def test_changed_approved_note_leaves_the_proven_set(self) -> None:
-        path = self.docs / "backlog/story-g.md"
-        stamp(path)
-        path.write_text(path.read_text(encoding="utf-8").replace("Content.", "Edited."),
-                        encoding="utf-8")
-        result = self.closure(f"{REQ}.md")
-        self.assertNotIn("backlog/story-g.md",
-                         {item["path"] for item in result["proven_unchanged"]})
-        self.assertEqual(result["stale_approved"], ["backlog/story-g.md"])
-        self.assertIn("backlog/story-g.md", result["changed"])
-        self.assertIn("backlog/story-g.md", result["closure"])
-
     def test_a_changed_note_reads_what_it_answers_to_one_hop(self) -> None:
-        digest = stamp(self.docs / f"{REQ}.md")
         result = self.closure("backlog/story-b.md")
         self.assertIn(f"{REQ}.md", result["closure"])
         self.assertNotIn(f"{REQ}.md", {row["path"] for row in result["proven_unchanged"]})
         # One hop only: story-c depends on story-b, and what story-b's
         # Requirement answers to is not pulled in through story-c.
         self.assertIn("backlog/story-c.md", result["closure"])
-        self.assertTrue(digest)
 
     def test_every_gap_carries_evidence_and_a_suggested_fix(self) -> None:
         (self.docs / "backlog/story-h.md").write_text(
@@ -368,25 +290,6 @@ class ImpactClosureTest(unittest.TestCase):
         self.assertIn(f"{REQ}.md", result["closure"])
         self.assertEqual(result["deleted"], ["backlog/story-b.md"])
         self.assertNotIn(f"{REQ}.md", impact_closure.closure(self.docs, [])["closure"])
-
-    def test_a_sealed_architecture_record_is_proven_by_its_ledger(self) -> None:
-        import architecture_compile
-        path = self.docs / "system-architecture/decisions/adr-001.md"
-        path.parent.mkdir(parents=True)
-        path.write_text(note("architecture-decision", "ADR 1", {"related_to": [(REQ, "Req A")]},
-                             extra="record_id: ADR-001\nrevision: 1\nrevision_state: sealed"),
-                        encoding="utf-8")
-        ledger = self.docs / "system-architecture/_ledger/records/ADR-001/r1.json"
-        ledger.parent.mkdir(parents=True)
-        sealed = architecture_compile.source_hash(path)
-        ledger.write_text(json.dumps({"source_hash": sealed}), encoding="utf-8")
-        rel = "system-architecture/decisions/adr-001.md"
-        self.assertIn({"path": rel, "approval_hash": sealed, "scheme": "architecture"},
-                      self.closure("backlog/story-g.md")["proven_unchanged"])
-        path.write_text(path.read_text(encoding="utf-8") + "\nEdited.\n", encoding="utf-8")
-        result = self.closure("backlog/story-g.md")
-        self.assertIn(rel, result["stale_approved"])
-        self.assertIn(rel, result["closure"])
 
     def test_record_beyond_appends_once_with_reason(self) -> None:
         manifest = {"closure": []}

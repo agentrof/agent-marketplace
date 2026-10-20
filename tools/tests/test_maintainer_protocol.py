@@ -58,7 +58,7 @@ class MaintainerProtocolTests(unittest.TestCase):
         skill = " ".join((root / "references/passes.md").read_text(encoding="utf-8").split())
         for term in ("Agent Marketplace package PRs", "make check-local", "make verify-local",
                      "single test named in a finding", "only to reproduce a CI failure",
-                     "Operation Contracts", "read-only"):
+                     "operation documents", "read-only"):
             self.assertIn(term, skill)
 
     def test_model_catalog_captures_are_bundled_versioned_and_checked(self):

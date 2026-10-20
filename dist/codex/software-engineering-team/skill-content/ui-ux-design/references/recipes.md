@@ -1,7 +1,7 @@
 # Recipes
 
-Runnable snippets the generator's output does not ship: fluid type, a contrast
-checker, and the dark-palette derivation rules used by the scripts.
+Runnable snippets: fluid type, a contrast checker, and the dark-palette
+derivation rules.
 
 ## Fluid Typography via clamp()
 
@@ -49,9 +49,7 @@ function getContrastRatio(foreground, background) {
 
 ## Dark Palette Derivation Rules
 
-The generator derives the dark value for each semantic role deterministically
-(implemented in `skill-content/ui-ux-design/scripts/design_system.py`,
-`derive_dark_palette`). Apply the same rules when adjusting palettes by hand:
+Derive the dark value for each semantic role with these rules:
 
 | Role group | Rule | Clamp |
 |------------|------|-------|

@@ -10,15 +10,9 @@ replace it.
 
 ## Verification
 
-DO use the project's approved Operation Contracts and existing verification
-evidence. Keep verification read-only; never stage or change another role's
-candidate. In a Delivery the code reviewer starts no test, diagnostic or other
-verification command and no `regression-run`: a run holds the Item's
-environment lock that QA's commands need. It reads the freeze record's
-pre-handoff run and QA's recorded runs, which the verification manifest's
-`verification_evidence` names, with `status --summary` and `status --run
-<kind>`; a test result it needs that no record holds is a finding or a
-question for QA, never a run of its own. For Agent Marketplace package PRs, use `make check-local` and
+DO use the project's operation documents and existing verification
+evidence, such as the pull request's CI results. Keep verification read-only;
+never stage or change another role's candidate. For Agent Marketplace package PRs, use `make check-local` and
 `make verify-local` against the owner's exact staged candidate, plus at most
 the single test named in a finding. If that candidate is unavailable, report
 missing evidence. Run a full test module, `make check`, or a `--full` local gate
@@ -190,10 +184,8 @@ follows the escalation route, same as conformance.
 
 ## Production reachability
 
-Read the frozen manifest's `production_reachability` before judging a new
-function, command or record reader. Trace each reported symbol from a real
-production entry point and each record to its producer. A test-only caller is
-not wiring. The scan reports clues, not a pass: resolve callbacks, imports,
-dynamic paths, external producers and every `unassessed` path explicitly.
-Report missing wiring in the current Item so it does not become a later
-Item's unplanned work. Apply this check in a single-verifier pass as well.
+Before judging a new function, command or record reader, trace each new
+symbol from a real production entry point and each record to its producer. A
+test-only caller is not wiring. Resolve callbacks, imports, dynamic paths and
+external producers explicitly. Report missing wiring in the current task so it
+does not become later unplanned work.

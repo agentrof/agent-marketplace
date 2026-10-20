@@ -20,8 +20,8 @@
     "mcp__ccd_view",
     "mcp__ccd_window"
   ],
-  "browser_agents": ["experience-reviewer", "frontend-developer", "qa-engineer", "ux-designer"],
-  "spawning_agents": ["delivery-coordinator"],
+  "browser_agents": ["frontend-developer", "qa-engineer"],
+  "spawning_agents": [],
   "sources": ["https://code.claude.com/docs/en/sub-agents"],
   "verified": "2026-10-16"
 }

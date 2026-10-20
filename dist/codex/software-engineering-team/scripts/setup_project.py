@@ -21,7 +21,6 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import atomic_file
@@ -38,11 +37,8 @@ WORKSPACE = "workspace"
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
 REQUIRED_DIRS = (
-    "apps", "demos", "sketches",
-    "docs/business-analysis", "docs/solution-design",
-    "docs/system-architecture", "docs/design-system/pages",
-    "docs/experience-design", "docs/requirements", "docs/operation",
-    "docs/delivery", "docs/delivery/governance", "docs/backlog",
+    "apps", "docs/business-analysis", "docs/solution-design",
+    "docs/system-architecture", "docs/operation", "docs/backlog",
 )
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
 JSON_PAYLOAD_FILES = (
@@ -429,82 +425,6 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
     return config, changed_fields
 
 
-def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[Path, str], list[Path], list[str]]:
-    """Translate retired command fields into draft vault contracts.
-
-    No stack value becomes a Solution decision. A legacy command becomes a
-    transparent, still-draft operational proposal until a user binds it to an
-    accepted Solution decision and approves the contract.
-    """
-    docs = workspace_root / "docs"
-    updates: dict[Path, str] = {}
-    deletions: list[Path] = []
-    blockers: list[str] = []
-    verification = docs / "operation" / "verification-contract.md"
-    environment = docs / "operation" / "environment-contract.md"
-    legacy_test = config.get("test_command")
-    legacy_mutation = config.get("mutation_command")
-    legacy_env = config.get("env_command")
-    if not verification.exists() and (isinstance(legacy_test, str) or isinstance(legacy_mutation, str)):
-        import operation_compile
-        props = operation_compile.initial_props("verification", [])
-        # A value with nothing to migrate stays absent: the vault rejects an empty text property.
-        if isinstance(legacy_test, str) and legacy_test.strip():
-            props["test_command"] = legacy_test
-        if isinstance(legacy_mutation, str) and legacy_mutation.strip():
-            props["mutation_disposition"] = "required"
-            props["mutation_command"] = legacy_mutation
-            props.pop("mutation_rationale", None)
-        body = "# Verification Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
-        updates[verification] = operation_compile.render(props, body)
-    legacy_environment = workspace_root / "environment" / "contract.md"
-    if not environment.exists() and legacy_environment.exists():
-        text = legacy_environment.read_text(encoding="utf-8")
-        import operation_compile
-        try:
-            props, _body_line, error = operation_compile.parse_frontmatter(text)
-        except ValueError:
-            props, error = {}, "invalid frontmatter"
-        if error or props.get("type") not in {"environment-contract", "environment-reference"}:
-            blockers.append(
-                "legacy workspace/environment/contract.md is not a recognized environment contract; preserve it and migrate manually"
-            )
-        else:
-            updates[environment] = text
-            # A recognized legacy document has a lossless canonical successor.
-            # Keep this removal in the same refresh transaction as the create,
-            # so a failed closing gate restores the original file.
-            deletions.append(legacy_environment)
-    elif not environment.exists() and isinstance(legacy_env, str):
-        import operation_compile
-        props = operation_compile.initial_props("environment", [])
-        if legacy_env.strip():
-            props["env_command"] = legacy_env
-        body = "# Environment Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
-        updates[environment] = operation_compile.render(props, body)
-    return updates, deletions, blockers
-
-
-def legacy_governance_update(workspace_root: Path, config: dict) -> dict[Path, str]:
-    value = config.get("max_parallel")
-    target = workspace_root / "docs" / "delivery" / "governance" / "governance.md"
-    if target.exists() or not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        return {}
-    props = {
-        "type": "delivery-governance", "title": "Delivery Governance",
-        "status": "approved", "revision": 1, "max_parallel": value,
-        "governance_hash": "", "source_hash": "",
-        "approved_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "tags": ["doc/delivery-governance", "status/approved"],
-    }
-    body = "# Delivery Governance\n\n## Coordination\n\nMigrated from retired workspace config. This is the hard maximum number of active Delivery slots.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/delivery|Delivery]]"
-    import delivery_governance
-    digest = delivery_governance.governance_hash(props, body)
-    props["governance_hash"] = digest
-    props["source_hash"] = digest
-    return {target: delivery_governance.render(props, body)}
-
-
 def alternate_workspaces(root: Path) -> list[str]:
     alternate = []
     for candidate in sorted(root.glob("*/config.json")):
@@ -628,37 +548,6 @@ def windows_length(path: str) -> int:
     return len(path.encode("utf-16-le")) // 2
 
 
-def deepest_delivery_worktree(root: Path, workspace: str) -> Path:
-    """Return the deepest Item or Integration worktree root Delivery would use.
-
-    The next Delivery always has an Integration worktree, and each Story of
-    the backlog gets an Item worktree below it, at the paths the Delivery code
-    itself builds.
-    """
-    import backlog_compile
-    import delivery_compile
-    import delivery_git
-
-    docs = root / workspace / "docs"
-    try:
-        main_worktree = delivery_git.main_worktree(root)
-    except RuntimeError as exc:
-        raise SetupError(f"main worktree cannot be resolved: {exc}") from exc
-    delivery_id = delivery_compile.next_delivery_id(docs)
-    roots = [delivery_git.worktree_paths(main_worktree, delivery_id)["integration"]]
-    try:
-        record, _findings = backlog_compile.collect(docs)
-    except (OSError, RuntimeError, ValueError):
-        record = {}
-    for story in record.get("stories", []):
-        try:
-            roots.append(delivery_git.worktree_paths(
-                main_worktree, delivery_id, str(story["id"]))["item"])
-        except ValueError:
-            continue
-    return max(roots, key=lambda path: windows_length(str(path)))
-
-
 def long_tracked_paths(root: Path, worktree: Path) -> list[dict]:
     """List each tracked file Git for Windows leaves out of *worktree*, and why.
 
@@ -690,10 +579,9 @@ def long_paths_plan(root: Path, workspace: str,
                     choices: dict[str, str]) -> dict:
     """Plan the native Windows core.longpaths choice.
 
-    Item and Integration worktrees share the project repository's local
-    config, and the owner's own Git commands in them must see the files
-    Delivery sees, so the setting belongs there and only with consent. Git on
-    other hosts has no path limit to lift.
+    Task worktrees share the project repository's local config, so the
+    setting belongs there and only with consent. Git on other hosts has no
+    path limit to lift.
     """
     plan = {"choice_requests": [], "operations": [], "warnings": [],
             "before": None}
@@ -711,13 +599,13 @@ def long_paths_plan(root: Path, workspace: str,
                          "after": "true"}],
         })
         return plan
-    worktree = deepest_delivery_worktree(root, workspace)
+    worktree = root
     paths = long_tracked_paths(root, worktree)
     if selected == "leave":
         if paths:
             plan["warnings"].append(
                 "core.longpaths stays off, so Git for Windows leaves these"
-                " tracked paths out of Item and Integration worktrees under"
+                " tracked paths out of the checkout under"
                 f" {worktree}: " + ", ".join(
                     f"{item['path']} ({item['reason'].replace('_', ' ')}"
                     f" {item['length']} >= {WINDOWS_PATH_LIMITS[item['reason']]})"
@@ -771,7 +659,6 @@ def build_plan(args) -> dict:
             + f"; move its durable content under {WORKSPACE}/"
         )
 
-    legacy_config = load_json(config_path)
     config, changed_fields = desired_config(args, config_path)
     payload_root, policy_path, policy = package_surfaces()
     operations: list[dict] = []
@@ -794,47 +681,9 @@ def build_plan(args) -> dict:
             "removed_fields": sorted(
                 key for key in current_value if key not in project_config.CONFIG_FIELDS
             ),
-            "migrated_fields": sorted(
-                key for key in ("test_command", "mutation_command", "env_command", "max_parallel")
-                if key in current_value
-            ),
             "fields": changed_fields,
             "changes": value_deltas(current_value, config),
             "ownership": "tracked_managed",
-        })
-
-    operation_updates, operation_deletions, migration_blockers = legacy_operation_updates(
-        workspace_root, legacy_config
-    )
-    governance_updates = legacy_governance_update(workspace_root, legacy_config)
-    blockers.extend(migration_blockers)
-    if operation_updates:
-        operation_map = vault_root / "maps" / "operation.md"
-        if not operation_map.exists():
-            source = payload_root.parent / "maps" / "operation.md"
-            operation_updates[operation_map] = source.read_text(encoding="utf-8")
-    if governance_updates:
-        delivery_map = vault_root / "maps" / "delivery.md"
-        if not delivery_map.exists():
-            source = payload_root.parent / "maps" / "delivery.md"
-            governance_updates[delivery_map] = source.read_text(encoding="utf-8")
-    for target, content in sorted(
-        {**operation_updates, **governance_updates}.items(), key=lambda item: str(item[0])
-    ):
-        assert_not_symlinked(root, target, "legacy contract migration")
-        operations.append({
-            "action": "create", "surface": "legacy_contract_migration",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "tracked_migration",
-            "after_hash": bytes_hash(content.encode("utf-8")),
-        })
-    for target in operation_deletions:
-        assert_not_symlinked(root, target, "legacy contract migration")
-        operations.append({
-            "action": "delete", "surface": "legacy_contract_migration",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "tracked_migration",
-            "before_hash": bytes_hash(target.read_bytes()),
         })
 
     for relative in REQUIRED_DIRS:
@@ -1031,8 +880,6 @@ def build_plan(args) -> dict:
         "_payload_deletions": planned_deletions,
         "_gate_bytes": gate_bytes,
         "_relation_reports": relation_updates,
-        "_legacy_contract_updates": {**operation_updates, **governance_updates},
-        "_legacy_contract_deletions": operation_deletions,
         "_gitignore_content": target_ignore,
         "_gitattributes_content": target_attributes,
         "_mode_repairs": mode_repairs,
@@ -1072,7 +919,6 @@ def rollback_targets(root: Path, plan: dict) -> list[Path]:
     """
     mutable_surfaces = {
         "workspace_config", "vault_payload", "generated_relation_report",
-        "legacy_contract_migration",
         "gitignore", "gitattributes", "portable_gate", "file_mode",
     }
     targets = {
@@ -1255,21 +1101,6 @@ class RefreshSnapshot:
         self.temporary.cleanup()
 
 
-def next_entry(root: Path) -> str:
-    result = subprocess.run([
-        sys.executable, str(Path(__file__).with_name("requirement_route.py")),
-        "--project-root", str(root), "--json",
-    ], capture_output=True, text=True, check=False)
-    try:
-        routed = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        routed = {}
-    entry = routed.get("next_entry") if isinstance(routed, dict) else None
-    if isinstance(entry, str) and entry:
-        return entry
-    return "requirement"
-
-
 def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
     root = Path(plan["project_root"])
     workspace_root = root / args.workspace
@@ -1319,12 +1150,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
         )
         for target, content in plan["_relation_reports"].items():
             snapshot.write_text(target, content)
-        for target, content in sorted(
-            plan["_legacy_contract_updates"].items(), key=lambda item: str(item[0])
-        ):
-            snapshot.write_text(target, content)
-        for target in plan["_legacy_contract_deletions"]:
-            snapshot.delete(target)
         current_ignore, _target_ignore = proposed_gitignore(
             root, args.workspace
         )
@@ -1397,7 +1222,7 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             "payload_files_reconciled": reconciled,
             "gitignore_changed": ignore_changed,
             "runtime_root": str(runtime),
-            "next_entry": next_entry(root),
+            "next_entry": "deliver",
             "warnings": plan["warnings"],
             "rolled_back": False,
         }

@@ -1,4 +1,4 @@
-# Materialized by Delivery activation from approved Operation Contracts.
+# Copied by the project as skill-content/setup/references/ci-bootstrap.md describes.
 # No double-braced token may be written into a consuming repository.
 name: tests
 

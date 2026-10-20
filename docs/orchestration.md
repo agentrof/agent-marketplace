@@ -1,159 +1,31 @@
 # Orchestration
 
 The user starts an entry skill. The entry reads its canonical flow, checks the
-project-local workspace and delegates read-only challenges to role agents when
-needed. Writers are serialized, except in the two process-switch cases below:
-the parallel lanes of `implementation_schedule` and the parallel contract
-drafts of `execution_planning`. Independent readers may run in parallel.
+project-local workspace and delegates work to role agents when needed.
+Implementation work runs on the fast lane, `flows/fast-lane.md` in the
+Software Engineering Team package: one task, approved by the owner, one branch
+and one pull request to the target branch. The owning developer role writes
+the change and its tests; the project's CI and one fresh `code-reviewer`
+verify it, and only a critical finding blocks. Every other finding becomes an
+issue in the project's repository. At rigor `high` the read-only
+`security-reviewer` joins and the owner merges.
 
-Every delegated review has three explicit boundaries: the orchestrator names
-the complete input file set and expected output shape before invocation; it
-waits for all readers in that review layer; then the owning persona alone
-triages findings and writes canonical files. Reviewer replies are transient
-inputs, not project state. A later review layer starts only after the prior
-layer's writes and deterministic checks are green. Each host uses its native
-agent invocation and wait mechanism without changing these semantics.
+Every delegated role receives explicit inputs derived by
+`scripts/task_inputs.py` under `templates/task-input-contract.md`: the
+orchestrator names the complete input file set and expected output shape
+before invocation, and the owning role alone writes canonical files. Reviewer
+replies are transient inputs, not project state. Independent readers may run
+in parallel; each host uses its native agent invocation and wait mechanism
+without changing these semantics.
 
-Backlog, Solution Design, Design System and Operation contract reviews run as
-process switch `review_panels` selects in the project's Process Policy.
-`single_reader`, the default, keeps one fresh reviewer per step. `lens_panel`
-runs review panels, defined in
-`challenge-review/references/switch-review_panels-lens_panel.md`: fresh
-read-only lens readers, one lens assignment each, read the same inputs in
-parallel, and the read-only reviewer roles run as their `-lens` variants. The
-owning persona merges findings that share a root cause, keeping the highest
-returned severity, and the panel approves only when no lens has an open
-critical or major finding and the owning compiler checks are green. A panel
-changes who reads, never the review loop: at `review_loop` `current` it keeps
-the step's own loop and a re-review reruns the whole panel, and at
-`blocking_delta` a re-review reruns only the assignments whose blocking
-findings were fixed or disproved, plus one changed-text check. A panel
-replaces the step's single reviewer and never stacks on top of it: the
-Solution primary reviewer existed only to stop two full panels from stacking
-(#293). Delivery code review, QA and the Experience attestation keep one
-reader per role because their machine interfaces accept one result per role;
-only under process switch `code_review_panel` does Delivery code review add a
-panel beside its reader, whose merge step registers that one result.
+## Process switches
 
-The writer side of those backlog, Solution Design and Operation contract
-reviews runs as process switch `mechanical_pass_tier` selects. `role_tier`,
-the default, keeps every writer pass on its role's own class. `mechanical`,
-defined in
-`challenge-review/references/switch-mechanical_pass_tier-mechanical.md`,
-gives a pass whose findings each name their exact fix to the owning writer's
-`-mechanical` variant and runs render, stamp and check steps as direct entry
-commands. Triage, authoring, design, code repairs and every review, re-check
-or calibration keep their roles and tiers.
-
-Process switch `review_loop` decides how a review loop treats the findings a
-review returns, with either value of `review_panels`. At `current`, the
-default, every step keeps its own loop. At `blocking_delta`, only a critical or
-major finding starts a round in the backlog, Solution Design, Design System and
-Operation contract reviews and in Delivery code review. A minor finding is
-fixed only in a writer pass that already carries a blocking fix; otherwise it
-becomes a follow-up with an owner role and a revisit trigger: in the compiler-
-validated `Accepted Minor Findings` table of a backlog review note or an
-Operation contract, at the approval gate of Solution Design and Design System,
-and for code review in result fields that `approve-item-evidence` copies into
-the Item's code review record and `approve-review` lists in the Delivery
-Review. A re-review reads only the open blocking findings, the changed text and
-its dependency context. Before a critical or major claim gates, one fresh,
-read-only calibration reader, neither the writer nor the claiming reader,
-confirms it, lowers it to minor or rules it invalid, citing the text. It runs
-as the claiming reviewer's role, or for an Operation contract or bundle claim
-the counterpart of the contract it concerns, on that role's own class, never as
-a `-lens` or a `-mechanical` variant. In Delivery code review it registers its
-rulings as a result of its
-own, and `delivery_verification.py result` refuses rulings that the claiming
-result carries itself. Only confirmed claims gate, and each claim is ruled
-once. Every ruling is kept where a compiler reads it: a backlog review note and
-an Operation contract keep a review record of the returned findings with their
-ids and severities, the rulings and the id of each accepted minor finding, so
-no finding that stays critical or major is accepted as minor; a Solution Design
-engagement, `MASTER.md` and the code review record keep their rulings too, and
-the approval gate shows them. A claim on an Operation contract is calibrated by
-the counterpart of the contract the claim concerns, the DevOps Engineer for the
-Verification Contract and the QA Engineer for the Environment Contract, never
-by that contract's writer. The instructions live in the `challenge-review` and
-`code-review` references `switch-review_loop-blocking_delta.md`.
-
-Process switch `review_rounds` caps the readers and rounds of backlog,
-Solution Design, Design System and Operation contract reviews. At `current`,
-the default, they follow `review_panels` and `review_loop`. At `single_pass`,
-defined in `challenge-review/references/switch-review_rounds-single_pass.md`,
-one reader of the step's reader role reads, never a lens panel; no
-calibration reader runs, so the reader's severity stands; only a critical
-finding starts a writer pass, and one re-review of the changed text closes
-it. Minor and major findings become follow-ups, which `backlog_compile.py`
-and `operation_compile.py` accept in `Accepted Minor Findings`, and a critical
-finding still open after the one re-review goes to the owner's approval gate.
-Delivery code review keeps its `review_loop` value.
-
-Process switch `code_review_panel` decides who reads a Delivery Item's frozen
-candidate in code review. At `single_reader`, the default, the official code
-reviewer alone does. At `beside_official`, one fresh `code-reviewer-lens` per
-lens assignment of `code-review/data/code-review-panel.json` reads the same
-candidate and inputs in parallel with the official reviewer, which reviews as
-before, and every reader registers its result through
-`delivery_verification.py panel-result`. One fresh code reviewer on its own
-class then calibrates every critical or major panel claim, confirming it,
-lowering it to minor, ruling it invalid or ruling it a duplicate of a finding
-that already carries the defect, and at `review_loop` `blocking_delta` the
-official claims too. `merge-panel` registers the one code review result the
-machine interface accepts: the official findings and the validated panel
-findings, each with its source, and a panel record of every lens claim with
-its ruling and of the combined step's wall clock against the official
-reviewer's, which `approve-item-evidence` keeps for every pass in the Item's
-code review record.
-`code-review/references/switch-code_review_panel-beside_official.md` defines
-the steps.
-At `risk_scoped`, the same panel reads, but a lens reader joins only when the
-frozen change fires its trigger in `code-review/data/lens-triggers.json`: a
-changed path matching the owner's risk path globs brings in the security
-lens, and changed lines above the owner's threshold bring in the correctness
-and conformance lenses; with none triggered the official reviewer reads
-alone, as
-`code-review/references/switch-code_review_panel-risk_scoped.md` defines.
-
-Process switch `qa_preflight` keeps the current order at `off`. At
-`lifecycle_first`, short declared targets must be rehearsed before freeze,
-runtime lifecycle checks precede live groups and the final log check follows
-them. Only an approved Verification Contract can waive a rehearsal; full QA
-evidence stays required. The steps are in
-`qa-verification/references/switch-qa_preflight-lifecycle_first.md`.
-
-Process switch `runtime_lifecycle` keeps the full down/up path for every
-runtime candidate at `fresh`. At `long_lived`, a candidate reuses the running
-instance: an idempotent `up` converges it to the candidate, `seed` resets its
-state, and no teardown follows. It applies only after an earlier candidate of
-the Item holds fresh runtime evidence on the same `environment_paths` bytes,
-so the first pass and any environment code change still take the fresh path.
-The steps are in `qa-verification/references/switch-runtime_lifecycle-long_lived.md`.
-
-Process switch `live_case_reuse` reruns every selected live group at `off`.
-At `delta_since_green`, each passing live run becomes the base of its groups,
-and a later pass reruns only the groups whose approved `live_group_paths`, or a
-catch-all path, changed since that base; the others take the base run's
-passed cases under bindings QA's final evidence check enforces. The steps are
-in `qa-verification/references/switch-live_case_reuse-delta_since_green.md`.
-
-Process switch `live_verification` runs the live groups in every story QA pass
-at `every_pass`. At `delivery_integration`, a pass runs no live test and records
-`live: deferred_to_integration`; the Delivery runs one impact-selected live run
-after every Item integrates. Switch `item_live_gate` adds no Item live run at
-`off`; at `tooling_items`, an Item that changes environment tooling runs its
-affected live groups once before merge. The steps are in
-`qa-verification/references/switch-live_verification-delivery_integration.md`
-and `qa-verification/references/switch-item_live_gate-tooling_items.md`.
-
-Process switch `process_profile` keeps the governed ceremonies at `governed`.
-At `fast_lane`, the orchestrating session runs one task per change itself, with
-every role in the foreground and no delivery coordinator: one task under
-`backlog/tasks/`, one branch and one pull request to the target branch, the
-project's CI plus one reviewer (two at task rigor `high`, where the owner
-merges), and auto-merge. The steps are in `flows/fast-lane.md` and
-`deliver/references/switch-process_profile-fast_lane.md`. Contracts, the Definition of Done and Governance then change by
-plain pull request, with no stamp, pairing, citation or hash pin.
+Process switch `process_profile` keeps the default at `governed`. At
+`fast_lane`, the orchestrating session runs one task per change itself, with
+every role in the foreground: one task, one branch and one pull request to the
+target branch, the project's CI plus one reviewer (two at task rigor `high`,
+where the owner merges), and auto-merge. The steps are in `flows/fast-lane.md`
+and `deliver/references/switch-process_profile-fast_lane.md`.
 
 Process switch `pr_proof` leaves a fast-lane task's proof to the project's CI
 at `remote_ci`. At `local_record`, `task_lane.py prove` runs the project's
@@ -162,513 +34,26 @@ the HEAD commit and a clean-tree flag, and `open-pr` refuses before pushing
 unless that record is green for the clean HEAD; the steps are in
 `deliver/references/switch-pr_proof-local_record.md`.
 
-Process switch `pass_carry_over` keeps nothing between passes at `off`. At
-`per_item`, the runner adds every pass record the approved test or live
-command writes to the Item's carry-over record, failed passes included, and
-names that record to the next pass in `AGENTROF_CARRY_OVER_RECORD`; the
-project's command carries a case only on unchanged inputs, and a missing record
-counts no case as passed. The steps are in
-`qa-verification/references/switch-pass_carry_over-per_item.md`.
-
-Process switch `repair_review` decides when a corrected candidate receives an
-independent correctness review. `after_freeze`, the default, keeps the review
-inside the next full pass. At `before_freeze`, a fresh reader checks the repair
-diff and previous findings before the candidate is frozen. A missing, stale or
-blocking result prevents freeze; passing minor findings carry into the full
-review. The regular reader panel, calibration and QA still run.
-`code-review/references/switch-repair_review-before_freeze.md` defines the steps.
-
-Process switch `item_verification` decides who verifies a frozen Item
-candidate. `separate`, the default, keeps an independent code reviewer and an
-independent QA reader. At `single_verifier`, one fresh verifier reviews the
-diff, runs QA's approved commands and registers both results together; only
-a critical finding blocks and every other finding is a follow-up issue.
-`deliver/references/switch-item_verification-single_verifier.md` defines the
-steps.
-
-Process switch `repair_pass` decides what a repaired candidate re-runs.
-`full_pass`, the default, runs the full code review and QA again. At
-`scoped_repair`, a repair of findings below critical whose pre-freeze repair
-review and touched-suites run passed is frozen and settled from that evidence,
-with no new reader pass over unchanged scope; a runtime Item or a critical
-finding still takes the full pass.
-`deliver/references/switch-repair_pass-scoped_repair.md` defines the steps.
-
-Process switch `finding_disposition` decides what a Delivery finding below
-critical costs. `next_pass`, the default, repairs every blocking finding and
-runs a new verification pass. At `follow_up_issue` only a critical finding
-blocks: each major or minor finding is a complete follow-up that the
-evidence records and the Delivery Review list, the coordinator files it as a
-project issue, and the Item integrates in the same pass.
-`deliver/references/switch-finding_disposition-follow_up_issue.md` defines
-the steps.
-
-What a backlog epic reviewer reads is process switch `review_manifest_scope`.
-At `transitive`, the default, every note the epic's manifest includes expands
-its own links, so the read set follows the vault. At `bounded`, links are
-followed only from the epics, stories and test plans of the epic and its
-dependency closure; each note they link to or cite is read with its
-front-matter relations one hop further, and nothing beyond is expanded. The
-root review and writer manifests keep the transitive read set, and a reviewer
-that needs evidence outside its manifest reports it and is rerun with it.
-`backlog-plan/references/switch-review_manifest_scope-bounded.md` defines the
-read set.
-
-Process switch `review_scope_record` collects the data that scope's default is
-chosen on. At `off`, the default, nothing is measured. At `both_scopes`, an
-epic reader's manifest also derives the other scope's read set and carries
-both sizes, flags a transitive read set over the owner's
-`transitive_source_bytes` budget so the flow offers `bounded` before any
-reader starts, and `backlog_review_inputs.py --scope-findings` reports the
-review's blocking findings that cite a note outside the bounded read set; the
-coordinator appends both to the JSON Lines record
-`<workspace>/measurements/review-scope.jsonl`, which the backlog revision
-commits, and the command refuses a record inside the vault or one Git ignores.
-`backlog-plan/references/switch-review_scope_record-both_scopes.md` defines
-the record.
-
-Who applies the epic reviews' findings is process switch
-`remediation_writers`. At `single_writer`, the default, one Product Owner
-writer reads the union of every epic's review scope and applies them all. At
-`per_epic`, each epic with findings gets its own Product Owner writer, in
-parallel, whose `--epic` task reads that epic's review scope at the
-`review_manifest_scope` value in force and writes only that epic's notes;
-afterwards one cross-epic writer, derived without `--epic`, reads and writes
-only the notes the cross-epic findings name.
-`backlog-plan/references/switch-remediation_writers-per_epic.md` defines the
-writers.
-
-What the root reviewer of a backlog revision reads in full is process switch
-`root_review_scope`. At `full`, the default, it reads the complete package. At
-`revision_delta`, its manifest names in full only the stories the revision
-changed or added, their neighbours one dependency edge away, their test
-plans, every epic and the review notes, and gives every other story as a
-hash-bound summary in the compiler's whole-backlog graph with every
-dependency edge and the root review's compiler facts. A first backlog, a delta
-over the owner's `max_delta_share_percent` and a reader's stated request read
-the whole package.
-`backlog-plan/references/switch-root_review_scope-revision_delta.md` defines
-the read set.
-
-Whether a small backlog revision skips the epic panel and the root reader is
-process switch `backlog_path`. At `standard`, the default, every revision runs
-its epic and root reviews. At `light_when_eligible`, a Requirement-mode
-revision of a technical or defect Requirement that changes at most
-`max_changed_stories` technical or defect stories in one epic has one reader
-review its story delta, and `backlog_compile.py record-light-root-review`
-writes the root review round from the compiler's structural checks; approval
-re-checks the eligibility.
-`backlog-plan/references/switch-backlog_path-light_when_eligible.md` defines
-the path.
-
-Who writes a backlog remediation pass's bookkeeping is process switch
-`remediation_bookkeeping`. At `writer`, the default, the Product Owner writer
-copies the rechecks' closure rows, reruns the expected-hash checks and writes
-the preservation evidence itself. At `compiler`, the writer does the content
-fixes and runs `backlog_compile.py record-rechecks` once: from the readers'
-closure tables and the pinned candidate it writes each review note's
-`Recheck Closures` table, the expected manifest hash of every touched scope
-and a preservation report, and `--verify` is the writer's check.
-`backlog-plan/references/switch-remediation_bookkeeping-compiler.md` defines
-the command.
-
-When epic reviews queue behind the host's agent limit, process switch
-`epic_review_cadence` sets when the next one starts. At `wait_per_panel`, the
-default, the coordinator waits for the previous review's calibration and its
-own record of that review. At `overlap_calibration`, the next review starts as
-soon as the previous review's last reader returns, a calibration reader starts
-for each reader's claims as soon as that reader returns, the coordinator
-writes only a fixed claim record at the boundary, and no writer action starts
-until every review and every calibration has returned.
-`backlog-plan/references/switch-epic_review_cadence-overlap_calibration.md`
-defines the cadence.
-
-Whether a business rule that computes a number must show how is process
-switch `calculation_examples`. At `off`, the default, a calculation rule
-follows the space standard alone. At `required`, each such rule carries its
-formula or an AC with a worked example, inputs, parameters, expected output
-and the output after one parameter change; the analysis challenger reports a
-missing one as a major finding, and a backlog test plan takes its expected
-value from it and never invents one, as
-`requirements-analysis/references/switch-calculation_examples-required.md`
-defines.
-
-How many owner gates a decision that changes approved analysis documents
-takes is process switch `source_decision_gate`. At `two_gates`, the default,
-the owner picks a direction, and the drafted and reviewed change is approved
-as exact content in a second gate. At `one_gate_when_drafted`, when the
-recommended option needs no owner input, the change is drafted and reviewed
-first and one gate shows it as "approve this exact change" with its content
-hash from `ba_compile.py content-hash`, which `approve-package
---expected-content-hash` then holds the package to; any other answer falls
-back to two gates, as
-`business-analysis/references/switch-source_decision_gate-one_gate_when_drafted.md`
-defines.
-
-Which owner gate approves the Experience rebinds a source approval makes
-necessary, of a Business Analysis space, the Solution landscape or the Design
-System MASTER, is process switch `dependent_rebind_gate`. At `separate`, the
-default, binding refresh finds the stale Experience package after the source
-approval and opens its own scope gate. At `with_source`,
-`experience_compile.py source-impact` lists the stale packages before the
-source gate and classes each as a `mechanical` rebind, when none of its notes
-cites a changed source row or document, or a `semantic` one; the source gate
-approves the mechanical rebinds with the source, and a semantic one keeps its
-own gate, as
-`business-analysis/references/switch-dependent_rebind_gate-with_source.md`
-defines.
-
-What the final snapshot review of a source-only Experience rebind reads is
-process switch `rebind_review_scope`. At `full`, the default, it reads the
-whole package and prototype tree. At `source_delta`, when `source-impact`
-reports `source_rebind_only` and no note citing a changed source row or
-document, the reviewer reads the source delta, the package notes and the
-attested hashes, not the prototype tree, and still writes the full
-attestation; any authored change or cited claim takes the full review, as
-`experience-modeling/references/switch-rebind_review_scope-source_delta.md`
-defines.
-
-How the readers of one review or recheck wave start is process switch
-`reader_waves`. At `as_slots_free`, the default, readers start as the host
-lets them. At `all_at_once`, the coordinator closes every finished worker,
-the writer between its passes included, and starts every reader of the wave
-before waiting on any of them, the largest inputs first when the host's
-thread cap is short, and each wave's progress message names its size and its
-readers running at once, as
-`challenge-review/references/switch-reader_waves-all_at_once.md` defines.
-Each host contract states how: Codex counts every open spawned thread against
-its cap, while a finished Claude Code subagent holds none.
-
-What every role reads in full for a change is process switch `review_scope`.
-At `full`, the default, it reads the complete package its step names. At
-`impact_closure`, the owning compiler's structural check runs before any
-reader starts, `impact_closure.py` derives the changed notes from the approval
-stamps and their closure over the vault's typed relations and shared
-contracts, every role reads that closure in full and each approved, unchanged
-note outside it as its hash-bound summary, reads beyond it when unsure and
-records why, a writer fixes a reported graph gap through its owning compiler
-and recomputes the closure, and a confirmation re-review reads only the fix's
-delta. A first approval, a shared contract or policy change and a graph gap
-widen the read, as
-`challenge-review/references/switch-review_scope-impact_closure.md` defines.
-Whatever the value, every role navigates the vault first, in the tier order of
-the constitution's section 5.
-
-How many readers share one review's changed units is process switch
-`review_fanout`. At `single_reader`, the default, the step's reader reads
-every changed unit in turn. At `per_unit`, a review of more than one changed
-unit spawns one reader per unit in one message and then one aggregator that
-reads only their findings and the compilers' cross-unit facts and decides the
-cross-unit questions no compiler enforces, as
-`challenge-review/references/switch-review_fanout-per_unit.md` defines.
-
-Whether review levels wait for each other is process switch `review_levels`.
-At `sequential`, the default, each level starts after the earlier one is
-approved. At `concurrent_when_independent`, a level its flow declares
-independent, such as the backlog root review beside the epic reviews or an
-Operation contract review beside the execution-plan topology review, starts
-with the earlier level over the same frozen inputs; approval waits for every
-level and a blocking fix re-runs every level whose manifest hash it changes,
-as
-`challenge-review/references/switch-review_levels-concurrent_when_independent.md`
-defines.
-
-What a spawned role reads first is process switch `context_pack`. At `off`,
-the default, it reads every flow, skill and reference file its task binds. At
-`role_digest`, it receives the pack `context_pack.py build` derives for its
-entry, role and mode, reads a named source in full only when the pack does not
-cover its case and records that read and why, as
-`challenge-review/references/switch-context_pack-role_digest.md` defines.
+What a reviewer reads in full for a change is process switch `review_scope`.
+At `full`, the default, it reads the complete change its step names. At
+`impact_closure`, `task_lane.py lint` runs before any reviewer starts, the
+reviewer reads the pull request diff and the change's impact closure in full
+and each approved, unchanged note outside it as its hash-bound summary, and
+reads beyond it when unsure and records why, as
+`deliver/references/switch-review_scope-impact_closure.md` defines.
 
 Whether flow steps are timed is process switch `step_timing`. At `off`, the
 default, nothing is recorded. At `recorded`, the coordinator wraps each step
 and role spawn in `step_timing.py start` and `end` with its phase, reports an
 overrun at once and ends each run with a durable `step_timing.py report
---write`, as `challenge-review/references/switch-step_timing-recorded.md`
-defines.
+--write`, as `deliver/references/switch-step_timing-recorded.md` defines.
 
 Whether steps are compared with a maximum is process switch `step_budgets`. At
 `off`, the default, none is. At `enforced`, each budgeted step's time is
 compared with its maximum in minutes, the owner's parameter or the package
 target in `configure/data/step-budgets.json`; a step may finish well under it,
 and only an exceeded maximum is reported, at once and never blocking, as
-`challenge-review/references/switch-step_budgets-enforced.md` defines.
-
-Whether a step is also compared with its own history is process switch
-`step_baseline`. At `off`, the default, it is not. At `median`, a timed step
-is over when it passes the larger of its maximum and a percentage of the
-median of its last recorded runs, and the QA runner times its live runs, live
-steps and rehearsal commands, as
-`deliver/references/switch-step_baseline-median.md` defines.
-
-A Delivery Item's implementation writers run as process switch
-`implementation_schedule` selects. `sequential_v1`, the default, runs them one
-after another in their approved order. For an Item whose approved plan
-declares it, `parallel_lanes_v1` is one of the two exceptions to serialized
-writers, beside the parallel contract drafts of `single_source_bundle`: after
-the Software Architect runs alone, roles whose approved lane scopes are
-disjoint write at the same time in the Item's one worktree, and a lane that
-consumes a declared seam starts as soon as its own producers finish. Lanes
-make no Git writes, the coordinator runs intent-to-add for the new files they
-report, environment verbs and verification commands hold the Item's
-environment lock one at a time, vault writes stay serial, and the coordinator
-alone commits, once, before the candidate freeze.
-`execution-plan/references/switch-implementation_schedule-parallel_lanes_v1.md`
-and `deliver/references/switch-implementation_schedule-parallel_lanes_v1.md`
-define the lanes.
-
-What an Item's candidate has passed when Code Review and QA start is process
-switch `pre_handoff_regression`. At `off`, the default, the implementation
-hands it over after its own Item's tests. At `touched_suites`, the coordinator
-first runs the automated suites of the earlier stories whose integrated Items
-in merged Deliveries claim a path the change touches, with the Item's own Test
-Plan targets, through the approved diagnostic adapter or else the full approved
-test command, under the Item's environment lock, and repairs every failure
-before the freeze, which refuses until that run passed on the exact candidate.
-QA's first gate run reports every failing group where the approved command
-allows it. `deliver/references/switch-pre_handoff_regression-touched_suites.md`
-defines the run. At process switch `own_target_reuse` `spot_run`, QA's final
-test run also takes the Item's own Test Plan targets from that run, but for the
-ones QA names to spot-run itself, as
-`deliver/references/switch-own_target_reuse-spot_run.md` defines. At
-`accept_record` it takes every own target from that run, runs none of them
-itself and checks only that the record binds the frozen candidate, as
-`deliver/references/switch-own_target_reuse-accept_record.md` defines.
-
-When QA starts its first test command of a round is process switch
-`qa_gate_order`. At `plan_first`, the default, QA plans and maps every check
-first. At `gate_first`, QA starts the command in the background and plans,
-maps and drafts its result while the command runs, as
-`qa-verification/references/switch-qa_gate_order-gate_first.md` defines.
-
-Whether a test run knows its groups is process switch `test_group_report`. At
-`off`, the default, the runner records a test command's exit code and output
-only. At `refuse_missing_groups`, where the Verification Contract declares
-`test_groups` and `test_group_report`, QA's test runs and the pre-handoff run
-read the group report the approved command writes, record each declared
-group's status, record a run whose report lacks a group not intact, and
-evidence approval refuses a final test run with a group that did not pass, as
-`deliver/references/switch-test_group_report-refuse_missing_groups.md`
-defines.
-
-Whether a converted scenario keeps its assertions is process switch
-`level_change_map`. At `off`, the default, an Item rewrites the test of a
-scenario whose Test Plan level changed on trust, and coverage counts by
-scenario id. At `assertion_map`, for each scenario whose automation target the
-Item changes and whose level differs from the revision its story integrated,
-the writer records the assertion lines that prove its Then at the integration
-base and in the candidate; `freeze` refuses a missing entry, a changed Then, an
-empty side and a line its file does not hold, and flags a pair whose after
-assertions only count or check existence, or that drops an expected value, for
-the code reviewer, as
-`deliver/references/switch-level_change_map-assertion_map.md` defines.
-
-When an active Item may write a path its plan revision adds is process switch
-`provisional_claims`. At `after_approval`, the default, its writer writes the
-path only after the revised plan is approved and published and the Item
-converged on it. At `during_plan_revision`, while the Delivery holds its
-plan-revision barrier, the coordinator records a provisional claim of a path
-the draft adds, refused when another Item claims an overlapping path, and the
-writer commits the change at once; freeze, `push-item` and integration refuse
-it until the approved plan publishes the path, and the revision's end
-promotes, orphans or withdraws the claim, as
-`deliver/references/switch-provisional_claims-during_plan_revision.md`
-defines.
-
-At `uncontested_delta`, `amend-path-claims` grants an active serial Item unheld
-product paths through an immutable receipt and the atomic Fence/Integration
-transaction, without a new plan approval. The Item converges before verification;
-protected paths, overlapping unfinished Items and active barriers still refuse.
-The exact procedure is in
-`execution-plan/references/switch-provisional_claims-uncontested_delta.md`.
-
-How QA's final test run uses the test environment is process switch
-`test_engines`. At `single`, the default, it runs the approved test command
-once under the Item's environment lock. At `partitioned`, where the
-Verification Contract declares a partition command, its engines and a `Test
-Partitions` table and the Environment Contract provisions the engines,
-`run --kind test` runs every partition in its own private clone, in parallel
-over the engines, longest first, and merges them into one record whose exit
-code is 0 only when every partition passed intact, as
-`deliver/references/switch-test_engines-partitioned.md` defines.
-
-What an Item's fixed chain costs is set by three process switches. Process
-switch `item_qa_tier`: at `full_per_item`, the default, every Item's QA gate
-runs the full acceptance command; at `change_tier_per_item`, where the
-Verification Contract declares a change-level and an integration tier, the
-Item's gate runs the change-level tier and the Delivery runs the integration
-tier once before its pull request, as
-`qa-verification/references/switch-item_qa_tier-change_tier_per_item.md`
-defines. Process switch `item_review_scale`: at `fixed`, the default, every Item
-gets the reader set `code_review_panel` selects; at `by_change_size`, the
-official code reviewer reads alone an Item whose change is within the owner's
-size limits, as `code-review/references/switch-item_review_scale-by_change_size.md`
-defines. Process switch `item_cost_report`: at `off`, the default, the Delivery
-Review carries no per-Item cost; at `per_step` it adds each Item's fixed cost
-step by step, as `deliver/references/switch-item_cost_report-per_step.md`
-defines.
-
-How a coordinator keeps parallel lanes apart and remembers them is set by two
-process switches. Process switch `lane_table`: at `off`, the default, lanes
-live in the coordinator's context; at `recorded`, `scripts/lane_table.py`
-records each lane's start and finish under the project-local runtime directory
-and lists the lanes a restarted session still has to launch, as
-`deliver/references/switch-lane_table-recorded.md` defines. Process switch
-`lane_isolation`: at `shared_checkout`, the default, a fix lane may work in the
-main checkout; at `scratch_clone`, each parallel fix lane works in its own
-scratch clone and no delegated lane switches the main checkout's branch, as
-`deliver/references/switch-lane_isolation-scratch_clone.md` defines.
-
-Whether a technical Requirement is fact-checked before its approval is process
-switch `requirement_fact_check`. At `off`, the default, only the compiler checks
-it. At `pre_approval_reader`, one read-only `routine_review` reader checks its outcome
-sentences against the files they cite and returns contradictions only, which
-the coordinator fixes before the owner sees the draft, as
-`requirement/references/switch-requirement_fact_check-pre_approval_reader.md`
-defines.
-
-Backlog planning measures story size as process switch `story_size_budget`
-selects. At `off`, the default, nothing is measured or shown. At
-`propose_split`, `backlog_compile.py check --json` reports each story's
-measures, derived from the story and its Test Plan, against the limits the
-owner sets in the Process Policy. Before the first epic review the Product
-Owner proposes a split for each story over budget, and the owner accepts it or
-keeps the story with a compiler-validated `Size Exceptions` row in the epic
-review note. The budget is advisory: it never fails a check, blocks an
-approval or rewrites a criterion, and a split moves criteria and scenarios
-verbatim. Review manifests carry the measures as given facts, and
-`/delivery-plan` shows them read-only.
-`product-planning/references/switch-story_size_budget-propose_split.md`
-defines the steps.
-
-What a Test Plan scenario costs to run is process switch `test_cost_budget`.
-A scenario may state `rows`, the table rows its automation target runs, and
-`row_split`, `serial`, `sharded` or `grouped`, which `backlog_compile.py check`
-validates at every value. At `off`, the default, nothing is flagged. At
-`flag_serial_rows`, `check --json`, the review manifests and
-`delivery_compile.py init` list each automation-required scenario whose rows
-exceed the owner's `serial_rows` limit while its split is `serial` or absent,
-and QA proposes a split before the epic review, or the owner keeps the scenario
-serial with a recorded reason. The flag is advisory, as
-`product-planning/references/switch-test_cost_budget-flag_serial_rows.md`
-defines.
-
-A package Test Plan field-shape repair uses process switch
-`backlog_schema_migration`. At `reviewed_revision`, the default, it takes the
-normal backlog revision and review rounds. At `receipt_only`, the coordinator
-plans the closed schema transformation from a committed hash-verified approval
-and obtains owner approval of the exact migration receipt. Only scenario
-field lines and compiler hashes change; review bytes, revision numbers and
-approval timestamps stay exact. An already approved Delivery retains gate A
-and its execution plan only while deterministic receipt replay proves its old
-backlog and Test Plan pins against the complete current postimage. Every other
-binding stays strict. The instructions live in
-`backlog-plan/references/switch-backlog_schema_migration-receipt_only.md`.
-
-Whether a backlog revision that only rebinds its upstream sources reviews
-every epic again is process switch `source_rebind`. At `reviewed_revision`,
-the default, it does, and a Delivery whose backlog pin moved approves its
-execution again. At `receipt_when_unchanged`, a revision whose root changes
-only its bindings and Requirement plans a receipt from the approved
-predecessor; an epic is reviewed only when a note of it is impacted, by a
-content change, a citation of a changed source document or row, the relation
-closure of a changed source, a changed inbound edge from a changed upstream
-note, a changed dependency edge or membership, and every other epic keeps its
-approved review. One scoped root reader judges the source diff, the owner
-approves the exact receipt hash, and a Delivery keeps its execution approval
-while receipt replay proves its pin and none of its Items is impacted. The
-instructions live in
-`backlog-plan/references/switch-source_rebind-receipt_when_unchanged.md` and
-`execution-plan/references/switch-source_rebind-receipt_when_unchanged.md`.
-
-At what level a Test Plan scenario has to run is process switch `test_levels`.
-A scenario may state `level`, `unit`, `fixture` or `live`, which
-`backlog_compile.py check` validates at every value, and a `level_reason` for
-a `fixture` or `live` one. At `off`, the default, nothing is listed. At
-`declared`, QA proves a decision rule at `unit` level over every combination
-of its inputs, adds one `fixture` scenario per entry point and decision
-family, and keeps `live` for engine or operating-system behaviour;
-`check --json` and the review manifests list each automation-required
-scenario that states no level and each `fixture` or `live` one that states no
-reason, the `test_cost_budget` list names each flagged scenario's level, and
-the backlog reviewer asks of every `live` scenario whether its assertion is a
-decision. The list is advisory, as
-`product-planning/references/switch-test_levels-declared.md` defines.
-
-Execution planning writes and reviews the facts a plan needs as process switch
-`execution_planning` selects. `per_document`, the default, revises and reviews
-each Operation contract on its own through the Operation flow.
-`single_source_bundle` writes every execution-planning fact once, in the
-document, section or front-matter keys, and writer role that
-`execution-plan/data/fact-ownership.json` names, and every other document
-links it: the architect's planning output is a
-transient handoff to the contract writers, and the revised contracts, the Item
-records and their Stories and Test Plans take one review layer over one
-hash-checked bundle manifest, which also binds the owner rulings in the
-Delivery's `User Decisions`. Each revised contract's counterpart reads the
-whole bundle in parallel, or review panel `execution_bundle` does at
-`review_panels` `lens_panel`, and the bundle gets one verdict. Writer
-ownership, architecture inside the active Item, pinned-only publication and the
-non-runtime Environment rule do not change.
-`execution-plan/references/switch-execution_planning-single_source_bundle.md`
-defines the steps.
-
-When the owner answers a Delivery's questions is process switch `owner_gates`.
-At `per_step`, the default, each question is asked when it comes up. At
-`two_fixed_gates` the owner decides in two choice gates: gate A presents the
-scope, the execution plan, every Operation or Governance change it needs, the
-decision log and the queued questions, and its approval authorizes the plan's
-writes through Item start; gate B presents the Delivery Review, its follow-ups,
-the decision log since gate A and the merge. Between them a question is queued
-as a `pending` row of the Delivery's `User Decisions` table and only the tasks
-that depend on it wait; when every remaining task does, the queue is asked as an
-early gate. The Software Architect's escalation clause and the classes in
-`deliver/data/owner-decision-classes.json` are still asked at once, nothing is
-decided by default, and every gate groups its questions in host calls no larger
-than the per-call bound the host contract names, four questions on Claude Code
-and three on Codex, recommended option first.
-`deliver/references/switch-owner_gates-two_fixed_gates.md` defines the gates.
-
-How many planning steps and owner gates a Delivery takes is process switch
-`delivery_path`. At `standard`, the default, `/delivery-plan` plans the scope
-and `/execution-plan DLV-###` the execution, each with its own gate. At
-`light_when_eligible`, a Delivery the compiler finds eligible, one small Story
-with no architecture or Operation impact, gets a topology-only pass of the
-Software Architect inside `/delivery-plan` and one owner gate; the compiler
-approvals and the Git coordinator verbs then run in order with their checks
-unchanged, and `delivery_compile.py light-path-check` repeats the eligibility
-check before each of them. `delivery-plan/references/switch-delivery_path-light_when_eligible.md`
-and `execution-plan/references/switch-delivery_path-light_when_eligible.md`
-define the path.
-
-Requirement Flow is a linear, user-gated sequence. Each required stage commits
-its approved documents before the next stage begins. The backlog compiler is
-the only machine that derives backlog indexes. All durable changes are
-ordinary Git changes in the project workspace.
-
-Host adapters preserve semantics: Claude uses project-local agents, else the
-plugin's namespaced ones, and `AskUserQuestion`; Codex uses project-local
-agents and `request_user_input`.
-Neither host requires another plugin.
-
-`task_inputs.py` derives the delegated task's full read list, conditional
-references, source identities, role boundary and repair obligations from the
-canonical task-input policy and the owning compiler's selected project inputs.
-The entry checks its source hash again before persisting results. A task given
-explicit inputs, outside an exact epic and a code review base, binds those
-inputs and the notes they cite by content and the rest of the canonical source
-inventory by path only, without `head`: a new or removed source still makes it
-stale, while a commit or a write to an unrelated note does not. The manifest
-is disposable stdout, not project state or approval authority; required full
-reads remain mandatory. External issue reporting never creates a project
-manifest. Catalog validation requires every role, skill and flow to be mapped.
-
-An approved Delivery Item may select `parallel_snapshot_v1`: implementation
-finishes before Code Review and QA read the same frozen candidate concurrently.
-Both must settle before the owner writes. The verification compiler binds
-independent final results and raw command evidence to that candidate; diagnostic
-QA cannot approve it. Missing schedule preserves the legacy sequential behavior.
-The evidence child commit preserves the existing exact product-parent proof.
+`deliver/references/switch-step_budgets-enforced.md` defines.
 
 ## Autopilot
 
@@ -691,33 +76,17 @@ ask the user and never read the grant.
 Classes are data in `skill-content/autopilot/data/autopilot-policy.json`.
 `choice`, `approval_gate` and `merge` are allowed by default. `merge` is only
 the flow's own merge step on its recorded PR head, never a provider or Git
-merge of another head; no grant waives evidence, integration, the PR record or
-Delivery closure, and a Delivery is complete only when `closure-audit` returns
-`closed`. `release` and
-`phase_start` are excluded by default, and a grant may allow them. An entry
-that ends by naming the next entry asks no question; under a grant that allows
-`phase_start` the session records `record --class phase_start --entry <next>
---after <kind>:<id>` and then runs that entry. The policy's `phase_starts`
-lists each entry the session may start and the states the closed phase's
-owning compiler must read, so `record` refuses a start while that phase is
-still open. A grant never starts a new Requirement.
+merge of another head; no grant waives evidence or the PR record. `release`
+and `phase_start` are excluded by default. No packaged compiler reads a closed
+phase, so `record` refuses `phase_start` and the session queues it.
 `credentials`, `security_settings`, `spending`, `destructive` and
 `scope_or_rule`, which holds every decision a flow asks at once, are never
 delegated, and `on` refuses a grant that allows one. A grant ends at a time,
 at a goal or at whichever comes first. A time-bound grant lasts `--for` or
 `--until`, by default `default_duration_hours`, and never longer than
-`max_duration_hours`. A goal-bound grant ends when the goal's owning compiler
-reads it as terminal, or at its cap: `default_goal_cap_hours` unless the grant
-gives a time. Goal kind `delivery` ends when `delivery_compile.py` reads the
-Delivery as `merged` or `cancelled`, `requirement` when `requirement_compile.py`
-reads the Requirement as incorporated into the approved backlog,
-`resolved_no_change`, `superseded` or `withdrawn`, and `text` only through
-`complete`, `off` or its cap. The session's own judgement never ends a
-readable goal; `complete` ends any grant and records whether the compiler
-agreed. A goal whose state its compiler cannot read, such as a Delivery whose
-merge state Git cannot decide or whose Review record cannot be read, is never
-terminal: `on` refuses it, and `check` and `status` show it as unknown with
-the reason instead of the tracked status.
+`max_duration_hours`. A goal-bound grant has goal kind `text`, which ends only
+through `complete`, `off` or its cap: `default_goal_cap_hours` unless the
+grant gives a time.
 
 Only the user arms a grant. Each host's user-prompt hook records the `on`
 command the user typed as a short-lived arming record; `on` refuses without
@@ -746,27 +115,11 @@ while a command may still end the grant or delete the files; a process outside
 the host's tool calls, or a command that overlaps a run of `autopilot.py`,
 escapes or undoes that check.
 
-Autopilot is an entry, not a process switch. A switch is a project rule that a
-Delivery pins at scope approval, and changing it inside a pinned Delivery is
-drift. A grant is personal and temporary: it turns on at night and off in the
-morning in the middle of any flow, without changing a pinned policy or an
-approved document. It lives only in ignored runtime state under
+Autopilot is an entry, not a process switch. A switch is a project rule; a
+grant is personal and temporary: it turns on at night and off in the morning
+in the middle of any flow, without changing the policy or an approved
+document. It lives only in ignored runtime state under
 `.agentrof/agent-marketplace/.runtime/autopilot/`, and only its decisions reach
 tracked documents. With no grant every compiler output and every task binding
 stays the same: the entry delegates no task, so the task-input policy declares
 it under `session_entries`, outside the task routes.
-
-Under `owner_gates` at `two_fixed_gates`, the grant is the owner's advance
-answer for its allowed classes, as the switch reference states. In the
-Delivery's `User Decisions` table an autopilot decision is an `answered` row
-whose answer carries the choice and the grant id; `blocks` names the Items that
-waited by Story id, `wait_minutes` records their wait, and an approval between
-the gates names its document as `<document> revision N` in the answer. Every
-question autopilot queues is also a `pending` row, of class `queued` or its
-at-once class, with the Items it holds in `blocks`, so gate A, gate B and the
-Item starts refuse while it is open. `delivery_compile.py check` accepts both
-rows.
-
-Process switch `regression_plan_revision` keeps `integrated` as the default. At
-`current_approved`, pre-handoff regression selects earlier stories from the
-complete committed backlog approval and records the closed-to-current delta.

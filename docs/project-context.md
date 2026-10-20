@@ -36,14 +36,6 @@ executes an environment command or creates approval authority.
 6. An explicit `--context-plan <project-relative JSON>` can bind a custom plan
    instead of the automatic one. This does not change skill selection or scope.
 
-Frozen Delivery verification manifests also include `project_reading`. Their
-`delivery_verification.py inspect-context --plan <manifest>` command validates
-the candidate and plan, then batch-reads exact Git blobs. `expand-context`
-continues the plan under the same candidate binding and accepts reasoned
-additional references. Ordinary resolver
-`read` refuses frozen manifests. `inspect` and `diff` remain available for
-manual recovery, and `full_read` and verification gates remain mandatory.
-
 ## Context feedback
 
 Every role returns observed context failures or recurring retrieval friction in
@@ -89,13 +81,6 @@ these adapters. The existing optional `context_pack: role_digest` feature is
 independent of this project-source reading plan.
 
 ## Approval baselines and quality
-
-`task-input-policy.json` declares approval anchors for each document workflow.
-Scoped packages use their own anchors; a task spanning several packages uses
-the oldest required approval event. A rendering commit that retains a receipt
-does not advance its approval baseline. Missing history falls back to complete
-inputs. Upstream edits, removed sources and committed changes since that
-baseline participate in the impact closure and root review delta.
 
 A reading plan does not narrow the semantic scope of an independent review.
 Mandatory project inputs absent from the plan retain their owning flow's read

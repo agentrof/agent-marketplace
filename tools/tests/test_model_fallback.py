@@ -140,8 +140,8 @@ class ClaudeFallbackHookTests(unittest.TestCase):
         cls.package = cls.root / "dist/claude" / fixtures.PLUGIN
         auto = json.loads(build_distributions.execution_profile_path(cls.root, "claude")
                           .read_text(encoding="utf-8"))["profiles"]["auto"]
-        # A critical_decision role runs one model and a mechanical variant another.
-        cls.opus, cls.sonnet = auto["critical_decision"]["model"], auto["mechanical"]["model"]
+        # A critical_decision role runs one model and a routine_authoring role another.
+        cls.opus, cls.sonnet = auto["critical_decision"]["model"], auto["routine_authoring"]["model"]
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -286,11 +286,11 @@ class ClaudeFallbackHookTests(unittest.TestCase):
                 self.assertNotIn("\n", output["systemMessage"])
 
     def test_the_pin_is_each_role_s_own(self):
-        lens = f"{PREFIX}product-owner-mechanical"
-        output = self.response(failure(lens, NOT_FOUND.format(model=self.sonnet)))
+        writer = f"{PREFIX}frontend-developer"
+        output = self.response(failure(writer, NOT_FOUND.format(model=self.sonnet)))
         self.assertIn(self.sonnet, output["systemMessage"])
         # A not-found error that names another model is not the pin's.
-        self.assertIsNone(self.response(failure(lens, NOT_FOUND.format(model=self.opus))))
+        self.assertIsNone(self.response(failure(writer, NOT_FOUND.format(model=self.opus))))
 
     def test_other_failures_and_other_calls_stay_silent(self):
         role = f"{PREFIX}solution-reviewer"
@@ -438,14 +438,12 @@ class ChangedNothingTests(unittest.TestCase):
             notes.mkdir()
             (notes / "first.md").write_text("# First\n", encoding="utf-8")
             scope = str(path.parent.relative_to(root))
-            derive = ["--entry", "business-analysis", "--role", "business-analyst",
+            derive = ["--entry", "deliver", "--role", "business-analyst",
                       "--mode", "revise", "--project-root", str(root), "--input", space]
             derived = self.task(*derive)
             self.assertEqual(derived.returncode, 0, derived.stdout + derived.stderr)
             manifest = json.loads(derived.stdout)
             self.assertEqual(manifest["write_boundary"], "named_owner_only")
-            self.assertEqual([row["path"] for row in manifest["write_scope"]["allowed_write_area"]],
-                             [space])
             check = [*derive, "--expected-hash", manifest["source_hash"]]
             status = self.git(root, "status", "--porcelain", "--", scope)
             self.assertEqual(sorted(status.splitlines()), [
@@ -488,8 +486,8 @@ class RenderedRoleFallbackTests(unittest.TestCase):
         cls.package = cls.root / "dist/claude" / fixtures.PLUGIN
         auto = json.loads(build_distributions.execution_profile_path(cls.root, "claude")
                           .read_text(encoding="utf-8"))["profiles"]["auto"]
-        # A critical_decision role runs one model and a mechanical variant another.
-        cls.opus, cls.sonnet = auto["critical_decision"]["model"], auto["mechanical"]["model"]
+        # A critical_decision role runs one model and a routine_authoring role another.
+        cls.opus, cls.sonnet = auto["critical_decision"]["model"], auto["routine_authoring"]["model"]
         cls.project = base / "project"
         (cls.project / "workspace").mkdir(parents=True)
         (cls.project / "workspace/config.json").write_text(json.dumps({
@@ -563,20 +561,20 @@ class RenderedRoleFallbackTests(unittest.TestCase):
         self.rewrite("software-architect", None)
         self.assertIn(self.opus, self.response(
             failure(agent, NOT_FOUND.format(model=self.opus)))["systemMessage"])
-        lens = f"{RENDERED}product-owner-mechanical"
-        self.rewrite("product-owner-mechanical", None)
+        writer = f"{RENDERED}frontend-developer"
+        self.rewrite("frontend-developer", None)
         self.assertIn(self.sonnet, self.response(
-            failure(lens, NOT_FOUND.format(model=self.sonnet)))["systemMessage"])
+            failure(writer, NOT_FOUND.format(model=self.sonnet)))["systemMessage"])
 
     def test_without_a_pin_it_stays_silent(self):
         error = NOT_FOUND.format(model=self.opus)
         self.rewrite("helper", "---\nname: software-engineering-team-helper\n"
                                f"description: The user's own.\nmodel: {self.opus}\n---\n\nMine.\n")
-        self.rewrite("product-owner", (self.agents / f"{RENDERED}product-owner.md").read_text(
+        self.rewrite("frontend-developer", (self.agents / f"{RENDERED}frontend-developer.md").read_text(
             encoding="utf-8").replace(OWNER + "\n", "", 1))
         self.rewrite("solution-reviewer", (self.agents / f"{RENDERED}solution-reviewer.md").read_text(
             encoding="utf-8").replace(f"model: {self.opus}", "model: inherit", 1))
-        for role in ("helper", "product-owner", "solution-reviewer", "ghost", "../agents/code-reviewer"):
+        for role in ("helper", "frontend-developer", "solution-reviewer", "ghost", "../agents/code-reviewer"):
             with self.subTest(role=role):
                 self.assertIsNone(self.response(failure(f"{RENDERED}{role}", error)))
                 self.assertIsNone(self.response(completed(f"{RENDERED}{role}", self.sonnet)))
@@ -607,8 +605,8 @@ class CodexModelCheckTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary.name) / "marketplace"
         fixtures.make_valid_root(cls.root, build=False)
-        # Two pinned models whatever the package defaults: the mechanical class
-        # runs another model of the catalog.
+        # Two pinned models whatever the package defaults: the routine review
+        # class runs another model of the catalog.
         table_path = build_distributions.execution_profile_path(cls.root, "codex")
         table = json.loads(table_path.read_text(encoding="utf-8"))
         catalog = json.loads(build_distributions.model_catalog_path(cls.root, "codex").read_text(
@@ -616,7 +614,7 @@ class CodexModelCheckTests(unittest.TestCase):
         cls.pinned = table["profiles"]["auto"]["critical_decision"]["model"]
         cls.second = sorted(model for model in catalog if model != cls.pinned)[0]
         efforts = catalog[cls.second]["efforts"]
-        table["profiles"]["auto"]["mechanical"] = {"model": cls.second,
+        table["profiles"]["auto"]["routine_review"] = {"model": cls.second,
                                             "effort": "high" if "high" in efforts else efforts[0]}
         table_path.write_text(json.dumps(table, indent=2) + "\n", encoding="utf-8")
         build_distributions.replace_generated(cls.root, cls.root / "dist")
@@ -950,7 +948,7 @@ class CodexModelCheckTests(unittest.TestCase):
         # The fallback belongs to the model exception of the default-path rule.
         architecture = " ".join((fixtures.REAL_REPOSITORY / "docs/architecture.md").read_text(
             encoding="utf-8").split())
-        invariant = architecture.split(" 30. ", 1)[1].split(" 31. ", 1)[0]
+        invariant = architecture.split(" 18. ", 1)[1]
         self.assertIn("so a catalog change reaches every role under any policy, and a role whose"
                       " pinned model cannot run falls back to the session's model with a warning",
                       invariant)
@@ -972,7 +970,13 @@ class ClaudeModelCheckTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.temporary = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary.name) / "marketplace"
-        fixtures.make_valid_root(cls.root)
+        fixtures.make_valid_root(cls.root, build=False)
+        # No package role runs the mechanical class, so the review class runs its model.
+        table_path = build_distributions.execution_profile_path(cls.root, "claude")
+        table = json.loads(table_path.read_text(encoding="utf-8"))
+        table["profiles"]["auto"]["routine_review"] = table["profiles"]["auto"]["mechanical"]
+        table_path.write_text(json.dumps(table, indent=2) + "\n", encoding="utf-8")
+        build_distributions.replace_generated(cls.root, cls.root / "dist")
         cls.package = cls.root / "dist/claude" / fixtures.PLUGIN
         cls.generator = cls.package / "scripts/generate_claude_project.py"
         class_map = json.loads((cls.package / "templates/model-classes.json").read_text(
@@ -1049,11 +1053,10 @@ class ClaudeModelCheckTests(unittest.TestCase):
                           "view": "account"})
         self.assertEqual(check["verdicts"], {self.opus: "unavailable", self.sonnet: "available",
                                              self.haiku: "available"})
-        on_opus = self.roles_on("critical_decision")
-        self.assertEqual(self.roles_running(self.opus), on_opus)
+        on_opus = self.roles_running(self.opus)
         self.assertEqual(result["model_fallbacks"], {self.opus: on_opus})
         rendered = self.rendered()
-        for role in on_opus:
+        for role in self.roles_on("critical_decision"):
             with self.subTest(role=role):
                 slot = "critical_decision"
                 lines = rendered[role]
@@ -1070,8 +1073,9 @@ class ClaudeModelCheckTests(unittest.TestCase):
                 self.assertIn(f"model: {self.sonnet}", rendered[role])
                 self.assertNotIn(f"# Model unavailable: {self.opus}", rendered[role])
         self.assertIn(f"claude-project: warning: {self.opus} is unavailable for the"
-                      " critical_decision class: this host's own model list (account view,", warning)
-        self.assertIn(f"Its roles {', '.join(on_opus)} run on this session's model at their"
+                      " critical_decision and security_review classes: this host's own model list"
+                      " (account view,", warning)
+        self.assertIn(f"Their roles {', '.join(on_opus)} run on this session's model at their"
                       " own effort; every setup or refresh judges it again.", warning)
         # The probe sent its one `initialize` request, and no user message.
         probes = [call for call in self.claude.calls() if call["argv"] != ["--version"]]
@@ -1149,12 +1153,13 @@ class ClaudeModelCheckTests(unittest.TestCase):
         self.assertNotIn(fable, self.map["models"])
         self.config({"class_models": {"claude": {
             "critical_decision": {"model": fable, "effort": "max"},
-            "mechanical": {"model": ghost}}}})
+            "routine_review": {"model": ghost}}}})
         self.reply(self.opus, self.sonnet, fable, efforts=["low", "medium", "high"])
         result, warning = self.generated("apply", "--scope", "local")
         self.assertEqual(result["model_check"]["verdicts"],
-                         {fable: "available", ghost: "unavailable", self.sonnet: "available"})
-        self.assertEqual(result["model_fallbacks"], {ghost: self.roles_on("mechanical")})
+                         {fable: "available", ghost: "unavailable", self.sonnet: "available",
+                          self.opus: "available"})
+        self.assertEqual(result["model_fallbacks"], {ghost: self.roles_on("routine_review")})
         self.assertIn(f"claude-project: warning: the critical_decision class runs {fable} at"
                       " effort max, which"
                       " this host's own model list does not name for it (low, medium, high);"

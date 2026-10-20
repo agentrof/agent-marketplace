@@ -55,13 +55,9 @@ DON'T inflate to look thorough or deflate to pass the gate.
 
 ## Single Evolving Record
 
-For a parallel Item, consume the frozen candidate manifest from the packaged
-`scripts/delivery_verification.py`. Return the independent review result with
-its candidate and session identities. Initial review covers the full Item
-change. Repair review covers unresolved findings, the new delta and affected
-consumers; all three passes remain mandatory. Do not write product, tests or
-canonical reports while either reader is active. The owner persists the
-settled results and the compiler checks their eligibility before approval.
+Initial review covers the full change. Repair review covers unresolved
+findings, the new delta and affected consumers; all three passes remain
+mandatory.
 
 One finding set per review loop, evolving across re-reviews. The
 canonical copy lives in the orchestrator's tracked project documents; the spawn
@@ -74,10 +70,7 @@ updated set for the orchestrator to record.
   trail across cycles, not a fresh dump per pass.
 - DON'T renumber, delete, or re-open findings without new evidence.
 - On re-review, re-check what changed plus anything a fix could have
-  touched; do not re-litigate untouched, already-passed code. Where the
-  verification manifest lists `carried_findings`, a finding whose `action`
-  is `carry` named no file or symbol that changed since the previous
-  candidate: keep its status from the record and do not re-examine it.
+  touched; do not re-litigate untouched, already-passed code.
 
 ## The Three Passes
 

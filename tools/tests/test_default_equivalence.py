@@ -230,43 +230,43 @@ SHIPPED_GOLDEN = {
 # because a tool or data file it can run shapes its result.
 SHIPPED_ADDITIONS = {
     "scripts/task_lane.py": (
-        80, "#602: the fast lane; the deliver entry runs a task from start to merge with time, cost,"
+        82, "#602: the fast lane; the deliver entry runs a task from start to merge with time, cost,"
             " quality, role routing and rework retro; every task binds the package script."),
     "scripts/model_class.py": (
-        80, "#602: model classes per work kind with an escalated slot; every task binds the package script."),
+        82, "#602: model classes per work kind with an escalated slot; every task binds the package script."),
     "scripts/production_reachability.py": (
-        80, "#594: frozen production-caller and record-writer clues for the review manifest;"
+        82, "#594: frozen production-caller and record-writer clues for the review manifest;"
             " every task binds the script with the package implementation."),
     "scripts/verification_reference.py": (
-        80, "#558: the generated verification verb and refusal reference; every task binds"
+        82, "#558: the generated verification verb and refusal reference; every task binds"
             " the package script, and planning and review instructions use it on demand."),
     "scripts/await_outputs.py": (
-        80, "#579: bounded waiting for background outputs; each task binds the shared package script."),
+        82, "#579: bounded waiting for background outputs; each task binds the shared package script."),
     "scripts/backlog_migration.py": (
-        80, "#450: the closed schema receipt replay used by backlog and Delivery compilers;"
+        82, "#450: the closed schema receipt replay used by backlog and Delivery compilers;"
             " every task hashes package scripts, while no default-path step applies a migration."),
     "scripts/backlog_rebind.py": (
-        80, "#463: the source-rebind receipt planner and replay, which the backlog compiler and"
+        82, "#463: the source-rebind receipt planner and replay, which the backlog compiler and"
             " Delivery's pin chain import; every task hashes package scripts, while no"
             " default-path step plans or replays a source rebind."),
     "scripts/delivery_closure.py": (
-        80, "#461: the read-only Delivery closure audit, pull request closure check and protection"
+        82, "#461: the read-only Delivery closure audit, pull request closure check and protection"
             " report, a package script every task binds with the other package scripts; no"
             " default-path compiler or coordinator output changes."),
     "scripts/autopilot_provenance.py": (
-        80, "#495: the autopilot writer marks the vault hook reads, a package script every task"
+        82, "#495: the autopilot writer marks the vault hook reads, a package script every task"
             " binds with the other package scripts; no default-path step runs it."),
     "scripts/context_history.py": (
-        80, "#441: exact bound document history is resolved by package code"
+        82, "#441: exact bound document history is resolved by package code"
     ),
     "scripts/context_catalog.py": (
-        80, "#441: source-addressed project records are bound as package code"
+        82, "#441: source-addressed project records are bound as package code"
     ),
     "scripts/project_context.py": (
-        80, "#441: explicit project reading plans are bound as package code"
+        82, "#441: explicit project reading plans are bound as package code"
     ),
     "scripts/process_policy.py": (
-        80, "#332: the Process Policy lifecycle compiler. task_inputs.py and the backlog"
+        82, "#332: the Process Policy lifecycle compiler. task_inputs.py and the backlog"
             " and Delivery compilers resolve every switch through it, the default path"
             " included, so every task binds it with the other package scripts."),
     "skill-content/configure/data/process-switches.json": (
@@ -280,26 +280,26 @@ SHIPPED_ADDITIONS = {
         6, "#349: the /configure models procedure, the configure entry's new models"
            " target, which every configure task binds with the rest of its skill."),
     "scripts/role_settings.py": (
-        80, "#349: the one resolution of each role's tier, model and effort, which"
+        82, "#349: the one resolution of each role's tier, model and effort, which"
             " project_config.py and the host project generators import, so every task"
             " binds it with the other package scripts."),
     "scripts/lane_table.py": (
-        80, "#332: the lane table of switches lane_table and lane_isolation, a package script"
+        82, "#332: the lane table of switches lane_table and lane_isolation, a package script"
             " every task binds with the other package scripts; no default-path step runs it."),
     "scripts/impact_closure.py": (
-        80, "#441: the impact closure over the vault's relation tiers, a package script"
+        82, "#441: the impact closure over the vault's relation tiers, a package script"
             " every task binds with the other package scripts; no default-path step runs it."),
     "scripts/vault_query.py": (
-        80, "#441: the cached vault query CLI, a package script every task binds with the"
+        82, "#441: the cached vault query CLI, a package script every task binds with the"
             " other package scripts; no default-path step runs it."),
     "scripts/vault_index.py": (
-        80, "#465: the checkout-local SQLite index used by the vault query and context"
+        82, "#465: the checkout-local SQLite index used by the vault query and context"
             " resolver, bound by every task with the other package scripts."),
     "scripts/context_pack.py": (
-        80, "#441: the role digest of switch context_pack, a package script every task binds"
+        82, "#441: the role digest of switch context_pack, a package script every task binds"
             " with the other package scripts; no default-path step runs it."),
     "scripts/step_timing.py": (
-        80, "#441: the per-step timing recorder of switch step_timing, a package script every"
+        82, "#441: the per-step timing recorder of switch step_timing, a package script every"
             " task binds with the other package scripts; no default-path step runs it."),
     "skill-content/setup/references/windows-long-paths.md": (
         2, "#358: the native Windows core.longpaths choice procedure, a step of the setup"
@@ -371,11 +371,12 @@ EXPECTED_DIFFERENCES = {
                ("writer", "sha256:98d2ef075ab3e4c193acf816c87d5fe6258a80428c3f413ccf5087ebad3829f6"))},
     },
     "shipped": {
-        ("tasks",): ("sha256:f8b984f913aaa3eab8a352d1994487f002eb4a8148af7a3b78a999b0eb6dd5a3",
+        ("tasks",): ("sha256:f43c596c1a8336e31a255425352d2d10f28615dbd8647e65d4a4d5b1d06346ff",
                       "#485: context policy identity includes the configured reader manifest byte budget;"
                       " required task paths and compiler authority remain unchanged. #602: the fast lane, the"
                       " deliver entry reads flows/fast-lane.md with its targets and role routing, and the"
-                      " Item-based flow moves unchanged to the deliver-governed entry."),
+                      " Item-based flow moves unchanged to the deliver-governed entry. The deliver"
+                      " entry's security pass spawns the read-only security-reviewer."),
         ("additions",): ({path: count for path, (count, _reason) in SHIPPED_ADDITIONS.items()},
                          "The files SHIPPED_ADDITIONS lists, each with its issue."),
     },

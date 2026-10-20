@@ -8,9 +8,6 @@ exposure: entry
 
 Where the task time went, who owns each loss, and what to cut next.
 
-Load the `obsidian-vault` skill before writing a retrospective note under the
-docs tree; its vault law is authoritative.
-
 Before delegating a role, follow the packaged `templates/task-input-contract.md`
 and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
 

@@ -46,8 +46,7 @@ a story (source_story, covers) or stand alone.
   --knowledge`): no stage entry, review panel, revision or rebind. Approval
   stamps, package hashes and cross-package bindings (Experience
   `application@rN`, landscape and backlog input refs) are not re-verified at
-  `fast_lane`; the vault gate checks schema, links and structure of the
-  touched trees, in parallel.
+  `fast_lane`.
 - The stage entries keep their full method for new analysis or design a
   request needs. Their reviews run one reader in
   a single pass and only a critical finding blocks; every other finding
@@ -59,7 +58,7 @@ a story (source_story, covers) or stand alone.
   `/requirement`, and stop. A Delivery opened before the switch finishes
   under the values it pinned; no Delivery flow owns this switch, so changing
   it never forces a Delivery's plan revision.
-- Vault, setup, configure, retrospective and autopilot entries are unchanged.
+- Setup, configure, retrospective and autopilot entries are unchanged.
 
 ## Contracts, Definition of Done and Governance
 
@@ -68,7 +67,7 @@ a story (source_story, covers) or stand alone.
   target branch is in force. No revision number, `source_hash` or
   `approved_at_utc` stamp, `constrained_by` citation or Verification to
   Environment pairing is required, and approval never waits for a Delivery's
-  owner gates. The vault hook lets a task edit them directly.
+  owner gates.
 - The Definition of Done needs no fixed Commands, Evidence Rules or Quality
   Gates headings.
 - Governance is optional: `governance.md` may be deleted, and without it
@@ -79,7 +78,7 @@ a story (source_story, covers) or stand alone.
 ## Task path
 
 - A task lives under `workspace/docs/backlog/tasks/`, type `task`,
-  checked by `scripts/task_lane.py lint` and the vault law only. The
+  checked by `scripts/task_lane.py lint` only. The
   backlog compiler, epic and root reviews and backlog revisions never read it.
 - Delivery is one branch and one pull request to the target branch. Nothing
   reserves a Slot, starts an Item, publishes or approves an execution plan,

@@ -42,7 +42,7 @@ system up from scratch, healthy, seeded and clean.
 - The approved model is law: a service or store enters the definition
   only when the architecture delta declares it; drive-by infrastructure
   is an escalation, never a favor.
-- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Does: the environment definition, image build recipes, service wiring

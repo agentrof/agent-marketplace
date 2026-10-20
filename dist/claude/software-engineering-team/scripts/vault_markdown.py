@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
-# Vault wikilink grammar, shared with vault_check (single parsing home).
+# Wikilink grammar (single parsing home).
 WIKILINK_RE = re.compile(r"(?P<embed>!?)\[\[(?P<inner>[^\[\]\n]+?)\]\]")
 GENERATED_BODY_BLOCKS = (
     ("## Related knowledge <!-- sec: relations:generated:start -->",
@@ -32,7 +32,7 @@ INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
 
 def without_code(text: str) -> str:
-    """Return the text vault_check scans for links: a line starting with ```
+    """Return the text scanned for links: a line starting with ```
     after indentation toggles a fence, fence and fenced lines are dropped, and
     inline code spans are removed line by line."""
     kept: list[str] = []

@@ -4,10 +4,8 @@
 
 - `{{workspace}}/config.json`: project declaration, changed only through the
   configure entry.
-- `{{workspace}}/docs/`: the governed project knowledge vault. Open this
-  directory as the vault root. Its maps, generated views, document-type
-  graph policy, citations, and navigation follow the
-  `obsidian-vault` skill and the owning validation commands.
+- `{{workspace}}/docs/`: the project documents. A role reads the sources its
+  task file lists and greps this tree for anything missing.
 - `{{workspace}}/docs/experience-design/artifacts/`: the author-owned
   Experience prototype workspace. Its structure, files, technologies, assets
   and behavior are free; the compiler snapshots bytes and paths only.
@@ -21,7 +19,7 @@
   design exploration previews.
 - `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime
   scratch and generated caches. It is never a shared or global database.
-- `{{workspace}}/docs/backlog/`: tracked Obsidian backlog source. The nested
+- `{{workspace}}/docs/backlog/`: tracked backlog source. The nested
   epic, story, review and test-plan files are the durable Requirement state.
 
 Requirement Flow evaluates the request impact matrix, runs only the required

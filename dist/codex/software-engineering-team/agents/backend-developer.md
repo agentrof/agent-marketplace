@@ -33,7 +33,7 @@ contract specify, in the smallest correct change, proven by tests.
   cleanup item.
 - Writes are idempotent and retry-safe; shutdown is graceful.
 - Every behavior ships with a check that proves it works.
-- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Does: server-side implementation, data access, migrations, seed data,

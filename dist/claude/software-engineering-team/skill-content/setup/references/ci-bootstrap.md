@@ -14,9 +14,8 @@ A workflow counts when it is a `.yml` or `.yaml` file directly in
 `pull_request_target`, and that event lists no `types` or includes
 `synchronize`. After the PR opens, `open-pr` pushes the Integration head that
 records its URL, and `merge-pr` reads that head's checks. Only `synchronize`
-runs for that push; `opened` and `reopened` alone check earlier heads. The
-test job is optional, so a workflow that runs only the portable vault gate
-counts. Counting does not guarantee a mergeable check: `merge-pr` still
+runs for that push; `opened` and `reopened` alone check earlier heads.
+Counting does not guarantee a mergeable check: `merge-pr` still
 refuses a job skipped by its `if:` condition and a green commit status, which
 reports no conclusion
 ([agentrof/agent-marketplace#229](https://github.com/agentrof/agent-marketplace/issues/229)).
@@ -41,8 +40,8 @@ and names that source in `pull_request_check_provider`. The operation compiler
 refuses any other source, an external source without a provider, and a
 provider for `repository_workflow`. Approval then requires no workflow. It
 reports the declared provider because `merge-pr` still merges the Delivery PR
-only on green checks, so that provider must report them on the Delivery PR and,
-like any CI, run the portable vault gate below. The source is contract content,
+only on green checks, so that provider must report them on the Delivery PR.
+The source is contract content,
 so changing it takes a contract revision and approval, whose new hash blocks
 Item start, resume, reopen and takeover until execution is approved again.
 
@@ -54,13 +53,7 @@ evaluates no `branches` or `paths` filter and cannot see a workflow disabled on
 GitHub or Actions turned off, so any of these can still leave the Delivery PR
 without a check.
 
-The template always runs the tracked portable single-vault gate before the
-project-specific jobs. Do not replace it with an installed plugin path; every
-supported host and CI must execute the same `.pyz` bytes.
-
-The `vault_gate` and `tests` jobs require complete Git history. The gate can
-resolve previously accepted sources from earlier committed blobs, and Item
-verification can read pinned approved receipts and Test Plans after later
+The `tests` job requires complete Git history. Item verification can read pinned approved receipts and Test Plans after later
 revisions replace them. Use `fetch-depth: 0` with `actions/checkout`; its
 [default checkout fetches one commit](https://github.com/actions/checkout/blob/v4/README.md).
 Custom workflows and external CI that run these checks need equivalent

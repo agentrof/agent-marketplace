@@ -9,9 +9,6 @@ exposure: internal
 **Given:** an architecture delta declaring applications, services and stores, and an ownership map granting the environment prefix.
 **Produces:** a compose-defined environment that rises from scratch with one command, healthchecked, seeded and clean, plus the entry point the whole team consumes.
 
-Load the `obsidian-vault` skill before reading or writing the approved
-Environment Contract under `workspace/docs/operation/`.
-
 ## When to Use
 
 - Defining or extending the project's containerized environment

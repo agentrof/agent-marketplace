@@ -44,8 +44,7 @@ Use the owning compiler's exact scope and source bindings.
 4. For a language change, run `project_config.py set --dry-run --json` and
    present only the config delta. Existing authored titles are not translated
    or rewritten by a config change.
-5. On approval, run the owning writer, `project_config.py check` and the
-   scoped vault gate. A new
+5. On approval, run the owning writer, `project_config.py check`. A new
    Governance revision must be applied through `delivery_git.py
    apply-governance`; do not start, claim or resume an Item while that Fence
    handoff is held. On rejection, write nothing.

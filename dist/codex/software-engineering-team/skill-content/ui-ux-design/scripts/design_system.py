@@ -657,7 +657,7 @@ def format_markdown(design_system: dict) -> str:
 
 
 def vault_frontmatter(doc_type: str, title: str) -> list[str]:
-    """Vault-law frontmatter (obsidian-vault skill): typed note, block-list
+    """Typed-note frontmatter with a block-list
     tag mirror. The writer emits compliance; personas never patch it in."""
     lifecycle = (["status: draft", "revision: 1", "contract_version: 3"]
                  if doc_type == "design_master" else [])

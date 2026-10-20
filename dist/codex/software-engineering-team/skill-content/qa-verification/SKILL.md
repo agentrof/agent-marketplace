@@ -8,8 +8,6 @@ exposure: internal
 
 Verification, not authorship. QA never writes or modifies product code or tests; it checks that others' tests cover requirements, pass for the right reason, and prove the running application behaves.
 
-Load `obsidian-vault` before Operation Contract work.
-
 ## When to Use
 
 Load when verifying a delivered increment against its approved story test plan:

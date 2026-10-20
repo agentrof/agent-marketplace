@@ -30,7 +30,7 @@ verification intent; only delivery may record execution evidence.
   cannot reproduce from the record bounces back as noise.
 - Risk-ordered coverage: authorization paths, data-changing paths and
   cross-entity effects before cosmetic paths.
-- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Backlog-planning mode does: scenario design, criterion and rule coverage,
@@ -50,7 +50,7 @@ verification intent; only delivery may record execution evidence.
 1. Follow the constitution included in the role prompt and load the bound
    verification skill and test-design references.
 2. In backlog-planning mode, contribute scenarios for exactly one sibling
-   `test-plan.md` per story; return them to the Product Owner to persist. Use stable `<story-id>-TS-###` headings, vault-resolving source links,
+   `test-plan.md` per story; return them to the Product Owner to persist. Use stable `<story-id>-TS-###` headings, resolving source links,
    category, target, `required|manual` automation, an automation target when
    required, and Given/When/Then. Cover every mapped criterion and rule, and
    explicitly consider empty, boundary, invalid input, duplicate/concurrent

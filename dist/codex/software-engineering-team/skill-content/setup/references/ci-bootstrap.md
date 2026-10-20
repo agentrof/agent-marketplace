@@ -5,7 +5,9 @@ only on green provider checks, so a project without a pull request workflow
 adds one before its first merge.
 
 - Copy the packaged `templates/ci-tests.yml` to `.github/workflows/tests.yml`.
-- Replace `{{test_command}}` with the project's test command.
+- Replace `{{test_command}}` with the project's test command and
+  `{{tests_root}}` with `tests_root` from `workspace/config.json` (default
+  `workspace/tests`), the folder that holds the project's tests.
 - Delete the `{{dependency_audit_job}}` and `{{environment_smoke_job}}`
   lines, or replace each with a job the project runs.
 - Commit it with the change that needs it; no double-braced token may reach

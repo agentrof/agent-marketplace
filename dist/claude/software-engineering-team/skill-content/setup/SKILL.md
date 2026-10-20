@@ -8,7 +8,7 @@ exposure: entry
 
 Setup never writes executable test or environment placeholders into a consuming
 project. The project copies the CI template, replacing `{{test_command}}` and
-dropping or replacing `{{dependency_audit_job}}` and `{{environment_smoke_job}}`,
+`{{tests_root}}` and dropping or replacing `{{dependency_audit_job}}` and `{{environment_smoke_job}}`,
 as [ci-bootstrap](references/ci-bootstrap.md) describes, while setup alone
 replaces `{{project_local_ignores}}` in its managed gitignore block. No
 placeholder is allowed to reach a consuming repository.
@@ -38,8 +38,10 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    ```
 
    Apply creates the project-local
-   `.agentrof/agent-marketplace/.runtime/` scratch directory, reconciles the
-   managed workspace surfaces and runs its closing gate. A disposable OS guard
+   `.agentrof/agent-marketplace/.runtime/` scratch directory, creates the
+   folders `workspace_layout` in `workspace/config.json` allows, seeds
+   `workspace/experience-design/DESIGN.md` and its `README.md` when absent,
+   reconciles the managed workspace surfaces and runs its closing gate. A disposable OS guard
    serializes mutating setup apply processes. Apply rebuilds its authoritative
    plan under that guard, and each target is rechecked immediately before its
    atomic replacement. If the gate fails, setup restores only exact unchanged

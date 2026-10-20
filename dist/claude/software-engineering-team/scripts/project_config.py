@@ -21,10 +21,28 @@ CONFIG_FIELDS = {
     "team_id",
     "output_language",
     "terminology_language",
+    "tests_root",
+    "workspace_layout",
     role_settings.CLASS_MODELS,
     role_settings.ROLE_CLASSES,
 }
-ORDINARY_FIELDS = {"output_language", "terminology_language"}
+ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout"}
+# Setup writes these into a config that lacks them; the project owns them after.
+# `workspace` and `docs` are the only top-level folders the workspace guard lets
+# a write create under workspace/ and workspace/docs/. The project root is not
+# guarded, so the files tools leave there (skills-lock.json, host folders) need
+# no list.
+DEFAULTS = {
+    "tests_root": "workspace/tests",
+    "workspace_layout": {
+        "workspace": ["apps", "docs", "environment", "experience-design", "memory",
+                      "project", "tests"],
+        "docs": ["backlog", "business-analysis", "operation", "solution-design",
+                 "system-architecture"],
+    },
+}
+# Folders setup creates below the allowed ones.
+NESTED_DIRS = ("docs/backlog/tasks", "docs/backlog/retrospectives")
 # The builder writes the class map of every host into each installed package;
 # a canonical source tree ships none, so it accepts no model or class setting.
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +69,42 @@ def atomic(path: Path, value: dict) -> None:
     )
 
 
+def setting(config: dict, field: str):
+    """A layout field's value in force: the config's own, else the package default."""
+    return config.get(field, DEFAULTS[field])
+
+
+def required_dirs(config: dict) -> tuple[str, ...]:
+    """Every workspace-relative folder setup creates and its check requires."""
+    layout = setting(config, "workspace_layout")
+    return tuple(dict.fromkeys([
+        *layout["workspace"], *(f"docs/{name}" for name in layout["docs"]), *NESTED_DIRS,
+    ]))
+
+
+def layout_errors(config: dict) -> list[str]:
+    errors: list[str] = []
+    tests_root = setting(config, "tests_root")
+    if not isinstance(tests_root, str) or not tests_root.strip() \
+            or tests_root.startswith("/") or ".." in tests_root.split("/"):
+        errors.append("tests_root must be a relative path inside the project")
+    layout = setting(config, "workspace_layout")
+    if not isinstance(layout, dict) or set(layout) != set(DEFAULTS["workspace_layout"]):
+        return errors + ["workspace_layout must hold exactly workspace and docs"]
+    for key, names in layout.items():
+        if not isinstance(names, list) or len(set(map(str, names))) != len(names) \
+                or not all(isinstance(name, str) and name and "/" not in name
+                           and name not in {".", ".."} for name in names):
+            errors.append(f"workspace_layout.{key} must list unique single path names")
+    if "docs" not in layout.get("workspace", []):
+        errors.append("workspace_layout.workspace must allow docs")
+    parts = tests_root.split("/") if isinstance(tests_root, str) else []
+    if len(parts) > 1 and parts[0] == "workspace" \
+            and parts[1] not in layout.get("workspace", []):
+        errors.append("tests_root must lie in a folder workspace_layout.workspace allows")
+    return errors
+
+
 def load_class_map() -> dict | None:
     """Return the installed package's class map, or None when it ships none."""
     return role_settings.load_class_map()
@@ -69,6 +123,7 @@ def base_errors(config: dict) -> list[str]:
         value = config.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{field} must be a non-empty string")
+    errors.extend(layout_errors(config))
     return errors
 
 

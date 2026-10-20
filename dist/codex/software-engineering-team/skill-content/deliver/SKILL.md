@@ -13,8 +13,7 @@ and derive its inputs with `scripts/task_inputs.py --entry deliver`.
 
 ## When to Use
 
-- The project's Process Policy sets `process_profile` to `fast_lane` and the
-  user asks for a change in free text.
+- The user asks for a change in free text.
 
 ## Invocation
 
@@ -25,7 +24,8 @@ from its task and branch; `/retrospective` reads the times.
 
 1. Pre-flight: read `workspace/config.json` (missing: route to the setup entry
    and stop).
-2. Read `flows/fast-lane.md` completely and run its steps in order, from the
-   project checkout, with the request verbatim.
+2. Read `flows/fast-lane.md` and [fast-lane](references/fast-lane.md)
+   completely and run the flow's steps in order, from the project checkout,
+   with the request verbatim.
 3. Report the task, its rigor, the pull request and its merge state, or the
    exact blocker.

@@ -32,6 +32,15 @@
         ]
       },
       {
+        "matcher": "Write|Edit|apply_patch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/workspace_guard.py"
+          }
+        ]
+      },
+      {
         "matcher": "^request_user_input(_async)?$",
         "hooks": [
           {

@@ -276,11 +276,7 @@ def closing(root: Path, workspace: str) -> list[str]:
                 "non-canonical managed workspace: "
                 + candidate.parent.relative_to(root).as_posix()
             )
-    required = (
-        "apps", "docs/business-analysis", "docs/solution-design",
-        "docs/system-architecture", "docs/operation", "docs/backlog",
-    )
-    for relative in required:
+    for relative in project_config.required_dirs(config):
         path = work / relative
         if path.is_symlink():
             findings.append(f"managed target is symlinked: {workspace}/{relative}")

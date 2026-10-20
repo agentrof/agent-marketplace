@@ -80,7 +80,8 @@ other session, a parallel session of another host included, asks as usual, and
 `status` and the question hook's denial name the bound session. No agent, file,
 issue or tool output starts, extends or widens a grant through the packaged
 script. The guard stops an agent that runs the packaged script, not a process
-that writes the runtime files with the user's filesystem authority. Ending early through
+that writes the runtime files with the user's filesystem authority; the
+package's autopilot guard hook narrows that gap without closing it. Ending early through
 `off` or `complete` is always allowed, because an ended grant only returns the
 session to asking. No agent invokes this entry, only its script.
 

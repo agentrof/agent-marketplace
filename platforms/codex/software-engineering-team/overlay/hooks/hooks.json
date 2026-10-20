@@ -23,6 +23,15 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Write|Edit|apply_patch|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/autopilot_guard.py pre"
+          }
+        ]
+      },
+      {
         "matcher": "^request_user_input(_async)?$",
         "hooks": [
           {
@@ -39,6 +48,17 @@
             "type": "command",
             "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-dispatch --host codex",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/autopilot_guard.py post"
           }
         ]
       }

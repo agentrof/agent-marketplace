@@ -56,16 +56,22 @@
       "8f2a3e9ccda37223b379476e97b2122d61d3da8ce8a283d91f50c4dd97210fda"
     ,
     "hooks/hooks.json":
-      "d517398305738f3033f9905d1dbfd1b78a300d33b2ef427613c6b52288390494"
+      "a0c36ec1026afaf7095852d1478862897e3a67295d6770858969bb72175015a8"
     ,
     "host-contract.md":
-      "347154a072b0971a0af6f7fafb69f03712f5daa654100c228e30a34c57728aa9"
+      "405419ec7472b0770f4c1961d797de140c56363fabd7d9abe0855530bba89cd4"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
     ,
     "scripts/atomic_file.py":
       "2835d96b91f37e472a73f1540aead9aa3d0a9165db4fa0f2cb457373aa629320"
+    ,
+    "scripts/autopilot_guard.py":
+      "649bd4e5f4aa060700e474b62a625f3e1927d9cfd1f3c9a90fac088b9c7ad86b"
+    ,
+    "scripts/autopilot_provenance.py":
+      "edbec76683b35d5197c0b77b52f8b5705518833d7717bbfcda4f07df560ec68b"
     ,
     "scripts/await_outputs.py":
       "d82184a2c9bb1f7529c2042aa2fd030bec9dc8b2f2cb49c7daa364f2375e643f"
@@ -140,7 +146,7 @@
       "3d73fee736dff0f1a49007baa425cf26e8ffe7581020d632514f4b351d640927"
     ,
     "scripts/task_lane.py":
-      "77479ba706858e714d9a2d73a11a97c1b67025748879e8b3f18688c54bd141c8"
+      "c954761a3e55dc18a505cac3961307277d94e80cabb7c655e89cb9d5b3a71300"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -149,7 +155,7 @@
       "c71a5914a8849507e5101d593305904e4ef658b5430d2fa328cc7b320defc745"
     ,
     "skill-content/autopilot/SKILL.md":
-      "75600b0c2ece1b4557193cf42f61cd7e5a156ffaa90240236bd1c7a3cf9cdbe6"
+      "b628e18c0612511956dcb3fdb91f2e8b82bf27d79918feca9551130291aac6f1"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
       "cde9d72c1ae4a029e2afce76fc4cdfd4939582537e38a36d8e05c91e11f66a18"
@@ -158,7 +164,7 @@
       "7a3ea3f0b5b5235315d2532f8c44427e27d3f30790491330d24246c1421b87b2"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "5a840fca62c854b0458980b012602da2fe17e8985b5576beb9dcd48b4c86f3dd"
+      "ae2a0a535f0307e287e56211003af3d2bb5e80a49ba99fec70d30b5f4e7ba422"
     ,
     "skill-content/autopilot/scripts/autopilot_recovery.py":
       "80f96c50339cf002d9ca9d3ef5c9a7d0d9d6806c1950f61ddb793acf917b3e56"

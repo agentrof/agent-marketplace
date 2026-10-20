@@ -1098,13 +1098,14 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
                 "Claude",
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "model_fallback.py"),
+                ("team_guard.py register", "model_fallback.py",
+                 "autopilot_guard.py pre", "autopilot_guard.py post"),
             ),
             (
                 "Codex",
                 tree.root / "platforms" / "codex" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register",),
+                ("team_guard.py register", "autopilot_guard.py pre", "autopilot_guard.py post"),
             ),
         )
         for label, hook_path, tokens in hook_contracts:

@@ -87,9 +87,23 @@ Any CRITICAL row failing here fails the review regardless of other sections. A m
 ## Auth
 
 - [ ] CRITICAL: Route guards protect every authenticated page; unauthorized access redirects to login
-- [ ] MAJOR: The client attaches auth headers centrally; 401/403 handled gracefully everywhere
+- [ ] MAJOR: Requests go through the one client layer; 401/403 handled gracefully everywhere
 - [ ] MAJOR: Logout clears all client state: tokens, cached user data, query cache, store
 - [ ] MINOR: Role-based UI rendering mirrors backend permissions and never substitutes for them
+
+## Interaction Defaults
+
+- [ ] MAJOR: Every action shows a pending state and a visible failure and cannot be submitted twice
+- [ ] MAJOR: Ids placed in URLs are encoded
+- [ ] MAJOR: Responses carry security headers and a CSP; the theme never flashes on first paint
+
+## Browser-Facing Backend (BFF)
+
+- [ ] CRITICAL: OIDC with PKCE runs server-side; access and refresh tokens never reach the browser
+- [ ] CRITICAL: Upstream identity comes only from the server session, never from the request
+- [ ] MAJOR: The session cookie is `__Host-` prefixed, Secure, HttpOnly and SameSite
+- [ ] MAJOR: Non-GET requests pass a same-origin check; ids with dot segments are refused before proxying
+- [ ] MAJOR: An in-memory session store is marked in code as a single-replica shortcut with its upgrade trigger
 
 ## Finding Format
 

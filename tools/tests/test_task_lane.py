@@ -160,12 +160,16 @@ class RetrospectiveTests(unittest.TestCase):
                                         "merge_wait": 1.0})
         self.assertEqual((row["total"], row["largest_step"]), (16.0, "write"))
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_an_open_task_has_no_total_and_a_proposal_names_it(self):
-        data = task_lane.report([task_lane.task_row(self.task, None)], "latest 20")
+        merged = task_lane.task_row({**self.task, "id": "TK-005"}, pr("2026-10-16T10:10:00Z", None, None,
+                                                                      "2026-10-16T10:20:00Z"))
+        data = task_lane.report([task_lane.task_row(self.task, None), merged], "latest 20")
         self.assertIsNone(data["per_task"][0]["total"])
-        self.assertEqual(data["request_to_merge_minutes"]["count"], 0)
-        self.assertIn("RETRO-BUILD-OPEN-TASKS", [item["id"] for item in data["proposals"]])
+        self.assertEqual(data["request_to_merge_minutes"]["count"], 1)
+        self.assertIn("RETRO-OPEN-TASKS", [item["id"] for item in data["proposals"]])
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_report_ranks_proposals_by_measured_minutes(self):
         rows = [task_lane.task_row({**self.task, "id": f"TK-00{n}"},
                                      pr("2026-10-16T10:05:00Z", f"2026-10-16T10:{20 + n}:00Z",
@@ -176,12 +180,12 @@ class RetrospectiveTests(unittest.TestCase):
         self.assertEqual(data["request_to_merge_minutes"],
                          {"count": 3, "average": 23.0, "median": 23.0, "max": 24.0})
         ids = [item["id"] for item in data["proposals"]]
-        self.assertEqual(ids[0], "RETRO-BUILD-CI")
-        self.assertIn("RETRO-BUILD-CHECK-TESTS", ids)
+        self.assertEqual(ids[0], "RETRO-CI")
+        self.assertIn("RETRO-CHECK-TESTS", ids)
         self.assertLessEqual(len(ids), 5)
         self.assertEqual(data["slowest"][0]["task_id"], "TK-003")
         text = task_lane.render(data)
-        self.assertIn("1. [RETRO-BUILD-CI]", text)
+        self.assertIn("1. [RETRO-CI]", text)
         self.assertIn("Request to merge: average 23.0, median 23.0, max 24.0 min", text)
         self.assertEqual(task_lane.export(data, "csv").splitlines()[0].split(",")[:3],
                          ["task_id", "title", "size"])
@@ -284,6 +288,7 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertTrue(result["auto_merge"])
         self.assertIn(("gh", "pr", "merge", "9", "--auto", "--merge"), calls)
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_issues_open_only_for_named_proposals_in_the_origin_repository(self):
         root = self.project("normal")
         calls = []
@@ -747,6 +752,7 @@ class RetrospectiveCostTests(unittest.TestCase):
         props = task_lane.task_props(path)
         self.assertEqual((props["task_kind"], props["approved_at"]), ("knowledge", props["requested_at"]))
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_sums_each_kind_and_ranks_its_levers_by_the_target_gap(self):
         build = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001"},
                                    pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:40:00Z"))
@@ -756,7 +762,7 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.assertEqual(set(data["targets"]), {"build", "knowledge"})
         self.assertEqual(data["targets"]["build"]["total"]["average"], 40.0)
         self.assertIn("define", data["targets"]["knowledge"]["steps"])
-        self.assertTrue(data["proposals"][0]["id"].startswith("RETRO-BUILD-"))
+        self.assertTrue(data["proposals"][0]["evidence"].startswith("build: "))
         self.assertIn("vs target 15 min", data["proposals"][0]["evidence"])
         text = task_lane.render(data)
         self.assertIn("- build (1 merged): total 40.0 / 40.0 / 40.0;", text)
@@ -966,6 +972,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         row["waits"] = dict.fromkeys(task_lane.WAITS, 0.0)
         return row
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_prices_each_task_and_kind_and_ranks_cost_levers_with_time(self):
         data = task_lane.report([self.costed_row()], "latest 20")
         cost = data["targets"]["build"]["cost"]
@@ -974,8 +981,8 @@ class RetrospectiveDollarTests(unittest.TestCase):
         self.assertEqual(cost["tokens_per_task"]["cache_read"], 2000000)
         ids = [item["id"] for item in data["proposals"]]
         for lever in ("STARTUP", "EFFORT", "MAIN"):
-            self.assertIn(f"RETRO-BUILD-COST-{lever}", ids)
-        self.assertLessEqual(len(ids), 4)
+            self.assertIn(f"RETRO-COST-{lever}", ids)
+        self.assertLessEqual(len(ids), task_lane.MAX_PROPOSALS)
         text = task_lane.render(data)
         self.assertIn("  - cost $2.00; tokens input 2 / cache_write 64000 / cache_read 2000000 / output 2000;"
                       " 1 spawns, startup context 64000 per spawn; main session $1.00", text)
@@ -1084,6 +1091,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
         task_lane.link_quality(rows, tasks, stories)
         self.assertEqual([row["quality"]["story_coverage"] for row in rows], [0.67, 0.67])
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_shows_quality_per_task_and_kind_and_ranks_its_levers(self):
         rows = [self.row("TK-001", {"critical": 1, "non_critical": 2, "filed": 2, "ci_first_pass": False,
                                     "red_runs": 2}),
@@ -1098,7 +1106,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
                          (0.5, 1.0, 0.5, 1.0, 0.5, {"ST-012": 0.67}))
         ids = [item["id"] for item in data["proposals"]]
         for lever in ("CI-FIRST-PASS", "ESCAPED", "CRITICAL"):
-            self.assertIn(f"RETRO-BUILD-QUALITY-{lever}", ids)
+            self.assertIn(f"RETRO-QUALITY-{lever}", ids)
         for item in data["proposals"]:
             for key in ("evidence", "cause_owner", "expected_gain", "verify", "proposal"):
                 self.assertTrue(item[key], (item["id"], key))
@@ -1384,6 +1392,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
         self.assertIn("up to 15.0 rework min per affected task", lever["expected_gain"])
         self.assertTrue(lever["verify"])
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_shows_rework_per_task_and_kind_keeps_it_once_and_groups_across_history(self):
         def row(task_id, minute, red):
             return task_lane.task_row({**RetrospectiveTests.task, "id": task_id},
@@ -1398,7 +1407,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
                          {"tasks": 2, "one_pass": 1, "one_pass_rate": 0.5, "events": 1, "minutes": 8.0,
                           "minutes_share": 0.16})
         self.assertEqual(data["rework"]["groups"][0]["status"], "recurring")
-        self.assertIn("RETRO-BUILD-REWORK-SPEC-GAP", [item["id"] for item in data["proposals"]])
+        self.assertIn("RETRO-REWORK-SPEC-GAP", [item["id"] for item in data["proposals"]])
         text = task_lane.render(data)
         self.assertIn("- TK-004: 1 (ci 1); spec-gap 1; 8.0 min", text)
         self.assertIn("- TK-005: none, one pass", text)
@@ -1416,6 +1425,95 @@ class RetrospectiveReworkTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_rework"), 2)
         task_lane.remember(root, data, rescan=True)
         self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_rework"), 4)
+
+
+class RetrospectiveHonestyTests(unittest.TestCase):
+    """Bounded figures, rework that counts only real rework, steps that add up, proposals backed
+    by enough tasks, and durations with a verdict and a baseline."""
+
+    def row(self, task_id, merged="2026-10-16T10:20:00Z", kind="build", size="s", **pr_extra):
+        return task_lane.task_row({**RetrospectiveTests.task, "id": task_id, "task_kind": kind, "size": size},
+                                  {**pr("2026-10-16T10:10:00Z", "2026-10-16T10:15:00Z", "2026-10-16T10:18:00Z",
+                                        merged), **pr_extra})
+
+    def test_merge_refuses_a_filed_count_above_the_found_count(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / task_lane.TASKS).mkdir(parents=True)
+        (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
+        args = SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None, critical=0, non_critical=2,
+                               filed=712)
+        with mock.patch.object(task_lane, "run") as run, self.assertRaises(task_lane.Refused):
+            task_lane.cmd_merge(args, root)
+        run.assert_not_called()
+
+    def test_a_share_never_exceeds_the_whole(self):
+        row = self.row("TK-001", critical=0, non_critical=1, filed=9)
+        self.assertEqual(task_lane.quality_summary([row])["filed_share"], 1.0)
+        self.assertEqual(task_lane.share(30, 20), 1.0)
+
+    def test_merges_from_main_the_docs_commit_and_the_first_feature_commit_are_not_rework(self):
+        def commit(sha, minute, subject):
+            return {"oid": sha * 7, "committedDate": f"2026-10-16T10:{minute:02d}:00Z", "messageHeadline": subject}
+        commits = [commit("a", 9, "docs: deliver task TK-004"), commit("b", 11, "Add the export"),
+                   commit("c", 12, "Merge branch 'main' into task/tk-004-export"),
+                   commit("d", 13, "Merge remote-tracking branch 'origin/main' into task/tk-004-export"),
+                   commit("e", 14, "test: cover the empty month")]
+        self.assertEqual([item["sha"] for item in task_lane.revisions(commits, "2026-10-16T10:10:00Z")],
+                         ["eeeeeee"])
+        self.assertEqual(task_lane.revisions(commits[1:2], "2026-10-16T10:10:00Z"), [])
+
+    def test_commit_prefixes_and_role_verdicts_pick_the_cause(self):
+        causes = task_lane.rework_causes()
+        self.assertEqual(task_lane.cause_of("test: cover the empty month", causes), "review-missing-test")
+        self.assertEqual(task_lane.cause_of("style: wrap long lines", causes), "lint-format")
+        self.assertEqual(task_lane.cause_of("code-reviewer changes: deadline unbounded", causes), "review-finding")
+
+    def test_steps_add_up_and_a_missing_step_says_why(self):
+        row = task_lane.task_row(RetrospectiveTests.task, pr("2026-10-16T10:10:00Z", None, "2026-10-16T10:18:00Z",
+                                                             "2026-10-16T10:20:00Z"))
+        self.assertEqual((row["steps"]["ci"], row["steps"]["merge_wait"]), (None, None))
+        self.assertEqual(row["missing"], {"ci": "CI not green", "merge_wait": "CI not green"})
+        self.assertEqual(row["unaccounted"], 2.0)
+        full = self.row("TK-002")
+        self.assertEqual((full["unaccounted"], full["missing"]), (0.0, {}))
+        text = task_lane.render(task_lane.report([row], "latest 20"))
+        self.assertIn("/ 2.0 = 20.0; missing: ci (CI not green); merge_wait (CI not green)", text)
+
+    def test_a_kind_needs_five_merged_tasks_before_a_proposal(self):
+        four = [self.row(f"TK-00{n}", merged="2026-10-16T11:00:00Z") for n in range(1, 5)]
+        data = task_lane.report(four, "latest 20")
+        self.assertEqual(data["proposals"], [])
+        self.assertIn("Proposals: none; a kind needs 5 merged tasks", task_lane.render(data))
+        self.assertTrue(task_lane.report(four + [self.row("TK-005", merged="2026-10-16T11:00:00Z")],
+                                         "latest 20")["proposals"])
+
+    def test_one_proposal_per_cause_across_kinds(self):
+        rows = [self.row(f"TK-0{n:02d}", merged="2026-10-16T11:00:00Z", kind=kind)
+                for n, kind in enumerate(["build"] * 5 + ["knowledge"] * 5)]
+        ids = [item["id"] for item in task_lane.report(rows, "latest 20")["proposals"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        review = next(item for item in task_lane.report(rows, "latest 20")["proposals"] if item["id"] == "RETRO-REVIEW")
+        self.assertEqual(sorted(review["kinds"]), ["build", "knowledge"])
+
+    def test_size_targets_are_calibrated_from_history(self):
+        history = [{"task_id": f"TK-1{n}", "kind": "build", "size": "m", "total": 10.0 + n} for n in range(4)]
+        goal = task_lane.targets([self.row("TK-001", size="m")], [], history)["build"]["calibrated"]
+        self.assertEqual(goal["m"], {"tasks": 5, "median": 12.0})
+        self.assertEqual(goal["s"], {"tasks": 0, "median": None})
+
+    def test_durations_carry_steps_a_verdict_a_baseline_and_a_cost_method_flag(self):
+        data = task_lane.report([self.row("TK-001")], "latest 20")
+        text = task_lane.render(data)
+        self.assertIn("Verdict: average 20.0 vs target 15 min (missed); baseline none", text)
+        self.assertIn("Steps (average min): define 3.0 / write 7.0 / ci 5.0 / review 8.0 / merge_wait 2.0"
+                      " / unaccounted 0.0", text)
+        self.assertIn("- TK-001: 20.0 min vs s target 5 (missed); define 3.0 / write 7.0", text)
+        before = {"at": "2026-10-10T00:00:00Z", "merged": 3, "average": 12.0, "median": 12.0, "max": 14.0,
+                  "cost_method": "aaa"}
+        again = task_lane.render({**task_lane.report([self.row("TK-001")], "latest 20", before), "cost_method": "bbb"})
+        self.assertIn("baseline 12.0 min average at the previous retrospective (2026-10-10)", again)
+        self.assertIn("Cost method changed since the previous retrospective (aaa -> bbb)", again)
 
 
 class EntryExposureTests(unittest.TestCase):

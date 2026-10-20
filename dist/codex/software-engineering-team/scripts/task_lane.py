@@ -161,6 +161,15 @@ QUALITY_KEPT = ("critical", "non_critical", "filed", "ci_first_pass", "red_runs"
 # Thresholds are a judgement call, not a measured baseline: a CI first-pass rate under 80%,
 # any escaped defect, or critical findings on more than 20% of reviewed tasks earns a lever.
 FIRST_PASS_FLOOR = 0.8
+# A lever is proposed only from a kind with this many merged tasks; fewer is noise, not evidence.
+MIN_PROPOSAL_TASKS = 5
+MAX_PROPOSALS = 5
+# Branch commits that are routine, never rework: merging the target in and the deliver-docs commit.
+MAIN_MERGE_RE = re.compile(r"^Merge (?:remote-tracking )?branch '(?:origin/)?(?:main|master)'")
+DELIVER_DOCS = "docs: deliver task "
+MISSING_REASONS = {"requested_at": "no request time", "approved_at": "no approval time",
+                   "pr_opened": "no pull request", "ci_green": "CI not green", "review": "no review pass",
+                   "merged": "not merged"}
 CRITICAL_CEILING = 0.2
 QUALITY_LEVERS = {
     "ci": "Run the CI's test command for the touched suites before open-pr,"
@@ -689,10 +698,7 @@ def pr_times(root: Path, number, runs: bool = True, causes: dict | None = None) 
               "review_note": next((scrub(FINDINGS_RE.sub("", body.replace(REVIEW_MARK, "")), 240)
                                    for comment in reversed(comments)
                                    if REVIEW_MARK in (body := comment.get("body") or "")), ""),
-              "revisions": [{"sha": item.get("oid", "")[:7], "at": item["committedDate"],
-                             "subject": item.get("messageHeadline") or ""}
-                            for item in data.get("commits") or [] if item.get("committedDate")
-                            and data.get("createdAt") and parse_time(item["committedDate"]) > parse_time(data["createdAt"])]}
+              "revisions": revisions(data.get("commits") or [], data.get("createdAt"))}
     if runs:
         listed = ci_runs(root, data.get("headRefName") or "")
         result.update(first_pass(listed, data.get("mergedAt")),
@@ -798,10 +804,34 @@ def minutes_between(times: dict, start, end: str) -> float | None:
     return round((parse_time(times[end]) - begin).total_seconds() / 60, 1)
 
 
+def revisions(commits: list[dict], opened: str | None) -> list[dict]:
+    """Feature commits pushed after the pull request opened. Merges from main and the deliver-docs
+    commit are routine; when no feature commit preceded the opening, the first one after it is the
+    feature itself, not rework."""
+    if not opened:
+        return []
+    feature = sorted((item for item in commits if item.get("committedDate")
+                      and not MAIN_MERGE_RE.match(item.get("messageHeadline") or "")
+                      and not (item.get("messageHeadline") or "").startswith(DELIVER_DOCS)),
+                     key=lambda item: parse_time(item["committedDate"]))
+    after = [item for item in feature if parse_time(item["committedDate"]) > parse_time(opened)]
+    if after and len(after) == len(feature):
+        after = after[1:]
+    return [{"sha": item.get("oid", "")[:7], "at": item["committedDate"], "subject": item.get("messageHeadline") or ""}
+            for item in after]
+
+
 def task_row(task: dict, pr: dict | None) -> dict:
     times = {"requested_at": task.get("requested_at"), "approved_at": task.get("approved_at"),
              **{key: (pr or {}).get(key) for key in ("pr_opened", "ci_green", "review", "merged")}}
     steps = {step: minutes_between(times, start, end) for step, (start, end) in STEPS.items()}
+    total = minutes_between(times, "requested_at", "merged")
+    # ci and review overlap, so the larger counts; measured before a local proof replaces ci.
+    side = [steps[step] for step in ("ci", "review") if steps[step] is not None]
+    accounted = sum(steps[step] or 0.0 for step in ("define", "write", "merge_wait")) + max(side, default=0.0)
+    missing = {step: ", ".join(MISSING_REASONS[key] for key in
+                               ((start if isinstance(start, tuple) else (start,)) + (end,)) if not times.get(key))
+               for step, (start, end) in STEPS.items() if steps[step] is None}
     if (pr or {}).get("proof_minutes") is not None:
         steps["ci"] = pr["proof_minutes"]
     known = {step: value for step, value in steps.items() if value is not None}
@@ -811,7 +841,8 @@ def task_row(task: dict, pr: dict | None) -> dict:
             "fixes": task.get("fixes", ""), "role_checks": role_minutes(task),
             "quality": {key: (pr or {}).get(key) for key in QUALITY_KEPT},
             "pr": (pr or {}).get("pr", ""), **times,
-            "total": minutes_between(times, "requested_at", "merged"), "steps": steps,
+            "total": total, "steps": steps, "missing": missing,
+            "unaccounted": None if total is None else round(total - accounted, 1),
             "largest_step": max(known, key=known.get) if known else None,
             "checks": (pr or {}).get("checks", {}),
             "rework_auto": auto_events(task, pr), "rework_notes": task.get("rework_notes") or []}
@@ -922,6 +953,11 @@ def select(tasks: list[dict], delivery: str | None = None, since: str | None = N
     if recent and not (delivery or since):
         chosen = chosen[-recent:]
     return chosen
+
+
+def share(part: float, whole: float) -> float | None:
+    """A share in [0, 1], or None without a whole."""
+    return min(1.0, max(0.0, round(part / whole, 2))) if whole else None
 
 
 def summary(values: list[float]) -> dict:
@@ -1108,7 +1144,7 @@ def quality_summary(rows: list[dict]) -> dict | None:
     return {"tasks": len(rows), "reviewed": len(reviewed), "critical_per_task": mean(reviewed, "critical"),
             "critical_tasks": [row["task_id"] for row in rows if row["quality"].get("critical")],
             "non_critical_per_task": mean(reviewed, "non_critical"),
-            "filed_share": round(sum(item["filed"] for item in reviewed) / minor, 2) if minor else None,
+            "filed_share": share(sum(min(item["filed"], item["non_critical"]) for item in reviewed), minor),
             "ci_checked": len(checked), "first_pass_rate": mean(checked, "ci_first_pass"),
             "red_runs_per_task": mean(checked, "red_runs", 1),
             "escaped": {task: row["quality"]["fixed_by"] for row in rows
@@ -1260,7 +1296,7 @@ def rework_summary(records: list[dict]) -> dict | None:
     total = sum(record["total"] or 0.0 for record in known)
     return {"tasks": len(known), "one_pass": len(clean), "one_pass_rate": round(len(clean) / len(known), 2),
             "events": sum(len(record["events"]) for record in known), "minutes": round(spent, 1),
-            "minutes_share": round(spent / total, 2) if total else None}
+            "minutes_share": share(spent, total)}
 
 
 def promotions(groups: list[dict], causes: dict) -> list[dict]:
@@ -1361,11 +1397,12 @@ def write_lessons(root: Path, rework: dict, causes: dict) -> dict:
 
 
 def kind_proposals(rows: list[dict], records: list[dict] | None = None, causes: dict | None = None) -> list[dict]:
-    """Levers per task kind, the kind furthest over its average target first, at most four
-    per kind; time, cost and quality levers rank together by the share of the task's minutes,
-    dollars or tasks they address, and recurring process or plugin rework causes by the share of
-    the kind's tasks they hit; each names its kind and the gap to that target."""
-    found = []
+    """One proposal per cause, at most ``MAX_PROPOSALS``, from the kinds with at least
+    ``MIN_PROPOSAL_TASKS`` merged tasks; time, cost and quality levers rank together by the share of
+    the task's minutes, dollars or tasks they address, and recurring process or plugin rework causes
+    by the share of the kind's tasks they hit. A cause seen in several kinds is one proposal whose
+    evidence names each kind and its gap to target."""
+    found: dict[str, dict] = {}
     records = records or []
     goals = targets(rows, [])
     kinds = {row.get("kind", "build") for row in rows}
@@ -1373,25 +1410,49 @@ def kind_proposals(rows: list[dict], records: list[dict] | None = None, causes: 
         goal = goals.get(kind)
         mine = [row for row in rows if row.get("kind", "build") == kind]
         done = [row["total"] for row in mine if row["total"] is not None]
-        minutes = statistics.mean(done) if done else 0
+        if len(done) < MIN_PROPOSAL_TASKS:
+            continue
+        minutes = statistics.mean(done)
         levers = [{**item, "weight": item["weight"] / minutes if minutes and item["weight"] > 0
                    else item["weight"]} for item in proposals(mine, keep_weight=True)]
         rework = rework_proposals([record for record in records if record["kind"] == kind],
                                   causes or rework_causes()) if records else []
         levers = sorted(levers + cost_proposals(mine) + quality_proposals(mine) + rework,
                         key=lambda item: -item["weight"])
-        for item in levers[:4]:
-            item.pop("weight")
+        for item in levers:
             versus = (f"; average {goal['average']} vs target {goal['average_target']} min"
                       f" ({'+' if goal['target_gap'] > 0 else ''}{goal['target_gap']})") if goal else ""
-            found.append({**item, "id": item["id"].replace("RETRO-", f"RETRO-{kind.upper()}-", 1),
-                          "kind": kind, "evidence": f"{kind}: {item['evidence']}{versus}"})
-    return found
+            evidence = f"{kind}: {item['evidence']}{versus}"
+            if item["id"] in found:
+                same = found[item["id"]]
+                same.update(kinds=same["kinds"] + [kind], evidence=f"{same['evidence']}; {evidence}",
+                            weight=max(same["weight"], item["weight"]))
+            else:
+                found[item["id"]] = {**item, "kinds": [kind], "evidence": evidence}
+    ranked = sorted(found.values(), key=lambda item: -item["weight"])[:MAX_PROPOSALS]
+    for item in ranked:
+        item.pop("weight")
+    return ranked
 
 
-def targets(rows: list[dict], totals: list[float]) -> dict:
-    """Per kind: the average against its average target, and each merged task against the
-    target of its own size and the kind's maximum."""
+def calibrated(rows: list[dict], history: list[dict], kind: str) -> dict:
+    """Per size, the median request-to-merge of this kind's merged tasks in scope and in the kept
+    history, once at least ``MIN_PROPOSAL_TASKS`` tasks of that size exist; else None."""
+    seen = {item["task_id"]: item for item in history if item.get("total") is not None
+            and item.get("kind", "build") == kind and item.get("size")}
+    seen.update({row["task_id"]: row for row in rows if row["total"] is not None
+                 and row.get("kind", "build") == kind and row.get("size")})
+    result = {}
+    for size in SIZES:
+        values = [item["total"] for item in seen.values() if item["size"] == size]
+        result[size] = {"tasks": len(values), "median": round(statistics.median(values), 1)
+                        if len(values) >= MIN_PROPOSAL_TASKS else None}
+    return result
+
+
+def targets(rows: list[dict], totals: list[float], history: list[dict] | None = None) -> dict:
+    """Per kind: the average against its average target, each merged task against the target
+    of its own size and the kind's maximum, and the per-size medians calibrated from history."""
     result = {}
     for kind, goal in TARGETS.items():
         done = [row for row in rows if row.get("kind", "build") == kind and row["total"] is not None]
@@ -1407,6 +1468,7 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
                         "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
                         "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over,
+                        "calibrated": calibrated(rows, history or [], kind),
                         "cost": cost_summary(done), "quality": quality_summary(done),
                         "rework": rework_summary([row["rework"] for row in done if row.get("rework")]),
                         "role_checks": role_summary(done)}
@@ -1437,9 +1499,12 @@ def report(rows: list[dict], scope: str, previous: dict | None = None,
             "per_task": rows,
             "slowest": [{"task_id": row["task_id"], "total": row["total"],
                          "largest_step": row["largest_step"],
-                         "largest_minutes": row["steps"].get(row["largest_step"])}
+                         "largest_minutes": row["steps"].get(row["largest_step"]), "steps": row["steps"],
+                         "size": row["size"] or "s",
+                         "target": TARGETS.get(row.get("kind", "build"), TARGETS["build"]).get(row["size"] or "s")}
                         for row in slowest],
-            "targets": targets(rows, totals), "previous": previous,
+            "targets": targets(rows, totals, extra), "previous": previous,
+            "missing_cost": [row["task_id"] for row in rows if row["total"] is not None and not row.get("cost")],
             "cost": cost_summary([row for row in rows if row["total"] is not None]),
             "quality": quality_summary([row for row in rows if row["total"] is not None]),
             "unattributed": unattributed,
@@ -1452,14 +1517,17 @@ def render(data: dict) -> str:
     lines = [f"Scope: {data['scope']}",
              f"Tasks: {data['tasks']} ({data['merged']} merged), target {data['target_minutes']} min",
              f"Request to merge: average {total['average']}, median {total['median']},"
-             f" max {total['max']} min", "",
-             "Per task (min): define / write / ci / review / merge_wait = total"]
+             f" max {total['max']} min", *headline(data), "",
+             "Per task (min): define / write / ci / review / merge_wait / unaccounted = total"
+             " (ci and review overlap; the larger counts)"]
     for row in data["per_task"]:
         steps = " / ".join("-" if row["steps"][step] is None else str(row["steps"][step])
                            for step in STEPS)
+        missing = "; ".join(f"{step} ({reason})" for step, reason in (row.get("missing") or {}).items())
         lines.append(f"- {row['task_id']} ({row['size'] or '-'}, {row['rigor']}) PR"
-                     f" {row['pr'] or '-'}: {steps}"
-                     f" = {row['total'] if row['total'] is not None else 'open'}")
+                     f" {row['pr'] or '-'}: {steps} / {dash(row.get('unaccounted'))}"
+                     f" = {row['total'] if row['total'] is not None else 'open'}"
+                     + (f"; missing: {missing}" if missing else ""))
     if data["per_task"]:
         lines += ["", "Quality per task: findings critical / non-critical / filed; CI first pass (red runs);"
                       " fixed by; story coverage"]
@@ -1479,7 +1547,10 @@ def render(data: dict) -> str:
         lines.append(f"Target {kind} ({goal['tasks']}): average {goal['average']} vs {goal['average_target']} min"
                      f" ({'met' if goal['average_met'] else 'missed'}), max {goal['max']} vs"
                      f" {goal['max_target']} ({'met' if goal['max_met'] else 'missed'}), s/m/l {sizes};"
-                     f" over size target: {', '.join(goal['over_size_target']) or 'none'}")
+                     f" over size target: {', '.join(goal['over_size_target']) or 'none'}; calibrated s/m/l "
+                     + "/".join(dash(goal["calibrated"][size]["median"]) for size in SIZES)
+                     + " (median of " + "/".join(str(goal["calibrated"][size]["tasks"]) for size in SIZES)
+                     + f" tasks, shown at {MIN_PROPOSAL_TASKS} or more)")
     for kind, goal in (data.get("targets") or {}).items():
         spent = goal.get("role_checks")
         if spent and spent["checks"]:
@@ -1499,6 +1570,9 @@ def render(data: dict) -> str:
             lines.append(f"Rework {kind}: one pass {spent['one_pass']}/{spent['tasks']} ({percent(spent['one_pass_rate'])}),"
                          f" {spent['events']} events, {spent['minutes']} min after the first event"
                          f" ({percent(spent['minutes_share'])} of request to merge)")
+    if data.get("missing_cost"):
+        lines.append(f"Cost missing: {', '.join(data['missing_cost'])} (no host session record in the scanned"
+                     " window, or sessions not scanned)")
     if data.get("unattributed"):
         lines.append(f"Unattributed in the scanned window: ${data['unattributed']['usd']:.2f},"
                      f" tokens {tokens_line(data['unattributed']['tokens'])}")
@@ -1532,9 +1606,13 @@ def render(data: dict) -> str:
                 lines.append(f"  - tool results over 200 KB: {row['reading']['results_over_200kb']}")
     if data["slowest"]:
         lines += ["", "Slowest:"]
-        lines += [f"- {item['task_id']}: {item['total']} min, largest step {item['largest_step']}"
-                  f" ({item['largest_minutes']} min)" for item in data["slowest"]]
+        lines += [f"- {item['task_id']}: {item['total']} min vs {item['size']} target {item['target']}"
+                  f" ({'met' if item['total'] <= item['target'] else 'missed'}); "
+                  + " / ".join(f"{step} {dash(item['steps'][step])}" for step in STEPS)
+                  + f"; largest step {item['largest_step']} ({item['largest_minutes']} min)" for item in data["slowest"]]
     lines += rework_lines(data.get("rework"))
+    if not data["proposals"] and data["merged"]:
+        lines += ["", f"Proposals: none; a kind needs {MIN_PROPOSAL_TASKS} merged tasks before a lever is evidence."]
     if data["proposals"]:
         lines += ["", "Proposals (approve by number or id to file one issue each):"]
         lines += [f"{number}. [{item['id']}] {item['proposal']} Evidence: {item['evidence']}."
@@ -1544,6 +1622,28 @@ def render(data: dict) -> str:
     if not data["tasks"]:
         lines.append("No task in scope.")
     return "\n".join(lines)
+
+
+def headline(data: dict) -> list[str]:
+    """Verdict against target, baseline and step breakdown for the scope's request-to-merge."""
+    total, before = data["request_to_merge_minutes"], data.get("previous")
+    if total["average"] is None:
+        return []
+    goal = data["target_minutes"]
+    lines = [f"Verdict: average {total['average']} vs target {goal} min"
+             f" ({'met' if total['average'] <= goal else 'missed'}); baseline "
+             + (f"{before['average']} min average at the previous retrospective ({before['at'][:10]})"
+                if before and before.get("average") is not None else "none, the first retrospective of this scope")]
+    merged = [row for row in data["per_task"] if row["total"] is not None]
+    averages = {step: [row["steps"][step] for row in merged if row["steps"][step] is not None] for step in STEPS}
+    spare = [row["unaccounted"] for row in merged if row.get("unaccounted") is not None]
+    lines.append("Steps (average min): " + " / ".join(
+        f"{step} {round(statistics.mean(values), 1) if values else '-'}" for step, values in averages.items())
+        + f" / unaccounted {round(statistics.mean(spare), 1) if spare else '-'}")
+    if before and before.get("cost_method") and data.get("cost_method") and before["cost_method"] != data["cost_method"]:
+        lines.append(f"Cost method changed since the previous retrospective ({before['cost_method']} ->"
+                     f" {data['cost_method']}): dollars are not comparable with that baseline.")
+    return lines
 
 
 def dash(value) -> str:
@@ -1701,6 +1801,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
         handle.write(json.dumps({"at": now(), "scope": data["scope"], "merged": data["merged"],
                                  "average": total["average"], "median": total["median"],
                                  "max": total["max"], "usd_per_task": spend.get("usd_per_task"),
+                                 "cost_method": data.get("cost_method"),
                                  "tokens_per_task": sum((spend.get("tokens_per_task") or {}).values())
                                  if spend else None,
                                  "quality": {key: spec.get(key) for key in (
@@ -1716,7 +1817,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
                              + "\n")
             if row["total"] is not None and row.get("rework_auto") is not None and row["task_id"] not in reworked:
                 handle.write(json.dumps({"type": "task_rework", "at": now(), "task_id": row["task_id"],
-                                         **{key: row.get(key) for key in ("kind", "requested_at", "merged", "total")},
+                                         **{key: row.get(key) for key in ("kind", "size", "requested_at", "merged", "total")},
                                          "events": row["rework_auto"]}) + "\n")
 
 
@@ -1756,7 +1857,17 @@ def gather(root: Path, args) -> dict:
         if row["total"] is not None and row["task_id"] in kept:
             row.update(cost=kept[row["task_id"]]["cost"], waits=kept[row["task_id"]]["waits"])
     scope = args.delivery or (f"since {args.since}" if args.since else f"latest {args.recent}")
-    return report(rows, scope, previous_run(root, scope), unattributed, extra, causes)
+    return {**report(rows, scope, previous_run(root, scope), unattributed, extra, causes),
+            "cost_method": cost_method(root)}
+
+
+def cost_method(root: Path) -> str | None:
+    """A fingerprint of the effective price table; a change makes dollars incomparable."""
+    try:
+        import session_cost
+    except ImportError:
+        return None
+    return hashlib.sha256(json.dumps(session_cost.load_prices(root), sort_keys=True).encode()).hexdigest()[:12]
 
 
 # --- story links and board -------------------------------------------------
@@ -2197,6 +2308,9 @@ def cmd_merge(args, root: Path) -> dict:
     rigor = task_props(task_path(root, args.task)).get("rigor", "normal")
     note = REVIEW_MARK + (f"\n\n{args.detail}" if args.detail else "")
     counts = [getattr(args, key, None) for key in ("critical", "non_critical", "filed")]
+    if any(count is not None and count < 0 for count in counts) or (counts[2] or 0) > (counts[1] or 0):
+        raise Refused("finding counts are non-negative and --filed is at most --non-critical;"
+                      " pass counts, never an issue number")
     if any(count is not None for count in counts):
         note += "\n\nfindings: critical {}, non-critical {}, filed {}".format(*(count or 0 for count in counts))
     owner_merges = rigor == "high" and not getattr(args, "delegated", False)

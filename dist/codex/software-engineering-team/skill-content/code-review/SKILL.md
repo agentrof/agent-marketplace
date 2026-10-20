@@ -79,15 +79,17 @@ passes reference. Follow the
 [verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
 
 1. **Correctness:** logic, edge cases, error propagation, type safety, and
-   the correctness of identity source, membership filters and bounds.
+   the correctness of identity source, membership filters, bounds, deadlines
+   and idempotency.
 2. **Conformance:** the change against the declared interface contract, data
-   model, decisions, and ownership map; every conformance finding carries an
+   model, decisions, ownership map and docs delta; every conformance finding carries an
    architectural impact rating (high, medium, low).
 
 Security is not a pass here: the read-only `security-reviewer` runs it in
 parallel at rigor `high` or on a risk flag (auth, tenant data, secrets,
 money, deletion), and the pull request merges with 0 critical and 0 major
-findings across both reviewers.
+findings across both reviewers. Its checklist owns fail-closed guards,
+path traversal and untrusted text.
 
 ## Architecture-Implicating Findings
 

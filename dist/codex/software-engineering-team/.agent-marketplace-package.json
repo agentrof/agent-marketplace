@@ -20,28 +20,28 @@
       "7a7de5fa77d37d3670ca8e43c0c1bf90ecf7179a1447a091ca72d5d2ca7c7934"
     ,
     "agents/backend-developer.md":
-      "ac3c7712f198aa084a734f13eb9f52a9843019cefddde950bb43861ba4753e0b"
+      "138ce8fcb513fb8b60024350ee208a3a74b2b33b83f426be8c0d91e6e2c47f2e"
     ,
     "agents/business-analyst.md":
       "8689104cf0acc2d5bd74fc07a027d5e8b846a796433e2690e32c2fd3dfaebda1"
     ,
     "agents/code-reviewer.md":
-      "ff3a97f1c61f63306dac7a2dec88b7bb09d2e66ecbc4409763bab118f034ffd8"
+      "3b407c262d85abebe3d0589b3d24bb226cb6c25d8773d8f95ba28135bf11f69c"
     ,
     "agents/devops-engineer.md":
-      "fa9d95646d2c93faf5c64b28d7ed989433aea0d44ccad026e075780a33c33551"
+      "80beb7a3eccc59f65b9243248e4b396f8b5a2d16b5ffa3d291052909511a8cfe"
     ,
     "agents/frontend-developer.md":
-      "1c82247095b107df4e9e651cd91bc889ad5f67fbf84c95e250f32fe52ac32c21"
+      "c27dca81d812dd36ea88e65b8d65ad227a902a312dc64c15ddc3d2fc8766c51f"
     ,
     "agents/qa-engineer.md":
-      "85a421220446b787e58f8846f89fced1e1734d98848a7abb0f73701380f14c22"
+      "f175072f1eabaabf6409873f8cb2f66c7465f9c0ebb3d39f311630b13b70bbaf"
     ,
     "agents/security-reviewer.md":
-      "4629336c9abccdcc0a9bfdeab64d8d0ee75c6f55b12423249ba5ec8639b6074e"
+      "db2e81011033c7d11f1570b61d005985aa7fe88c40b153f0a29d6ded4a759c0a"
     ,
     "agents/software-architect.md":
-      "3731c38ab3778d19ec5704b25ca657c210ea8dc71f4a494cb75c6886f1d28800"
+      "0fa51c097481fe80a78671313cc75cc41b6028b04788e9312bf7ba2529bf9e29"
     ,
     "agents/solution-architect.md":
       "4ae81c48823ae5b5016d3c0a94c37e3406b2e175be1817108bbee36b36828bf4"
@@ -146,7 +146,7 @@
       "d19af55eec08738727d088cf154111d97e0621cdd96022973071b720cc332ae3"
     ,
     "scripts/task_lane.py":
-      "43f2257dbc5021e70b849323d7563a2a41378183a48e7a35e82825fee513490d"
+      "df34e71dd9ce3843a2813c096d0158b41025c33f3adb79981e1f6813b10e0a40"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -185,10 +185,10 @@
       "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
     ,
     "skill-content/code-review/SKILL.md":
-      "3fd51964ce23b52f45824de05cb310b94cba216078964951ffaf0a189897d60f"
+      "d710b9585ba504ef4ad2cf473aa2c3a210b5cc3b8c4bc8ab6427d01b80ea7530"
     ,
     "skill-content/code-review/references/passes.md":
-      "5e48f385d3014260437f9d4bc960226e4efc1d9c7b70afd6eef58158ded9915a"
+      "fd7bfc3fa2eaa4dff1c046585357cad22cdeaccf7a0830213c61c679da5e3a6e"
     ,
     "skill-content/code-review/references/pitfalls.md":
       "594084b63be2a81011a3de9ba88c7ae55edad21d04c682ad38c4e24e4d72a933"
@@ -239,19 +239,22 @@
       "0d4e563158e27d724752b6b87fabaccaa6f6f6bef9420a0de8f1e451cdbe1fee"
     ,
     "skill-content/docker-compose/SKILL.md":
-      "f3a207b6ad053c006b454afb391bff6859b4797cb5b600ac258cb45f86e30cec"
+      "6c609831407c9f08b824e61ec242673c720995c047faffe0cf87f8763ad0b972"
+    ,
+    "skill-content/docker-compose/references/cluster-patterns.md":
+      "ed93f25faf248e1538aee2de165cbb4d07c705b3229125c80c931e12a6df25a9"
     ,
     "skill-content/docker-compose/references/compose-patterns.md":
       "26b99ad6550a5049129ac25aed49c686962ca8e6b08fc9b79d73777ed33be073"
     ,
     "skill-content/docker-compose/references/image-build.md":
-      "0d6247c2604a71054ceb04093a0395784a477003054fac52f5e895ee71e0eaca"
+      "5111fa50883dda4494679d2572afbcc09ca394b77cbb4181dd9a483ecd0e1a48"
     ,
     "skill-content/docker-compose/references/qa-checklist.md":
       "acb390d812b303bbdafff02a5826b7da64743333e16c4ff0a2cfa411cfc1656f"
     ,
     "skill-content/docker-compose/references/review-checklist.md":
-      "f511894d3d82cdfde197df18f1c791a1e520e680cd4818a3582c5a43318c738f"
+      "56a18e8395698988e469f93234888dcf8858e98947043f9f6a2427b13b6b4e70"
     ,
     "skill-content/docker-compose/references/seed-scenarios.md":
       "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
@@ -290,7 +293,7 @@
       "4ebfa5db83ff108d0352bca68e8ea13d2c7c860f13d876bd0f1a49d03db0802e"
     ,
     "skill-content/python-fastapi/SKILL.md":
-      "b335164b3bc4bdc80be739b1a99606881577ae198307d0ce89c9a819e1d51421"
+      "272726e7bfe1bc1ebfa483308db203b99b962cc7cd5bc4c73c9d81ef69935058"
     ,
     "skill-content/python-fastapi/references/patterns.md":
       "352007b984f1b4596e85a2c85ab7d343c7d80f5abbae49e4cd44526fc03d49ff"
@@ -299,10 +302,10 @@
       "d1ee3c235e62d50261b4ef409a547b7030de215929e974d8c1f582f4eef67205"
     ,
     "skill-content/python-fastapi/references/review-checklist.md":
-      "ac56808afa550eada9c15099b4233ffa7456a42f9da23e3508f128a3e1b493c5"
+      "cf3e72e400119cb400830138fd10ea64e7a337777d839ec49ce0e1c09ca5f753"
     ,
     "skill-content/react-typescript/SKILL.md":
-      "ff247db8ea0452aa6c654fe970db48786ea52005528c1e9ee5ca4903b5cdd747"
+      "984f7d53d65ff739695781ed9e1cf4b69f1b7be0062adce84654fd9568f73ece"
     ,
     "skill-content/react-typescript/references/accessibility.md":
       "bae66259020b2b669c23530bbe110171e3fef27148032fb0a1ffe3d7f4a7fe09"
@@ -320,7 +323,7 @@
       "b50e11c0d3ed0874040ac632cbea225c4e3806a7e1e0bb3e7e9ae0593f21a5a8"
     ,
     "skill-content/react-typescript/references/review-checklist.md":
-      "7668cc3b56313ab327ca1f262dfacd5c1ffc4fbc3c68ca8c537b4af9537685f0"
+      "144f8cb24b0fabc7915b16e3342eea08116acde5f39f8102933ee7ab851bc609"
     ,
     "skill-content/react-typescript/references/testing.md":
       "3fc1be0e89bd61b6aff4f0f7abc3174b2aeabb048765038566e96b2ea7ed0792"
@@ -329,16 +332,16 @@
       "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a"
     ,
     "skill-content/retrospective/SKILL.md":
-      "456188b64bfa4d434f249004942ad61d7829760368a5d0a09044b22ed3a462d0"
+      "4534cbe6034978657b50ca15bc539165de55a3723097eb6dc82a995d043f6f99"
     ,
     "skill-content/retrospective/data/pricing.json":
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"
     ,
     "skill-content/retrospective/data/rework-causes.json":
-      "07cb58e9d45c28eff7a5ee6450e478870033915479f26586c107caffa67f7ae8"
+      "d7e265299e3ab0e2788963c8c14e5c7548e741315016eac7e2133b53ec8a5b26"
     ,
     "skill-content/retrospective/references/rework.md":
-      "822e5d19a3e5be6924a904918c5f9f356c5fea074bbc0ff344f8a6011950fda6"
+      "616b6b3720b930306653e393590a2f41ec882745ce81db826905d05d526f8066"
     ,
     "skill-content/setup/SKILL.md":
       "cbc8a4d8eec5159533bc5d1c45ab1552cbcda2ab37cfc3e24b32e88f76c936b2"
@@ -380,10 +383,10 @@
       "e720170ae35e091781dbb7c76e5d285390520f55e14fb729e912ebb03f09dbab"
     ,
     "skill-content/sql-database-design/SKILL.md":
-      "d1dbda6aadb1dd60e5d8dfccba14d10f8d36b9c18670de99d92a42ba186d5fc8"
+      "72ca136089235023889a3ffbe9e5a11806805b1f822305a22cc6ce350961d8f5"
     ,
     "skill-content/sql-database-design/references/advanced-patterns.md":
-      "e7f1be274a5edad05d60548ada0044173b05fdb831555e7d2927b1b7e3202352"
+      "71fbcb129c1b1ac94f154352ef579e8f7f80db8d9ede1c202fe552f4ac54c8f0"
     ,
     "skill-content/sql-database-design/references/data-types.md":
       "278ec401fd5117573c5b4c0f7cf1df7abced3978b4cc32098df5d0b2f66b54ce"
@@ -393,6 +396,9 @@
     ,
     "skill-content/sql-database-design/references/indexing.md":
       "cb189199fc19f4286daa329c6e05a8255130de2b6b8183decc62fd5413afaeed"
+    ,
+    "skill-content/sql-database-design/references/multi-tenancy.md":
+      "34f5c148f0c1f1dcfc4dda2b22b95128e9460c354603326fee493c3165c7b866"
     ,
     "skill-content/sql-database-design/references/normalization.md":
       "25ca0ee856ff8a0c3e21a03f260f349afc0f852638630ac93aac6da7c5a9e7d7"
@@ -407,7 +413,7 @@
       "325ce7b1d1493e000b4fd6d192587689d50f5fd6da0d4a0635689284a424551f"
     ,
     "skill-content/sql-database-design/references/review-checklist.md":
-      "2a883309e014134ae221cc510074ddd4f115396ed042d95a3ff0db0447efdf8e"
+      "6440ab63c364f68fc58bd7ee4e0aa7530380d5773da863d11f46307651937e78"
     ,
     "skill-content/ui-ux-design/SKILL.md":
       "72c6936575954f2ce962efb268062f47a6fd342a0160677368e81abce4b35244"

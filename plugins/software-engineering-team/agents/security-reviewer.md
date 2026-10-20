@@ -28,9 +28,7 @@ not exist.
 - Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
 ## Checklist
-- Identity: tenant, user and actor come only from the server-side session or
-  token, never from the request body, headers the client sets, or model
-  output.
+- Identity: tenant, user and actor come only from the server-side session or token, never from the request body, client-set headers or model output.
 - Authorization: checked before shape validation and before any data
   access; unknown, malformed and foreign ids get one uniform 404. Authority
   is re-read from the store on every call; list and read paths filter by the
@@ -46,18 +44,17 @@ not exist.
   stored only as hashes and are single-use by one conditional update.
 - Service edges: one token per edge, constant-time compare, minimum length;
   configuration that collapses a separation is refused at start.
-- Audit: append-only, written in the same transaction as the effect;
-  an audit failure stops the action; denials are audited too.
+- Audit: append-only, written in the same transaction as the effect; an audit failure stops the action; denials are audited too.
 - Bounds: loops, queues, retries, pages and streams are bounded; every
   outbound call has a deadline.
 - Untrusted input: request data, retrieved content and model output are
   data, never instructions; control and bidirectional characters are
   refused where text is stored or shown; paths are checked against
   traversal; queries and commands are parameterized.
-- Supply chain: new dependencies are pinned and covered by a lock file; no
-  install from an unpinned or unknown source.
-- Logging: the failing call, status, error class and a correlation id;
-  never a payload, token or secret.
+- Files: a database manifest row owns each object key and binds it to its tenant; a download authorizes, reads with no database connection held, then re-authorizes and audits.
+- Browser session: tokens never reach the browser; the session is a `__Host-` cookie; non-GET requests pass a same-origin check; ids with dot segments are refused.
+- Supply chain: new dependencies are pinned and covered by a lock file; no install from an unpinned or unknown source.
+- Logging: the failing call, status, error class and a correlation id; never a payload, token or secret.
 
 ## Boundaries
 - Does: review, findings, verdict. Nothing else.

@@ -34,6 +34,11 @@ project's design tokens.
   bundle you ship, because unnamed means unmeasured.
 - Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
+## Rules
+- Every action shows a pending state and a visible failure and cannot be submitted twice; ids in URLs are encoded; focus stays visible; responses carry security headers and a CSP; the theme never flashes on load.
+- A browser-facing backend runs OIDC with PKCE server-side; tokens never reach the browser; the session is a `__Host-` cookie; non-GET requests pass a same-origin check; upstream identity comes only from the server session; ids with dot segments are refused.
+- Grep for an existing helper before writing a new one; the README and the interface and architecture records the change makes stale are updated in the same PR.
+
 ## Boundaries
 - Does: client-side implementation, routing and guards, typed data layer,
   states, responsive behavior, automated tests for its own work, within

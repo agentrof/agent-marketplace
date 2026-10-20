@@ -57,7 +57,7 @@
       "owner": "project",
       "description": "lint or format check",
       "rule": "Run the project's formatter and linter on the changed files before every push.",
-      "hints": ["\\b(lint|linter|ruff|flake8|pylint|eslint|prettier|black|isort|gofmt|rustfmt|markdownlint|stylelint)\\b", "would reformat", "format(ting)? (check|error)", "trailing whitespace"]
+      "hints": ["^style(\\([^)]*\\))?:", "\\b(lint|linter|ruff|flake8|pylint|eslint|prettier|black|isort|gofmt|rustfmt|markdownlint|stylelint)\\b", "would reformat", "format(ting)? (check|error)", "trailing whitespace"]
     },
     {
       "id": "type-error",
@@ -78,21 +78,21 @@
       "owner": "process",
       "description": "acceptance criteria missing, ambiguous or misread",
       "rule": "Write each acceptance criterion with its expected value and its named test before writing code; ask the owner when a criterion has two readings.",
-      "hints": ["acceptance criteri", "\\bcriterion\\b", "spec(ification)? (gap|unclear|missing)", "requirement (missing|unclear|changed)", "ambiguous", "misread"]
+      "hints": ["\\b(software-architect|business-analyst|product-owner) changes\\b", "acceptance criteri", "\\bcriterion\\b", "spec(ification)? (gap|unclear|missing)", "requirement (missing|unclear|changed)", "ambiguous", "misread"]
     },
     {
       "id": "review-missing-test",
       "owner": "project",
       "description": "review found a behavior without a test",
       "rule": "Add a test for each criterion and each new branch in the same change; the reviewer checks one per criterion.",
-      "hints": ["missing (a )?tests?", "no tests? (for|covers)", "untested", "without (a )?tests?", "not covered by (a )?tests?"]
+      "hints": ["^test(\\([^)]*\\))?:", "\\bqa-engineer changes\\b", "missing (a )?tests?", "no tests? (for|covers)", "untested", "without (a )?tests?", "not covered by (a )?tests?"]
     },
     {
       "id": "review-finding",
       "owner": "project",
       "description": "review found a defect the author missed",
       "rule": "Before opening the PR, read the diff once against the reviewer's checklist (security, failure paths, data custody) and fix what it names.",
-      "hints": ["review(er)? (finding|found|flagged)", "security review", "from (the )?review", "address(es)? review"]
+      "hints": ["^(fix|review)\\((review|security)\\)", "\\b(code|security)-reviewer changes\\b", "review(er)? (finding|found|flagged)", "security review", "from (the )?review", "address(es)? review"]
     },
     {
       "id": "test-failure",

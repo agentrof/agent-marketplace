@@ -46,6 +46,10 @@ Design-time review of a relational schema deliverable. Severity: Critical blocks
 - [ ] Soft-delete strategy documented where applicable, with partial indexes for live rows and defined child behavior.
 - [ ] Common fields documented as a group with a code-level implementation recommendation (base model, mixin, middleware).
 
+## Tenant Isolation
+
+- [ ] When the system is multi-tenant, every box of the [multi-tenancy](multi-tenancy.md) reference holds. A tenant table without forced row level security is a CRITICAL finding.
+
 ## Schema Evolution Safety
 
 - [ ] Migrations touching large live tables use safe DDL: concurrent index builds, NOT VALID then VALIDATE for new constraints, batched backfills.

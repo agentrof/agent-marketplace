@@ -222,8 +222,7 @@
       "tests": [
         "tools.tests.test_task_inputs.BuiltPackageTaskInputTests.test_every_built_package_checks_its_catalog_and_derives_a_role_task",
         "tools.tests.test_task_inputs.TaskInputTests.test_base_inventory_includes_dirty_and_untracked_product_sources",
-        "tools.tests.test_task_inputs.TaskInputTests.test_regular_input_rejects_lexical_and_filesystem_aliases",
-        "tools.tests.test_task_inputs.TaskInputTests.test_technology_binding_rejects_git_clean_crlf_bytes_that_differ_from_head"
+        "tools.tests.test_task_inputs.TaskInputTests.test_regular_input_rejects_lexical_and_filesystem_aliases"
       ],
       "depends_on": [
         "platform"

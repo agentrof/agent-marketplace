@@ -26,6 +26,7 @@
     "GITHUB_RUN_ID",
     "GITHUB_SHA",
     "GITHUB_STEP_SUMMARY",
+    "GRAPHIFY_OUT",
     "HOME",
     "LANG",
     "PATH",

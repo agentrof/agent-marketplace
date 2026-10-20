@@ -17,6 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 import build_distributions  # noqa: E402
 import counts  # noqa: E402
+sys.path.insert(0, str(ROOT / "tools" / "tests"))
+from git_fixture import init_repository  # noqa: E402
 
 TEAM = ROOT / "plugins" / "software-engineering-team"
 OVERLAY = ROOT / "platforms" / "shared" / "software-engineering-team" / "overlay"
@@ -50,7 +52,7 @@ class GraphifyHookEnvTests(unittest.TestCase):
         import setup_companions
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            init_repository(root)
             (root / ".gitattributes").write_text("graph.json merge=graphify\n", encoding="utf-8")
             hook = root / ".git" / "hooks" / "post-commit"
             hook.write_text("#!/bin/sh\n# graphify-hook-start\ngraphify update .\n", encoding="utf-8")
@@ -174,7 +176,7 @@ class GraphifyRefreshTests(unittest.TestCase):
                 return subprocess.run(["git", "-C", str(project), *args], check=True,
                                       capture_output=True, text=True).stdout.strip()
 
-            git("init", "-q")
+            init_repository(project)
             git("-c", "user.name=t", "-c", "user.email=t@example.invalid",
                 "commit", "-q", "--allow-empty", "-m", "base")
             (project / "workspace" / "docs" / "a.md").write_text("x\n", encoding="utf-8")

@@ -86,7 +86,7 @@
       "18e3511f531893c5551e8564102ac9931ba8d1a1c1b2f21a3676c0d9df1a44a8"
     ,
     "scripts/graphify_refresh.py":
-      "72506ee8d873243e89684341e57f12f949e38de73289f70e2b01d0878ff689d1"
+      "f5fcab070a80cb4bee1a3d07c039cf3249eb7eb364e3b128f40276b7cd36458f"
     ,
     "scripts/hook_launcher.py":
       "f5dfa03e324467e05754048c0edac9751f1f8e76844b026fce151668cbf761fc"
@@ -134,7 +134,7 @@
       "11ed3660383ed1970870cae04c534ada141a36c7f04f433833de227b6913872d"
     ,
     "scripts/setup_companions.py":
-      "95a46e44550fdcf26a9c2069ce472757bf53bed8ad192c39537a43018916d608"
+      "9f9c7f1b2d81c3f39a638d0658bab6d008cf348f0c95460ab76a6499fad1e62d"
     ,
     "scripts/setup_project.py":
       "619d463d51b5b2eebd96f311026d9b37ca501b68b46585ba4a93b6c79e279718"
@@ -155,7 +155,7 @@
       "c71a5914a8849507e5101d593305904e4ef658b5430d2fa328cc7b320defc745"
     ,
     "scripts/workspace_guard.py":
-      "07268df9dcc524f8f242e54d1d70c04ed9ff0dcf166be8407b7cd790044c5625"
+      "f29df7f1ba48fb3c20fda18f517be7dc8812ef50a0621a1b111cfa6543627f59"
     ,
     "skill-content/autopilot/SKILL.md":
       "3a6c28c1713428f8331f4a43a0fa66e74f21bf9c5120084f542c4fe64c2ca128"

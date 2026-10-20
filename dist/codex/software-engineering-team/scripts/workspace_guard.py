@@ -42,7 +42,7 @@ def log(root: Path, message: str) -> None:
     try:
         runtime = root / ".agentrof" / "agent-marketplace" / ".runtime"
         runtime.mkdir(parents=True, exist_ok=True)
-        with (runtime / "workspace-guard.log").open("a", encoding="utf-8") as handle:
+        with (runtime / "workspace-guard.log").open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {message}\n")
     except OSError:
         pass

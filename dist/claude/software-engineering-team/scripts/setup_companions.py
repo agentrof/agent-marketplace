@@ -122,7 +122,7 @@ def write_hook_env(registry: dict, root: Path) -> None:
         for step in companion.get("steps", []):
             for path in hook_missing(step, root):
                 head, _, body = path.read_text(encoding="utf-8").partition("\n")
-                path.write_text(f"{head}\n{step['hook_env']['line']}\n{body}", encoding="utf-8")
+                path.write_bytes(f"{head}\n{step['hook_env']['line']}\n{body}".encode("utf-8"))
 
 
 def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dict], list[str]]:

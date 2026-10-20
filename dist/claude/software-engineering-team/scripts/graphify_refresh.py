@@ -26,7 +26,7 @@ import file_lock
 
 def log(out: Path, message: str) -> None:
     out.mkdir(parents=True, exist_ok=True)
-    with (out / "refresh.log").open("a", encoding="utf-8") as handle:
+    with (out / "refresh.log").open("a", encoding="utf-8", newline="\n") as handle:
         handle.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {message}\n")
 
 
@@ -50,13 +50,13 @@ def refresh(root: Path, commit_range: str, docs: str) -> None:
         log(out, f"skip: no docs graph yet; build it once with GRAPHIFY_OUT={graph}"
                  f" graphify extract {docs} --backend claude-cli")
         return
-    with (out / "refresh.lock").open("w") as lock:
+    with (out / "refresh.lock").open("w", newline="\n") as lock:
         if not file_lock.try_lock(lock.fileno()):
             # The running refresh or the next one picks these up from the manifest.
             log(out, f"skip: another refresh is running; {len(changed)} file(s) wait for the next one")
             return
         log(out, f"start: {len(changed)} changed file(s) in {commit_range}")
-        with (out / "refresh.log").open("a", encoding="utf-8") as handle:
+        with (out / "refresh.log").open("a", encoding="utf-8", newline="\n") as handle:
             result = subprocess.run(
                 ["graphify", "extract", docs, "--backend", "claude-cli"], cwd=root,
                 env={**os.environ, "GRAPHIFY_OUT": str(graph.resolve())},

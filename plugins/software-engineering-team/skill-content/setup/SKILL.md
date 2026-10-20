@@ -113,7 +113,9 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
     template with unresolved command placeholders.
     Read [ci-bootstrap](references/ci-bootstrap.md) before a Delivery's
     execution approval, whose pull request check precondition it defines.
-11. Review and commit the exact tracked refresh diff before a workflow handoff.
+11. Run `setup_project.py companions check`; optional third-party skills, and
+    `companions apply` installs them only on the owner's go (README Companions).
+12. Review and commit the exact tracked refresh diff before a workflow handoff.
     Report `requirement` as the next entry. `/requirement` evaluates the
     request-specific impact matrix and routes only the required stages and
     backlog handoff; setup never infers routing from repository history.

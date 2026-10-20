@@ -4,7 +4,8 @@
 ``inspect`` produces the exact managed-surface plan without changing the
 project, ``check`` verifies the installed project contract, and ``apply``
 executes the inspected plan with rollback when the closing check does not pass.
-Omitting the command runs ``apply``.
+Omitting the command runs ``apply``. ``companions [check|apply]`` checks or
+installs the optional third-party companion skills.
 """
 
 from __future__ import annotations
@@ -1479,6 +1480,10 @@ def emit(result: dict, as_json: bool) -> None:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["companions"]:
+        import setup_companions  # host-shared overlay, present in the built package
+        return setup_companions.main(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command", nargs="?", choices=("inspect", "check", "apply"),

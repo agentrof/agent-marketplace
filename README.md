@@ -35,6 +35,80 @@ tracked vault contract, ignored local Obsidian plugin projection, closed
 configuration, managed ignore and checkout-attribute blocks and portable gate.
 Claude Code and Codex use the same canonical workflows and project-local files.
 
+## Companions
+
+Setup can add optional third-party skills through their own official install
+paths; none is copied into the package and none is required. Run
+`scripts/setup_project.py companions check --project-root <root>` for a status
+table and `companions apply` to install, write the deny rules, environment and
+marker files, and print any command the owner must run by hand. Blocked
+skills become `Skill(<plugin>:<skill>)` deny rules in `.claude/settings.json`
+and `[[skills.config]]` entries with `enabled = false` in the user Codex
+config; the environment is written to the Claude project settings.
+
+<!-- companions:start -->
+
+The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.
+
+### superpowers
+
+Debugging, self-verification, review intake and skill-writing disciplines. Four skills add method the team lacks; the rest duplicate the deliver flow and stay blocked. [https://github.com/obra/superpowers](https://github.com/obra/superpowers), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add obra/superpowers-marketplace`<br>`claude plugin install superpowers@superpowers-marketplace --scope project` | `claude plugin list --json` lists `superpowers@superpowers-marketplace` |
+| codex | user | `codex plugin add superpowers@openai-curated` | `codex plugin list --json` lists `superpowers@openai-curated` |
+
+Blocked: `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `using-git-worktrees`, `finishing-a-development-branch`, `test-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `diagnosing-superpowers`. They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.
+
+Environment: `SUPERPOWERS_DISABLE_TELEMETRY=1`.
+
+### humanizer
+
+Removes AI-writing tells from prose. Pull request bodies, documents and issues read as written by the team, without changing what they say. [https://github.com/blader/humanizer](https://github.com/blader/humanizer), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add blader/humanizer`<br>`claude plugin install humanizer@humanizer --scope project` | `claude plugin list --json` lists `humanizer@humanizer` |
+| codex | project | `npx skills add blader/humanizer --agent codex -y` | `.agents/skills/humanizer/SKILL.md` exists |
+
+### security-audit
+
+Security review lens with a tenant data isolation reference. High-rigor reviews get a security method; guidance mode writes nothing. [https://github.com/cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -y` | `.claude/skills/security-audit/SKILL.md` exists |
+| codex | project | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y` | `.agents/skills/security-audit/SKILL.md` exists |
+
+### diagram-design
+
+Architecture, delta, sequence and ER diagrams. Structural architecture changes get a drawn delta; no telemetry. [https://github.com/cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add cathrynlavery/diagram-design`<br>`claude plugin install diagram-design@diagram-design --scope project` | `claude plugin list --json` lists `diagram-design@diagram-design` |
+| codex | user | `codex plugin marketplace add cathrynlavery/diagram-design`<br>`codex plugin add diagram-design@diagram-design` | `codex plugin list --json` lists `diagram-design@diagram-design` |
+
+Setup writes `.diagram-design`.
+
+### impeccable
+
+Frontend design craft and read-only UI critique. Closes the frontend design quality gap; installed without hooks and with telemetry off. [https://github.com/pbakaus/impeccable](https://github.com/pbakaus/impeccable), Apache-2.0.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `npx impeccable install --providers=claude --project --no-hooks -y` | `.claude/skills/impeccable/SKILL.md` exists |
+| codex | project | `npx impeccable install --providers=codex --project --no-hooks -y` | `.agents/skills/impeccable/SKILL.md` exists |
+
+Environment: `IMPECCABLE_CONTEXT_DIR=workspace/experience-design`, `IMPECCABLE_NO_TELEMETRY=1`.
+
+Setup writes `.impeccable/config.json`.
+
+Check fails on `DESIGN.md`, `PRODUCT.md`, `docs/DESIGN.md`, `docs/PRODUCT.md`. DESIGN.md and PRODUCT.md live only in workspace/experience-design.
+
+<!-- companions:end -->
+
 ## Requirement and Delivery path
 
 ```text

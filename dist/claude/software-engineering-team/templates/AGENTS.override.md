@@ -59,6 +59,23 @@ current process receipts together. Every approved package-set or
 application-only delta advances that application receipt; older Requirement and
 backlog bindings must revise and rebind before further handoff.
 
+## Companion skills
+
+The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.
+
+| Step | Role | Skill | When |
+|---|---|---|---|
+| Write code, test fails or bug task | developer roles | superpowers:systematic-debugging | a failure whose cause is not obvious |
+| Self-check before handoff | developer roles | superpowers:verification-before-completion | always before reporting done |
+| Fix pass | same writer | superpowers:receiving-code-review | applying review findings |
+| Team skill authoring | plugin maintainers | superpowers:writing-skills | writing or changing a skill |
+| PR body, docs, README, upstream issue | writer, deliver | humanizer, embedded mode | prose deliverables; not commit messages |
+| Review, high rigor | security reviewer lens | security-audit guidance mode | auth, tenant data, secrets, money, deletion |
+| Full security audit | owner request only | security-audit full mode | explicit audit request, reports outside the repo |
+| Architecture change | software-architect | diagram-design (architecture, architecture-delta, sequence, ER) | a structural change to system-architecture |
+| Write UI | frontend-developer | impeccable (craft, polish, harden, adapt) | the task touches UI |
+| Review, UI | code-reviewer | impeccable detect and critique, read-only | the change touches UI |
+
 # Load user context
 
 Before any work, read these files in this order and follow them. Skip a file

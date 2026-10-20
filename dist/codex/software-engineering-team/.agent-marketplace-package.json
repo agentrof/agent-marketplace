@@ -370,8 +370,11 @@
     "scripts/setup_check.py":
       "76b0dadc1d4a2e7c12d6233b2cad6bd098ff2dc053a0351aaf2d0a642317a025"
     ,
+    "scripts/setup_companions.py":
+      "c17134aa6e87214bcd8284a69cd58913ae15a8ae076e6e31463b5eaf26d5ab5b"
+    ,
     "scripts/setup_project.py":
-      "c38f9bdfe6db73d3a49565fd00a9051f2a1a6f375d443ff26626d8289295b6b6"
+      "3767aa981779685c3ad3a1b074894daec77c21b45ab3aa41b75573c9f77f6ecf"
     ,
     "scripts/stage_package.py":
       "c11bac2a55602b51c4660e542c67783fc19d772eb29c84b90d6d9a35c6949248"
@@ -977,7 +980,10 @@
       "822e5d19a3e5be6924a904918c5f9f356c5fea074bbc0ff344f8a6011950fda6"
     ,
     "skill-content/setup/SKILL.md":
-      "8c59ecce59d1b49c248675c5d8e1088fa4475cfc58a2c1292f1c27a8849a768e"
+      "b5ec2c00dc33dfdf1eeb33f413ae2f110febd4eed82f8b256b331ec61353b76f"
+    ,
+    "skill-content/setup/data/companions.json":
+      "c3dd675ca93141a17d3e1f90206b5cd268bc3891453eb55aa95dfd2385e5324a"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "598c71d4a7c4d0b72d8a57d2bc18898292583a7c692d3d227d0e12a50218a39b"
@@ -1211,10 +1217,10 @@
       "a7126597ce9ea9103be1d443ab748322ddf880e7438ec38fd9d7d13db4134c34"
     ,
     "templates/AGENTS.override.md":
-      "d84ca774c7fed4e518e3221355ba7aca179b0458b1810bd4bc40d0565d0df364"
+      "e366c5d255b1a7209994c947435f09449a6343452f1fac85b66282e93a37bbf1"
     ,
     "templates/CLAUDE.md":
-      "db8d959e9778cf374734e59a86ebb77ab3164a2e4981e025b04e452a9ccab4c8"
+      "6925bf2d36bdf9323f4cd1b05d8237ec302423077d778b4703c52937cff790b6"
     ,
     "templates/ci-tests.yml":
       "0d05078ab3c81a50c20b8a08ce2f1bef6c8fe7b01d7c6230e122e1b140a49cc7"

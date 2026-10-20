@@ -1,0 +1,174 @@
+{
+  "schema_version": 1,
+  "precedence": "The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.",
+  "companions": [
+    {
+      "id": "superpowers",
+      "repo": "https://github.com/obra/superpowers",
+      "license": "MIT",
+      "purpose": "Debugging, self-verification, review intake and skill-writing disciplines.",
+      "why": "Four skills add method the team lacks; the rest duplicate the deliver flow and stay blocked.",
+      "skill_namespace": "superpowers",
+      "blocked_skills": [
+        "brainstorming",
+        "writing-plans",
+        "executing-plans",
+        "subagent-driven-development",
+        "using-git-worktrees",
+        "finishing-a-development-branch",
+        "test-driven-development",
+        "dispatching-parallel-agents",
+        "requesting-code-review",
+        "diagnosing-superpowers"
+      ],
+      "blocked_reason": "They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.",
+      "env": [
+        {"name": "SUPERPOWERS_DISABLE_TELEMETRY", "value": "1"}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add obra/superpowers-marketplace",
+            "claude plugin install superpowers@superpowers-marketplace --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "superpowers@superpowers-marketplace"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "codex plugin add superpowers@openai-curated"
+          ],
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "superpowers@openai-curated"}
+        }
+      },
+      "routing": [
+        {"step": "Write code, test fails or bug task", "role": "developer roles", "skill": "superpowers:systematic-debugging", "when": "a failure whose cause is not obvious"},
+        {"step": "Self-check before handoff", "role": "developer roles", "skill": "superpowers:verification-before-completion", "when": "always before reporting done"},
+        {"step": "Fix pass", "role": "same writer", "skill": "superpowers:receiving-code-review", "when": "applying review findings"},
+        {"step": "Team skill authoring", "role": "plugin maintainers", "skill": "superpowers:writing-skills", "when": "writing or changing a skill"}
+      ]
+    },
+    {
+      "id": "humanizer",
+      "repo": "https://github.com/blader/humanizer",
+      "license": "MIT",
+      "purpose": "Removes AI-writing tells from prose.",
+      "why": "Pull request bodies, documents and issues read as written by the team, without changing what they say.",
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add blader/humanizer",
+            "claude plugin install humanizer@humanizer --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "humanizer@humanizer"}
+        },
+        "codex": {
+          "scope": "project",
+          "install": [
+            "npx skills add blader/humanizer --agent codex -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md"}
+        }
+      },
+      "routing": [
+        {"step": "PR body, docs, README, upstream issue", "role": "writer, deliver", "skill": "humanizer, embedded mode", "when": "prose deliverables; not commit messages"}
+      ]
+    },
+    {
+      "id": "security-audit",
+      "repo": "https://github.com/cloudflare/security-audit-skill",
+      "license": "MIT",
+      "purpose": "Security review lens with a tenant data isolation reference.",
+      "why": "High-rigor reviews get a security method; guidance mode writes nothing.",
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".claude/skills/security-audit/SKILL.md"}
+        },
+        "codex": {
+          "scope": "project",
+          "install": [
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md"}
+        }
+      },
+      "routing": [
+        {"step": "Review, high rigor", "role": "security reviewer lens", "skill": "security-audit guidance mode", "when": "auth, tenant data, secrets, money, deletion"},
+        {"step": "Full security audit", "role": "owner request only", "skill": "security-audit full mode", "when": "explicit audit request, reports outside the repo"}
+      ]
+    },
+    {
+      "id": "diagram-design",
+      "repo": "https://github.com/cathrynlavery/diagram-design",
+      "license": "MIT",
+      "purpose": "Architecture, delta, sequence and ER diagrams.",
+      "why": "Structural architecture changes get a drawn delta; no telemetry.",
+      "files": [
+        {"path": ".diagram-design", "content": "profile: default\n"}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add cathrynlavery/diagram-design",
+            "claude plugin install diagram-design@diagram-design --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "diagram-design@diagram-design"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "codex plugin marketplace add cathrynlavery/diagram-design",
+            "codex plugin add diagram-design@diagram-design"
+          ],
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "diagram-design@diagram-design"}
+        }
+      },
+      "routing": [
+        {"step": "Architecture change", "role": "software-architect", "skill": "diagram-design (architecture, architecture-delta, sequence, ER)", "when": "a structural change to system-architecture"}
+      ]
+    },
+    {
+      "id": "impeccable",
+      "repo": "https://github.com/pbakaus/impeccable",
+      "license": "Apache-2.0",
+      "purpose": "Frontend design craft and read-only UI critique.",
+      "why": "Closes the frontend design quality gap; installed without hooks and with telemetry off.",
+      "env": [
+        {"name": "IMPECCABLE_CONTEXT_DIR", "value": "workspace/experience-design"},
+        {"name": "IMPECCABLE_NO_TELEMETRY", "value": "1"}
+      ],
+      "files": [
+        {"path": ".impeccable/config.json", "content": {"telemetry": false, "hook": {"enabled": false}}}
+      ],
+      "forbidden_paths": ["DESIGN.md", "PRODUCT.md", "docs/DESIGN.md", "docs/PRODUCT.md"],
+      "forbidden_reason": "DESIGN.md and PRODUCT.md live only in workspace/experience-design.",
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "npx impeccable install --providers=claude --project --no-hooks -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".claude/skills/impeccable/SKILL.md"}
+        },
+        "codex": {
+          "scope": "project",
+          "install": [
+            "npx impeccable install --providers=codex --project --no-hooks -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md"}
+        }
+      },
+      "routing": [
+        {"step": "Write UI", "role": "frontend-developer", "skill": "impeccable (craft, polish, harden, adapt)", "when": "the task touches UI"},
+        {"step": "Review, UI", "role": "code-reviewer", "skill": "impeccable detect and critique, read-only", "when": "the change touches UI"}
+      ]
+    }
+  ]
+}

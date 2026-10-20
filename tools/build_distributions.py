@@ -1088,6 +1088,25 @@ def user_context_files(root: Path) -> list[str]:
     return files
 
 
+def companion_section(team_source: Path) -> list[str]:
+    """Return the generated companion routing section, if the team has a registry."""
+    path = (
+        team_source.parents[1] / "platforms" / "shared" / team_source.name
+        / "overlay" / "skill-content" / "setup" / "data" / "companions.json"
+    )
+    if not path.is_file():
+        return []
+    registry = json.loads(path.read_text(encoding="utf-8"))
+    rows = [
+        f"| {row['step']} | {row['role']} | {row['skill']} | {row['when']} |"
+        for companion in registry["companions"] for row in companion.get("routing", [])
+    ]
+    return ["\n".join([
+        "## Companion skills", "", registry["precedence"], "",
+        "| Step | Role | Skill | When |", "|---|---|---|---|", *rows,
+    ])]
+
+
 def project_instruction_text(
     team: str, owner_host: str, companion: str,
     fragments: tuple[Path, Path, Path], user_context: list[str],
@@ -1119,6 +1138,7 @@ def project_instruction_text(
     sections = [
         common.read_text(encoding="utf-8").strip(),
         team_fragment.read_text(encoding="utf-8").strip(),
+        *companion_section(team_fragment.parents[2]),
         "\n".join([*lines[:index], *entries, *lines[index + 1:]]),
     ]
     return owner + "\n\n" + "\n\n".join(sections) + "\n"

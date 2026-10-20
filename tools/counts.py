@@ -12,12 +12,18 @@ Stdlib only. Deterministic output.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
 
 COUNTS_START = "<!-- counts:start -->"
 COUNTS_END = "<!-- counts:end -->"
+COMPANIONS_START = "<!-- companions:start -->"
+COMPANIONS_END = "<!-- companions:end -->"
+COMPANIONS = Path(
+    "platforms/shared/software-engineering-team/overlay/skill-content/setup/data/companions.json"
+)
 
 
 def parse_frontmatter(text: str) -> dict[str, str]:
@@ -77,17 +83,49 @@ def render_block(counts: dict[str, int]) -> str:
     return "\n".join(lines)
 
 
-def inject(readme: Path, block: str) -> tuple[str, str]:
+def verify_text(verify: dict) -> str:
+    if verify["kind"] == "path_exists":
+        return f"`{verify['path']}` exists"
+    return f"`{verify['command']}` lists `{verify['plugin_id']}`"
+
+
+def render_companions(root: Path) -> str:
+    """Render the README companion section from the setup registry."""
+    registry = json.loads((root / COMPANIONS).read_text(encoding="utf-8"))
+    lines = [COMPANIONS_START, "", registry["precedence"]]
+    for companion in registry["companions"]:
+        lines += [
+            "", f"### {companion['id']}", "",
+            f"{companion['purpose']} {companion['why']} [{companion['repo']}]"
+            f"({companion['repo']}), {companion['license']}.", "",
+            "| Host | Scope | Install | Verify |", "|---|---|---|---|",
+        ]
+        for host, spec in companion["hosts"].items():
+            install = "<br>".join(f"`{command}`" for command in spec["install"])
+            lines.append(f"| {host} | {spec['scope']} | {install} | {verify_text(spec['verify'])} |")
+        if companion.get("blocked_skills"):
+            names = ", ".join(f"`{name}`" for name in companion["blocked_skills"])
+            lines += ["", f"Blocked: {names}. {companion['blocked_reason']}"]
+        if companion.get("env"):
+            env = ", ".join(f"`{item['name']}={item['value']}`" for item in companion["env"])
+            lines += ["", f"Environment: {env}."]
+        if companion.get("files"):
+            lines += ["", "Setup writes " + ", ".join(f"`{item['path']}`" for item in companion["files"]) + "."]
+        if companion.get("forbidden_paths"):
+            lines += ["", "Check fails on " + ", ".join(
+                f"`{path}`" for path in companion["forbidden_paths"]
+            ) + f". {companion['forbidden_reason']}"]
+    return "\n".join([*lines, "", COMPANIONS_END])
+
+
+def inject(readme: Path, block: str, start: str = COUNTS_START,
+           end: str = COUNTS_END, text: str | None = None) -> tuple[str, str]:
     """Return (old_text, new_text)."""
-    text = readme.read_text(encoding="utf-8")
-    pattern = re.compile(
-        re.escape(COUNTS_START) + r".*?" + re.escape(COUNTS_END), re.DOTALL
-    )
+    text = readme.read_text(encoding="utf-8") if text is None else text
+    pattern = re.compile(re.escape(start) + r".*?" + re.escape(end), re.DOTALL)
     if not pattern.search(text):
-        raise SystemExit(
-            f"counts: README has no marker block ({COUNTS_START} ... {COUNTS_END})"
-        )
-    new_text = pattern.sub(block, text, count=1)
+        raise SystemExit(f"counts: README has no marker block ({start} ... {end})")
+    new_text = pattern.sub(lambda _: block, text, count=1)
     return text, new_text
 
 
@@ -103,8 +141,9 @@ def main() -> int:
         print("counts: README.md not found", file=sys.stderr)
         return 1
 
-    block = render_block(compute(root))
-    old_text, new_text = inject(readme, block)
+    old_text, new_text = inject(readme, render_block(compute(root)))
+    _, new_text = inject(readme, render_companions(root), COMPANIONS_START,
+                         COMPANIONS_END, new_text)
 
     if args.check:
         if old_text != new_text:

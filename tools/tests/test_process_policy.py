@@ -18,7 +18,6 @@ TEAM = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(TEAM / "scripts"))
 
 import process_policy  # noqa: E402
-import vault_check  # noqa: E402
 
 
 FIXTURE_REGISTRY = {
@@ -238,30 +237,6 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
         self.assertEqual(listed["other_mode"]["values"][1]["tradeoffs"], "One gate instead of two.")
         self.assertEqual(result["policy"]["status"], "approved")
 
-    def test_the_policy_is_a_legal_linked_vault_note(self):
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        self.approved_with(fixture_mode="fast")
-        self.cli("begin-revision")
-        for step in ("draft", "approved"):
-            with self.subTest(step=step):
-                if step == "approved":
-                    self.assertEqual(self.cli("approve")[0], 0)
-                map_text = (self.docs / "maps/delivery.md").read_text(encoding="utf-8")
-                self.assertIn("[[delivery/process-policy|Process Policy]]", map_text)
-                vault = vault_check.build_vault(self.docs, policy)
-                findings = []
-                for check in (vault_check.check_frontmatter_props, vault_check.check_nav_footer,
-                              vault_check.check_wikilink_resolution, vault_check.check_orphans,
-                              vault_check.check_moc_coverage, vault_check.check_title_shape):
-                    check(vault, findings)
-                self.assertEqual([finding for finding in findings if finding.path in {
-                    "delivery/process-policy.md", "maps/delivery.md"}], [])
-        vault_check.materialize_payload(self.docs, policy, vault_check.DEFAULT_PAYLOAD)
-        vault_check.reconcile_payload_fragment(self.docs, policy, "delivery")
-        types = json.loads((self.docs / ".obsidian/types.json").read_text())["types"]
-        props, _body = process_policy.parse(self.path)
-        for key in props:
-            self.assertEqual(types.get(key), policy["property_types"][key], key)
 
 
 LIMITS = "skill-content/fixture-method/data/limits.json"
@@ -490,20 +465,6 @@ class ProcessPolicyParameterTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, fragment):
                     process_policy.load_registry(self.package)
 
-    def test_a_policy_with_parameters_is_a_legal_linked_vault_note(self):
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        self.assertEqual(self.cli("init")[0], 0)
-        self.cli("set", "--switch", "limit_mode", "--value", "capped")
-        self.cli("set", "--switch", "limit_mode", "--parameter", "criteria", "--value", "12")
-        self.assertEqual(self.cli("approve")[0], 0)
-        vault = vault_check.build_vault(self.docs, policy)
-        findings = []
-        for check in (vault_check.check_frontmatter_props, vault_check.check_nav_footer,
-                      vault_check.check_wikilink_resolution, vault_check.check_orphans,
-                      vault_check.check_title_shape):
-            check(vault, findings)
-        self.assertEqual([finding for finding in findings
-                          if finding.path == "delivery/process-policy.md"], [])
 
 
 SKILLS = "plugins/software-engineering-team/skill-content"
@@ -517,7 +478,6 @@ RELEASED_DEFAULTS = {
     "backlog_path": "standard",
     "calculation_examples": "off",
     "code_review_panel": "single_reader",
-    "context_pack": "off",
     "delivery_path": "standard",
     "dependent_rebind_gate": "separate",
     "epic_review_cadence": "wait_per_panel",
@@ -557,7 +517,6 @@ RELEASED_DEFAULTS = {
     "review_manifest_scope": "transitive",
     "review_panels": "single_reader",
     "review_rounds": "current",
-    "review_scope": "full",
     "requirement_fact_check": "off",
     "review_scope_record": "off",
     "root_review_scope": "full",
@@ -675,20 +634,6 @@ SAFETY_RULES = {
             "a receipt is uncommitted, tampered, ambiguous or does not replay",
         ),
     },
-    "review_scope": {
-        f"{SKILLS}/challenge-review/references/switch-review_scope-impact_closure.md": (
-            "The closure scopes the default read; it never caps it",
-            "no reader is ever spent on a package its compiler refuses",
-            "A note in `graph_gaps` is read in full",
-            "A first approval reads the whole package",
-            "never infer its content from that summary",
-            "A read-only reader never writes the vault",
-            "never a silent edit",
-            "refresh every review whose manifest hash changed before its verdict counts",
-        ),
-        **{path: ("run the owning compiler's structural check the flow names before",)
-           for path in HOSTS.values()},
-    },
     "review_fanout": {
         f"{SKILLS}/challenge-review/references/switch-review_fanout-per_unit.md": (
             "a role never starts or closes another agent",
@@ -707,14 +652,6 @@ SAFETY_RULES = {
             "A blocking fix re-runs every level whose manifest hash it changes",
         ),
         **{path: ("approval still waits for every level",) for path in HOSTS.values()},
-    },
-    "context_pack": {
-        f"{SKILLS}/challenge-review/references/switch-context_pack-role_digest.md": (
-            "The pack is derived from the bound sources, never authored",
-            "A pack whose source hashes do not match the bound sources is stale",
-            "the pack never narrows what a role may read",
-            "apply in full whatever the pack holds",
-        ),
     },
     "step_timing": {
         f"{SKILLS}/challenge-review/references/switch-step_timing-recorded.md": (
@@ -1264,11 +1201,9 @@ class ProcessSwitchContractTests(unittest.TestCase):
 # The review and reading switches of #441: each owning flow anchors its
 # non-default value and names the reference that defines it.
 READING_SWITCHES = {
-    "review_scope": ("impact_closure", "switch-review_scope-impact_closure.md"),
     "review_fanout": ("per_unit", "switch-review_fanout-per_unit.md"),
     "review_levels": ("concurrent_when_independent",
                       "switch-review_levels-concurrent_when_independent.md"),
-    "context_pack": ("role_digest", "switch-context_pack-role_digest.md"),
     "step_timing": ("recorded", "switch-step_timing-recorded.md"),
     "step_budgets": ("enforced", "switch-step_budgets-enforced.md"),
 }
@@ -1278,10 +1213,7 @@ STEP_BUDGET_TARGETS = {"backlog_revision": 10, "confirmation_rereview": 3,
                        "requirement_technical": 10, "story_end_to_end": 180}
 # The QA step keys, whose length depends on the project, ship no target (#543).
 QA_STEP_KEYS = ("freeze", "live_run", "live_step", "manual_scenario", "pre_handoff", "qa_lifecycle_gate")
-VAULT_FIRST = "Vault first, per constitution section 5"
-VAULT_TIERS = ("`project_reading` plan", "machine indexes and generated views",
-               "typed frontmatter", "relation blocks and wikilinks", "then maps",
-               "manual search, reads and relationship discovery", "record sources and reasons")
+SOURCES_FIRST = "Sources first, per constitution section 5"
 
 
 class ReadingSwitchTests(unittest.TestCase):
@@ -1302,7 +1234,7 @@ class ReadingSwitchTests(unittest.TestCase):
                 self.assertEqual(spec["issue"], 441)
                 self.assertEqual(spec["reference_scope"], "owning_flows")
         flows = sorted(path.stem for path in (ROOT / FLOWS).glob("*.md"))
-        for name in ("review_scope", "context_pack", "step_timing", "step_budgets"):
+        for name in ("step_timing", "step_budgets"):
             self.assertEqual(sorted(self.switches[name]["flows"]), flows, name)
 
     def test_every_owning_flow_anchors_the_value_and_names_its_reference(self):
@@ -1326,59 +1258,23 @@ class ReadingSwitchTests(unittest.TestCase):
                 self.assertTrue(item["summary"].startswith("Maximum minutes"))
         self.assertIn("never an expectation", self.switches["step_budgets"]["summary"])
 
-    def test_every_role_navigates_the_vault_first(self):
+    def test_every_role_reads_its_sources_first(self):
         constitution = flat_text("plugins/software-engineering-team/constitution.md")
-        section = constitution[constitution.index("## 5. Vault first"):
+        section = constitution[constitution.index("## 5. Sources first"):
                                constitution.index("## Escape hatch")]
-        for term in ("`project_reading` plan automatically returned by `task_inputs.py`",
-                     "project_context.py read --plan <task manifest>",
+        for term in ("sources the task file lists", "grep `workspace/docs/`",
                      "on your initiative or the parent agent's direction",
                      "Record the sources and reasons", "preserve every owning-flow gate",
                      "`context_findings`", "only explicit user approval of the displayed payload"):
             with self.subTest(rule=term):
                 self.assertIn(term, section)
-        self.assertNotIn("`vault_query.py` verbs first", section)
         for agent in sorted((TEAM / "agents").glob("*.md")):
             text = " ".join(agent.read_text(encoding="utf-8").split())
             with self.subTest(agent=agent.name):
-                self.assertIn(VAULT_FIRST + ": start from `project_reading`", text)
-                self.assertIn("Use manual search, reads and relation discovery", text)
+                self.assertIn(SOURCES_FIRST + ": read the sources the task file lists", text)
                 self.assertIn("preserve gates and return `context_findings`", text)
-                self.assertNotIn("under review_scope", text)
-        for flow in sorted((ROOT / FLOWS).glob("*.md")):
-            text = flat_text(flow.relative_to(ROOT).as_posix())
-            with self.subTest(flow=flow.name):
-                self.assertIn("every role starts from the default `project_reading` plan", text)
-                self.assertIn("role's initiative or parent direction", text)
-                self.assertIn("Fallback navigation", text)
-                self.assertNotIn("`vault_query.py` verbs first", text)
-                for term in VAULT_TIERS:
-                    self.assertIn(term, text)
-        # Verify that the shared navigation interface actually exposes its verbs.
-        import project_context
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), self.assertRaises(SystemExit) as stopped:
-            project_context.main(["--help"])
-        self.assertEqual(stopped.exception.code, 0)
-        for verb in ("resolve", "read", "expand", "units", "check"):
-            self.assertIn(verb, output.getvalue())
-        # Navigation never instructs a role to mutate the relation graph.
-        for path in sorted(TEAM.rglob("*.md")):
-            text = " ".join(path.read_text(encoding="utf-8").split())
-            self.assertNotIn("`vault_query.py` verbs first", text, str(path))
-            for verb in ("heal", "render"):
-                with self.subTest(path=path.name, verb=verb):
-                    self.assertNotIn(f"impact_closure.py {verb}", text)
-
-    def test_the_structural_check_runs_before_any_reader(self):
-        for flow in self.switches["review_scope"]["flows"]:
-            text = flat_text(f"{FLOWS}/{flow}.md")
-            anchor = text[text.index("Switch `review_scope`: at `impact_closure`"):]
-            with self.subTest(flow=flow):
-                self.assertRegex(anchor[:400], r"before any (reader|reviewer|reading role)"
-                                 r"|stays the structural check before any reader"
-                                 r"|a refinement reads only")
-
+        self.assertIn(SOURCES_FIRST + ": every role reads the sources the task file lists",
+                      flat_text(f"{FLOWS}/fast-lane.md"))
 
 class MeasuredBaselineTests(unittest.TestCase):
     """The registry ships to every user, so a baseline measured in a project is
@@ -1399,14 +1295,14 @@ class MeasuredBaselineTests(unittest.TestCase):
                 cited.append(name)
                 with self.subTest(switch=name):
                     self.assertTrue(evidence.startswith(" in one measured project"), evidence)
-        self.assertEqual(cited, ["backlog_path", "calculation_examples", "code_review_panel", "context_pack",
+        self.assertEqual(cited, ["backlog_path", "calculation_examples", "code_review_panel",
                                  "delivery_path",
                                  "dependent_rebind_gate", "epic_review_cadence",
                                  "execution_planning", "item_qa_tier", "level_change_map", "own_target_reuse",
                                  "owner_gates",
                                  "pre_handoff_regression", "provisional_claims", "qa_gate_order", "reader_waves",
                                  "rebind_review_scope", "remediation_bookkeeping",
-                                 "remediation_writers", "requirement_fact_check", "review_scope",
+                                 "remediation_writers", "requirement_fact_check",
                                  "review_scope_record",
                                  "root_review_scope",
                                  "source_decision_gate", "test_cost_budget", "test_engines",

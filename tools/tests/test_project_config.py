@@ -195,14 +195,12 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertTrue(canonical.is_file())
             self.assertFalse(legacy.exists())
 
-    def test_legacy_command_migration_writes_drafts_the_vault_accepts(self):
+    def test_legacy_command_migration_writes_drafts_with_unset_values_absent(self):
         """A migrated draft leaves every unset value absent, as a new contract does."""
         sys.path.insert(0, str(SCRIPTS))
         import operation_compile
         import setup_project
-        import vault_check
 
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
         # A retired config and the fields its drafts carry, where None means absent.
         cases = {
             "test and environment commands": (
@@ -230,10 +228,6 @@ class ProjectConfigTests(unittest.TestCase):
                 for path, text in updates.items():
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(text, encoding="utf-8")
-                findings = []
-                vault_check.check_frontmatter_props(vault_check.build_vault(docs, policy), findings)
-                self.assertEqual([(finding.path, finding.message) for finding in findings
-                                  if finding.path.startswith("operation/")], [])
                 for kind, fields in expected.items():
                     props, _body = operation_compile.parse(operation_compile.contract_path(docs, kind))
                     self.assertEqual({key: props.get(key) for key in fields}, fields)

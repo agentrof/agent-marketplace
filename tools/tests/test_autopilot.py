@@ -393,20 +393,16 @@ class LifecycleTests(unittest.TestCase):
                                "--options", "Publish; Hold", "--recommendation", "Hold",
                                "--blocks", "release notes", now=now)
 
-    def test_failed_authority_publication_restores_the_previous_mark(self):
+    def test_failed_authority_write_keeps_the_previous_bytes(self):
         import atomic_file
-        import autopilot_provenance
         self.p.run_verb("on")
         path = self.p.state / "grant.json"
         before = path.read_bytes()
         changed = {**json.loads(before), "id": "unpublished"}
-        after = (json.dumps(changed, indent=2, sort_keys=True) + "\n").encode()
         with mock.patch.object(atomic_file, "replace_bytes", side_effect=OSError("interrupted write")):
             with self.assertRaises(OSError):
                 autopilot.write_private(path, changed)
         self.assertEqual(path.read_bytes(), before)
-        self.assertTrue(autopilot_provenance.written_by_package(path.parent, path.name, before))
-        self.assertFalse(autopilot_provenance.written_by_package(path.parent, path.name, after))
 
     def test_check_reports_an_active_an_expired_and_no_grant(self):
         code, out, _err = self.p.run_verb("check")

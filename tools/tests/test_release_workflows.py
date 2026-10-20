@@ -438,12 +438,11 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertNotIn("continue-on-error", shard_job)
         self.assertIn("TEST_RESULT: ${{ needs.test-shards.result }}", text)
         self.assertIn('test "$TEST_RESULT" = success', text)
-        # The hook and the Delivery code keep native tests where their systems differ.
+        # The Delivery code keeps native tests where its systems differ.
         native = {lane: [selector for group in ("platform", lane)
                          for selector in policy["groups"][group]["tests"]]
                   for lane in ("macos", "windows")}
-        for lane, module in (("macos", "test_vault_hook"), ("windows", "test_vault_hook"),
-                             ("windows", "test_delivery_compile"), ("windows", "test_delivery_git")):
+        for lane, module in (("windows", "test_delivery_compile"), ("windows", "test_delivery_git")):
             with self.subTest(lane=lane, module=module):
                 self.assertTrue(any(selector.startswith(f"tools.tests.{module}.")
                                     for selector in native[lane]))

@@ -43,9 +43,6 @@ VERIFICATION_POLICY = f"{PLUGIN_ROOT}/skill-content/deliver/data/delivery-verifi
 # only its check, and first sees the copy clean, so no finding comes from a
 # file the copy left out.
 DELIVERY_READS = (f"{PLUGIN_ROOT}/skill-content/deliver/data", SWITCHES)
-VAULT_POLICY_READS = (f"{PLUGIN_ROOT}/skill-content/obsidian-vault/data",
-                      f"{PLUGIN_ROOT}/skill-content/business-analysis/data",
-                      f"{PLUGIN_ROOT}/templates/vault")
 PROFILE_READS = ("product.json", "platforms", MODEL_CONFIG)
 HOST_CLI_READS = ("product.json", "platforms", HOST_CLI_PINS)
 PACKAGE_READS = (PLUGIN_ROOT, MODEL_CONFIG)
@@ -149,81 +146,6 @@ class ValidatorContractTests(unittest.TestCase):
                 text = path.read_text(encoding="utf-8").replace(old, new)
                 path.write_text(text, encoding="utf-8")
                 self.assert_reported(root, "frontmatter_shape")
-
-    def test_graph_palette_identity_query_and_rgb_are_validated(self):
-        root = self.partial(VAULT_POLICY_READS)
-        self.assert_silent(root, "vault_policy_shape")
-
-        def recolor(policy: dict) -> None:
-            story = next(
-                group for group in policy["graph_color_groups"]
-                if group["id"] == "story"
-            )
-            story["query"] = "tag:#doc/wrong"
-            story["rgb"] = -1
-
-        self.write_json(
-            root / PLUGIN_ROOT / "skill-content/obsidian-vault/data/vault-policy.json", recolor)
-        self.assert_reported(root, "vault_policy_shape")
-
-    def test_lazy_fragment_property_drift_is_validated(self):
-        root = self.partial(VAULT_POLICY_READS)
-        self.write_json(
-            root / PLUGIN_ROOT / "skill-content/obsidian-vault/data/vault-policy.json",
-            lambda policy: policy["property_types"].pop("package_status"))
-        findings = fixtures.validator_findings(root, "vault_policy_shape")
-        self.assertTrue(any(
-            finding.check == "vault_policy_shape"
-            and "lazy_fragments['business_analysis']"
-            in finding.message
-            and "package_status" in finding.message
-            for finding in findings
-        ))
-
-    def test_vault_policy_and_types_seed_property_maps_cannot_drift(self):
-        root = self.partial(VAULT_POLICY_READS)
-        self.write_json(root / PLUGIN_ROOT / "templates/vault/.obsidian/types.json",
-                        lambda types: types["types"].update(owner_role="number"))
-        findings = fixtures.validator_findings(root, "vault_policy_shape")
-        self.assertTrue(any(
-            finding.check == "vault_policy_shape"
-            and "types.json property map" in finding.message
-            for finding in findings
-        ))
-
-    def test_optional_story_classifications_declare_values_and_text_properties(self):
-        root = self.partial(VAULT_POLICY_READS)
-        path = root / PLUGIN_ROOT / "skill-content/obsidian-vault/data/vault-policy.json"
-        original = path.read_text(encoding="utf-8")
-
-        def messages(mutate) -> list[str]:
-            policy = json.loads(original)
-            mutate(policy)
-            path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-            found: list = []
-            validate.CHECKS["vault_policy_shape"](validate.build_tree(root), found)
-            return [finding.message for finding in found]
-
-        def impact(policy: dict) -> dict:
-            return policy["backlog_contract"]["optional_story_classifications"]["operation_impact"]
-
-        self.assertEqual(messages(lambda policy: None), [])
-        shape = ("optional story classification 'operation_impact' must declare distinct"
-                 " snake_case values and a reason property other than itself")
-        for case, (mutate, message) in enumerate((
-            (lambda policy: impact(policy).update(values=[]), shape),
-            (lambda policy: impact(policy).update(values=["required", "required"]), shape),
-            (lambda policy: impact(policy).update(reason="operation_impact"), shape),
-            (lambda policy: impact(policy).pop("reason"), shape),
-            (lambda policy: impact(policy).update(reason="operation_rationale"),
-             "optional story classification 'operation_impact' names property"
-             " 'operation_rationale', which property_types does not type 'text'"),
-            (lambda policy: policy["property_types"].update(operation_impact="multitext"),
-             "optional story classification 'operation_impact' names property"
-             " 'operation_impact', which property_types does not type 'text'"),
-        )):
-            with self.subTest(case=case):
-                self.assertIn(message, messages(mutate))
 
     def test_delivery_contract_set_and_merge_policy_are_validated(self):
         data = f"{PLUGIN_ROOT}/skill-content/deliver/data"
@@ -1215,10 +1137,6 @@ VALIDATOR_BUILDERS = {
     "version_sync": lambda root: edit_json(
         root, "versions.json",
         lambda value: value["plugins"].update({fixtures.PLUGIN: "9.9.9"})),
-    "vault_policy_shape": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/obsidian-vault/data/vault-policy.json",
-        lambda value: value.update(schema_version="one")),
-    "vault_wiring": lambda root: edit(root, FLOW, "`obsidian-vault` skill", "vault skill"),
     "model_config_shape": lambda root: edit_json(
         root, "tools/data/models.json", lambda value: value["model_classes"].update(
             mechanical={"escalates": "yes"})),

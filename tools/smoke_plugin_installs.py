@@ -399,16 +399,11 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     config = json.loads(config_path.read_text(encoding="utf-8"))
     config["consumer_refresh_fixture"] = "preserve"
     config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
-    app_path = project / "workspace/docs/.obsidian/app.json"
-    app = json.loads(app_path.read_text(encoding="utf-8"))
-    app["alwaysUpdateLinks"] = False
-    app["consumer_knob"] = "preserve"
-    app_path.write_text(json.dumps(app, indent=2) + "\n", encoding="utf-8")
     drift = json.loads(run([
         sys.executable, str(setup), "inspect", "--project-root", str(project),
         "--json",
     ], env))
-    if "workspace/docs/.obsidian/app.json" not in {
+    if "workspace/config.json" not in {
         item.get("path") for item in drift.get("operations", [])
     }:
         raise SmokeFailure("project refresh inspection omitted managed payload drift")
@@ -430,10 +425,6 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         config_path.read_text(encoding="utf-8")
     ):
         raise SmokeFailure("setup refresh retained an unknown config field")
-    refreshed_app = json.loads(app_path.read_text(encoding="utf-8"))
-    if refreshed_app.get("alwaysUpdateLinks") is not True \
-            or refreshed_app.get("consumer_knob") != "preserve":
-        raise SmokeFailure("setup refresh did not isolate managed Obsidian keys")
     run([
         sys.executable, str(setup), "check", "--project-root", str(project),
         "--json",
@@ -442,8 +433,6 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         sys.executable, str(check), "check", "--project-root", str(project),
         "--json",
     ], env)
-    portable = project / ".github" / "agentrof" / "vault-gate.pyz"
-    run([sys.executable, str(portable), "check", "--project-root", str(project), "--json"], env)
     routed = subprocess.run([
         sys.executable, str(route), "--project-root", str(project),
         "--json",

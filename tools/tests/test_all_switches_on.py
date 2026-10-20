@@ -90,7 +90,7 @@ EXPECTED = {
         ("business-analysis", "domain-expert"), ("demo", "ux-designer"),
         ("design-system", "ux-designer"), ("experience-design", "experience-reviewer"),
         ("experience-design", "ux-designer"), ("issue-report", None),
-        ("organize-docs", "business-analyst"), ("requirement", "business-analyst"),
+        ("requirement", "business-analyst"),
         ("setup", "delivery-coordinator"), ("sketch", "ux-designer"),
         ("solution-design", "domain-expert"), ("solution-design", "solution-architect"))},
     "backlog-plan:product-owner": [*BACKLOG, SPLIT, COST, LEVELS],
@@ -156,16 +156,15 @@ EXPECTED = {key: sorted([*value, *(DELIVER if key.startswith("deliver-governed:"
             if key.startswith("deliver-governed:") or key in OWN_SKILL else value
             for key, value in EXPECTED.items()}
 # The reading switches of #441 bind their references, all in challenge-review,
-# to every task of the entries whose flows own them: review_scope,
-# context_pack, step_timing and step_budgets own every flow.
+# to every task of the entries whose flows own them: step_timing and
+# step_budgets own every flow.
 READING = "challenge-review/references/switch-"
 EVERY_FLOW = tuple(READING + name for name in (
-    "context_pack-role_digest.md", "review_scope-impact_closure.md",
     "step_budgets-enforced.md", "step_timing-recorded.md"))
 FANOUT_ENTRIES = ("backlog-plan", "business-analysis", "configure", "design-system",
                   "execution-plan", "experience-design", "solution-design")
 LEVEL_ENTRIES = ("backlog-plan", "configure", "execution-plan")
-FLOWLESS_ENTRIES = ("issue-report", "organize-docs", "setup")
+FLOWLESS_ENTRIES = ("issue-report", "setup")
 EXPECTED = {key: sorted([
     *value,
     *(EVERY_FLOW if key.split(":")[0] not in FLOWLESS_ENTRIES else ()),
@@ -351,19 +350,7 @@ class AllSwitchesOnTests(unittest.TestCase):
                 result = task_inputs.manifest(
                     entry=entry, role=role, mode="review",
                     project=self.project if route["project_state"] else None)
-                # Under context_pack role_digest the pack's sources replace the
-                # required reads of every entry with a flow.
-                pack = result.get("context_pack")
-                self.assertEqual(pack is None, entry in FLOWLESS_ENTRIES, entry)
-                reads = ([source["path"] for source in pack["sources"]] if pack
-                         else result["required_reads"])
-                if pack:
-                    # Beside the digest only the constitution, the role and the
-                    # switch references stay full reads.
-                    self.assertIn("constitution.md", result["required_reads"])
-                    self.assertTrue(all(task_inputs.pack_full_read(path, role)
-                                        for path in result["required_reads"]))
-                    self.assertTrue(pack["rules"])
+                reads = result["required_reads"]
                 bound[f"{entry}:{role}"] = sorted(
                     path.removeprefix("skill-content/") for path in reads
                     if "/references/switch-" in path)
@@ -397,19 +384,6 @@ class AllSwitchesOnTests(unittest.TestCase):
         ended = step_timing.end(self.project, values, run="all-on", span=begun["span"],
                                 at="2026-01-01T03:01:00Z")
         self.assertEqual(ended["overrun"]["budget"], "story_end_to_end")
-        # A reader's task binds the impact closure of its change from the
-        # shipped impact_closure module and its role digest from context_pack.
-        make_approved_backlog(self.docs)
-        self.commit("Approve the backlog")
-        story = sorted((self.docs / "backlog").rglob("story.md"))[0]
-        story.write_text(story.read_text(encoding="utf-8") + "\nA changed line.\n", encoding="utf-8")
-        changed = story.relative_to(self.project).as_posix()
-        result = task_inputs.manifest(entry="backlog-plan", role="backlog-reviewer", mode="review",
-                                      project=self.project, changed=[changed])
-        self.assertEqual(result["review_scope"], "impact_closure")
-        self.assertIn(changed, result["impact_closure"]["changed"])
-        self.assertTrue(result["vault_views"]["views"])
-        self.assertTrue(result["context_pack"]["rules"])
 
     def test_the_backlog_checks_and_derives_an_epic_review_manifest_with_every_switch_on(self):
         make_approved_backlog(self.docs)

@@ -180,13 +180,6 @@ HOOK_EVENT_KEY_RE = re.compile(r"^[A-Z][A-Za-z]+$")
 # before scanning, the same way fenced blocks are skipped.
 INLINE_CODE_RE = re.compile(r"`[^`]*`")
 
-# The vault app's property types; vault-policy.json property_types values
-# must come from this enum.
-OBSIDIAN_PROPERTY_TYPES = {
-    "text", "multitext", "number", "checkbox", "date", "datetime",
-    "tags", "aliases",
-}
-
 COUNTS_START = "<!-- counts:start -->"
 COUNTS_END = "<!-- counts:end -->"
 
@@ -1092,12 +1085,12 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
             problems.append("Codex visible description must not require another plugin")
         claude_contract = read_text(claude_contract_path) \
             if claude_contract_path.is_file() else ""
-        for token in ("team_guard.py", "vault_hook.py", "One Software Engineering Team", "AskUserQuestion", "generated project check"):
+        for token in ("team_guard.py", "One Software Engineering Team", "AskUserQuestion", "generated project check"):
             if token.lower() not in claude_contract.lower():
                 problems.append(f"Claude host contract lacks {token!r}")
         codex_contract = read_text(codex_contract_path) \
             if codex_contract_path.is_file() else ""
-        for token in ("team_guard.py", "vault_hook.py", "One Software Engineering Team", "request_user_input", "generated project check"):
+        for token in ("team_guard.py", "One Software Engineering Team", "request_user_input", "generated project check"):
             if token.lower() not in codex_contract.lower():
                 problems.append(f"Codex host contract lacks {token!r}")
         hook_contracts = (
@@ -1105,14 +1098,13 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
                 "Claude",
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|Bash|PowerShell",
-                 "model_fallback.py"),
+                ("team_guard.py register", "model_fallback.py"),
             ),
             (
                 "Codex",
                 tree.root / "platforms" / "codex" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "vault_hook.py pre", "vault_hook.py post", "Write|Edit|apply_patch|Bash"),
+                ("team_guard.py register",),
             ),
         )
         for label, hook_path, tokens in hook_contracts:
@@ -1199,10 +1191,6 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
                 and "codex" in path.parts
             )
         )
-        # Vault payload files under a plugin's templates/ carry the vault
-        # app's own key schema (camelCase settings, kebab plugin ids); only
-        # the parse requirement applies there.
-        is_vault_payload = "templates" in path.parts and ".obsidian" in path.parts
         # A host's model catalog is keyed by the host's exact model IDs, which
         # the execution_profiles check validates against the adapter's format.
         is_model_catalog = path.name == build_distributions.MODEL_CATALOG_FILE \
@@ -1210,7 +1198,7 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
         keys: list[tuple[str, str]] = []
         _walk_keys(data, "$", keys)
         for where, key in keys:
-            if is_vault_payload or is_codex_schema:
+            if is_codex_schema:
                 continue
             if (is_hooks_manifest and where == "$.hooks"
                     and HOOK_EVENT_KEY_RE.match(key)):
@@ -1502,12 +1490,6 @@ def check_template_placeholders(tree: Tree, findings: list[Finding]) -> None:
             if (skill / "SKILL.md").is_file()
         )
         for tpl in sorted(p for p in templates.rglob("*") if p.is_file()):
-            parts = tpl.parts
-            if ".obsidian" in parts and "plugins" in parts:
-                # Vendored third-party vault plugins are shipped verbatim;
-                # their bundles carry their own template tokens, which are
-                # never substitutions this plugin's skills owe.
-                continue
             for lineno, line in enumerate(read_text(tpl).splitlines(), start=1):
                 for token in PLACEHOLDER_RE.findall(line):
                     if token == "workspace" and "project-instructions" in tpl.parts:
@@ -1774,558 +1756,6 @@ def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
             "error", "versions.json", 1, "version_sync", problem,
             "update versions.json once, run the release sync and rebuild every host",
         ))
-
-
-def check_vault_wiring(tree: Tree, findings: list[Finding]) -> None:
-    """A plugin that ships the vault-law skill wires every docs-facing
-    surface to it: an entry or flow that names the docs tree must also
-    name the obsidian-vault skill, so the law cannot be skipped by
-    omission. Deliberately broad: readers pay one pointer sentence."""
-    for plugin in plugin_dirs(tree):
-        skills = skill_dirs(plugin)
-        if not any(path.name == "obsidian-vault" for path in skills):
-            continue
-        surfaces = sorted(
-            path / "SKILL.md" for path in skills if (path / "SKILL.md").is_file()
-        )
-        flows = plugin / "flows"
-        if flows.is_dir():
-            surfaces.extend(sorted(flows.glob("*.md")))
-        for path in surfaces:
-            text = read_text(path)
-            if "workspace/docs" in text and "obsidian-vault" not in text:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "vault_wiring",
-                    "surface names the docs tree without the vault-law skill",
-                    "add the obsidian-vault load or pointer sentence; every"
-                    " docs-facing surface names the law"))
-
-
-def check_vault_policy_shape(tree: Tree, findings: list[Finding]) -> None:
-    """Any shipped vault-policy.json must be well-formed and in parity with
-    the plugin's templates/vault seeds: the vault checker, the seeds and the
-    graph config are all parameterized by it, so drift is a broken product."""
-    for plugin in plugin_dirs(tree):
-        for skill in skill_dirs(plugin):
-            path = skill / "data" / "vault-policy.json"
-            if not path.is_file():
-                continue
-            def err(message: str, fix: str) -> None:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "vault_policy_shape",
-                    message, fix))
-            try:
-                policy = json.loads(read_text(path))
-            except json.JSONDecodeError as exc:
-                err(f"policy is not valid JSON: {exc}", "fix the JSON syntax")
-                continue
-            if not isinstance(policy.get("schema_version"), int):
-                err("schema_version must be an integer",
-                    "version the policy so the checker can refuse unknowns")
-            for key in ("vault_root_dirname", "home_file",
-                        "maps_dir", "generated_marker_prefix", "attachments_dir",
-                        "artifact_directory_name"):
-                value = policy.get(key)
-                if not (isinstance(value, str) and value):
-                    err(f"'{key}' must be a non-empty string",
-                        "every structural name is policy-driven, never implied")
-            extensions = policy.get("attachment_extensions")
-            if (not isinstance(extensions, list) or not extensions
-                    or not all(isinstance(value, str)
-                               and re.fullmatch(r"\.[a-z0-9]+", value)
-                               for value in extensions)
-                    or len(extensions) != len(set(extensions))):
-                err("attachment_extensions must be unique lowercase suffixes",
-                    "declare every supported binary attachment format once")
-            subtrees = policy.get("subtrees")
-            if (not isinstance(subtrees, list) or not subtrees
-                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
-                               for s in subtrees)):
-                err("subtrees must be a non-empty list of kebab-case names",
-                    "list every note-bearing top-level directory of the vault")
-                subtrees = []
-            extra_maps = policy.get("extra_maps", [])
-            if (not isinstance(extra_maps, list)
-                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
-                               for s in extra_maps)):
-                err("extra_maps must be a list of kebab-case names",
-                    "name the non-subtree map notes (or ship an empty list)")
-                extra_maps = []
-            machine_dirs = policy.get("machine_dirs")
-            if (not isinstance(machine_dirs, list) or not machine_dirs
-                    or not all(isinstance(s, str) and s and "/" not in s
-                               for s in machine_dirs)):
-                err("machine_dirs must be a non-empty list of directory"
-                    " names",
-                    "compiler-owned directories are policy-listed so the"
-                    " checker tolerates them mechanically")
-            banned = policy.get("banned_basenames")
-            if (not isinstance(banned, list) or not banned
-                    or not all(isinstance(s, str) and s.endswith(".md")
-                               for s in banned)):
-                err("banned_basenames must be a non-empty list of .md"
-                    " basenames",
-                    "generic basenames are policy-listed; the naming law is"
-                    " data, not prose")
-            community = policy.get("community_plugins")
-            if (not isinstance(community, list)
-                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
-                               for s in community)):
-                err("community_plugins must be a list of kebab-case plugin"
-                    " ids",
-                    "the vetted community-plugin set is policy-listed; an"
-                    " empty list means none are allowed")
-                community = []
-            graph_search = policy.get("graph_search")
-            if not isinstance(graph_search, str):
-                err("graph_search must be a string",
-                    "the global graph filter is policy data")
-                graph_search = None
-            color_specs = policy.get("graph_color_groups")
-            color_groups = None
-            palette = None
-            if not isinstance(color_specs, list) or not color_specs:
-                err("graph_color_groups must be a non-empty list of"
-                    " {id, query, rgb} objects",
-                    "bind each stable group id to its graph query and"
-                    " 0..16777215 RGB color in one policy record")
-            else:
-                valid_specs = True
-                ids: list[str] = []
-                queries: list[str] = []
-                rgbs: list[int] = []
-                for group in color_specs:
-                    if (not isinstance(group, dict)
-                            or set(group) != {"id", "query", "rgb"}):
-                        err("each graph_color_groups entry must contain"
-                            " exactly id, query and rgb",
-                            "keep group identity, selector and standard"
-                            " color together so ordering cannot reassign"
-                            " colors")
-                        valid_specs = False
-                        continue
-                    group_id = group.get("id")
-                    query = group.get("query")
-                    rgb = group.get("rgb")
-                    if not isinstance(group_id, str) \
-                            or not KEBAB_RE.match(group_id):
-                        err("graph color group ids must be non-empty"
-                            " kebab-case strings",
-                            "use a stable semantic id such as rule-set")
-                        valid_specs = False
-                    if not isinstance(query, str) or not query:
-                        err("graph color group queries must be non-empty"
-                            " strings",
-                            "declare the exact Obsidian graph query")
-                        valid_specs = False
-                    elif "|" in query or re.search(r"tag:#\S*\*", query):
-                        err(f"graph_color_groups query '{query}' uses"
-                            " grammar the graph does not support",
-                            "graph queries have no pipe-OR and no tag"
-                            " wildcards; write OR-joined full tags")
-                        valid_specs = False
-                    if (not isinstance(rgb, int) or isinstance(rgb, bool)
-                            or not 0 <= rgb <= 0xFFFFFF):
-                        err("graph color group rgb values must be integers"
-                            " from 0 through 16777215",
-                            "store each standard six-digit RGB value as"
-                            " its decimal integer")
-                        valid_specs = False
-                    if isinstance(group_id, str):
-                        ids.append(group_id)
-                    if isinstance(query, str):
-                        queries.append(query)
-                    if isinstance(rgb, int) and not isinstance(rgb, bool):
-                        rgbs.append(rgb)
-                if len(ids) != len(set(ids)):
-                    err("graph color group ids must be unique",
-                        "one semantic id owns one standard color")
-                    valid_specs = False
-                if len(queries) != len(set(queries)):
-                    err("graph color group queries must be unique",
-                        "one graph selector owns one standard color")
-                    valid_specs = False
-                if valid_specs:
-                    color_groups = queries
-                    palette = list(zip(queries, rgbs))
-            hubs = policy.get("hubs")
-            if not isinstance(hubs, list):
-                err("hubs must be a list of {note, covers} objects",
-                    "the hub ladder is policy data; ship an empty list when"
-                    " no subtree has hubs")
-            else:
-                for entry in hubs:
-                    if (not isinstance(entry, dict)
-                            or not (isinstance(entry.get("note"), str)
-                                    and entry.get("note", "").endswith(".md"))
-                            or not (isinstance(entry.get("covers"), str)
-                                    and entry.get("covers"))):
-                        err("each hubs entry needs a .md note glob and a"
-                            " covers glob",
-                            "a hub entry names the hub file pattern and the"
-                            " subtree it owns")
-                        continue
-                    if entry["note"].rsplit("/", 1)[0] != entry["covers"]:
-                        err(f"hubs note '{entry['note']}' does not live in"
-                            f" its covers directory '{entry['covers']}'",
-                            "the hub file sits at the root of the tree it"
-                            " covers; the ladder and the matcher share"
-                            " segments")
-            namespaces = policy.get("tag_namespaces")
-            if (not isinstance(namespaces, list) or not namespaces
-                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
-                               for s in namespaces)):
-                err("tag_namespaces must be a non-empty list of kebab-case names",
-                    "the tag vocabulary is closed; declare its namespaces")
-            trees = policy.get("decision_trees")
-            if not isinstance(trees, dict):
-                err("decision_trees must be an object",
-                    "declare each decision tree's path and id grammar")
-                trees = {}
-            for tree_name, spec in sorted(trees.items()):
-                if not isinstance(spec, dict):
-                    err(f"decision tree '{tree_name}' must be an object",
-                        "give it path, id_prefix and id_min_width")
-                    continue
-                if not (isinstance(spec.get("path"), str) and spec.get("path")):
-                    err(f"decision tree '{tree_name}' needs a non-empty path",
-                        "point at the decisions directory inside the vault")
-                if not re.fullmatch(r"[A-Z][A-Z0-9]*", str(spec.get("id_prefix", ""))):
-                    err(f"decision tree '{tree_name}' id_prefix must be"
-                        " uppercase letters/digits",
-                        "ids read as PREFIX-number; the prefix is the law")
-                width = spec.get("id_min_width")
-                if not isinstance(width, int) or isinstance(width, bool) or width < 1:
-                    err(f"decision tree '{tree_name}' id_min_width must be a"
-                        " positive integer",
-                        "ids are zero-padded to the minimum width; more digits"
-                        " stay legal")
-                if spec.get("id_source") != "alias":
-                    err(f"decision tree '{tree_name}' id_source must be 'alias'",
-                        "record ids live in frontmatter aliases")
-                if not isinstance(spec.get("render_index"), bool):
-                    err(f"decision tree '{tree_name}' must carry a boolean"
-                        " render_index",
-                        "each tree declares its index stance explicitly;"
-                        " no default")
-            for key in ("generated_views", "generated_subtrees"):
-                value = policy.get(key)
-                if (not isinstance(value, list)
-                        or not all(isinstance(s, str) and s for s in value)):
-                    err(f"'{key}' must be a list of non-empty strings",
-                        "generated surfaces are policy-listed, never inferred")
-            prop_types = policy.get("property_types")
-            if not isinstance(prop_types, dict) or not prop_types:
-                err("property_types must be a non-empty object",
-                    "one value type per frontmatter key, vault-wide")
-                prop_types = {}
-            else:
-                for key, value in sorted(prop_types.items()):
-                    if value not in OBSIDIAN_PROPERTY_TYPES:
-                        err(f"property_types['{key}'] value '{value}' is not"
-                            f" one of {sorted(OBSIDIAN_PROPERTY_TYPES)}",
-                            "use the vault app's property type enum")
-            lazy_fragments = policy.get("lazy_fragments")
-            if not isinstance(lazy_fragments, dict):
-                err("lazy_fragments must be an object of property lists",
-                    "declare each lazy payload fragment as a list of policy properties")
-            else:
-                for fragment, properties in sorted(lazy_fragments.items()):
-                    if (not isinstance(properties, list)
-                            or not all(isinstance(key, str) and key for key in properties)):
-                        err(f"lazy_fragments['{fragment}'] must be a list of property names",
-                            "use one non-empty property name per lazy fragment entry")
-                        continue
-                    for key in properties:
-                        if key not in prop_types:
-                            err(f"lazy_fragments['{fragment}'] names property '{key}' missing from property_types",
-                                "declare every lazy fragment property in the vault-wide property type map")
-            # The backlog compiler validates a story's optional classification
-            # from this declaration, and the vault's closed property schema
-            # must take the classification and its reason alike.
-            backlog_contract = policy.get("backlog_contract")
-            classifications = (backlog_contract.get("optional_story_classifications")
-                               if isinstance(backlog_contract, dict) else None)
-            if classifications is not None and not isinstance(classifications, dict):
-                err("backlog_contract.optional_story_classifications must be an object",
-                    "declare each optional story classification under its property name")
-                classifications = None
-            for key, spec in sorted((classifications or {}).items()):
-                spec = spec if isinstance(spec, dict) else {}
-                values, reason = spec.get("values"), spec.get("reason")
-                if (set(spec) != {"values", "reason"} or not isinstance(values, list) or not values
-                        or not all(isinstance(value, str) and SNAKE_KEY_RE.match(value)
-                                   for value in values)
-                        or len(values) != len(set(values))
-                        or not isinstance(reason, str) or reason == key):
-                    err(f"optional story classification '{key}' must declare distinct snake_case"
-                        " values and a reason property other than itself",
-                        "list the classification's values and name the property that carries"
-                        " its reason")
-                    continue
-                for name in (key, reason):
-                    if prop_types.get(name) != "text":
-                        err(f"optional story classification '{key}' names property '{name}', which"
-                            " property_types does not type 'text'",
-                            "declare the classification and its reason as vault-wide text"
-                            " properties")
-            extra_types = policy.get("extra_doc_types")
-            if (not isinstance(extra_types, list)
-                    or not all(isinstance(s, str) and KEBAB_RE.match(s)
-                               for s in extra_types)):
-                err("extra_doc_types must be a list of kebab-case type"
-                    " names",
-                    "non-schema doc types (navigation, architecture and"
-                    " design layers) are policy-listed so the graph legend"
-                    " can be judged complete")
-                extra_types = []
-            path_patterns = policy.get("type_path_patterns")
-            if not isinstance(path_patterns, dict) or not path_patterns:
-                err("type_path_patterns must be a non-empty object",
-                    "close every non-analysis document type over explicit"
-                    " vault-relative path regexes")
-                path_patterns = {}
-            else:
-                for doc_type, patterns in sorted(path_patterns.items()):
-                    if (not isinstance(doc_type, str)
-                            or not KEBAB_RE.match(doc_type.replace("_", "-"))
-                            or not isinstance(patterns, list) or not patterns
-                            or not all(isinstance(item, str) and item
-                                       for item in patterns)):
-                        err(f"type_path_patterns['{doc_type}'] must be a"
-                            " non-empty regex list",
-                            "each closed type declares one or more exact"
-                            " vault-relative path grammars")
-                        continue
-                    for pattern in patterns:
-                        try:
-                            re.compile(pattern)
-                        except re.error as exc:
-                            err(f"type_path_patterns['{doc_type}'] has invalid"
-                                f" regex '{pattern}': {exc}",
-                                "ship compilable deterministic path regexes")
-            status_values = policy.get("status_values")
-            if not isinstance(status_values, dict):
-                err("status_values must be an object",
-                    "status vocabularies are closed by document type")
-            else:
-                for doc_type, values in sorted(status_values.items()):
-                    if (not isinstance(values, list) or not values
-                            or not all(isinstance(value, str)
-                                       and KEBAB_RE.match(value.replace("_", "-"))
-                                       for value in values)):
-                        err(f"status_values['{doc_type}'] must be a non-empty"
-                            " machine-safe list",
-                            "declare every legal lifecycle value explicitly")
-            relations = policy.get("relation_contract")
-            if not isinstance(relations, dict):
-                err("relation_contract must be an object",
-                    "cross-subtree traceability is policy data")
-            else:
-                keys = relations.get("keys")
-                if not isinstance(keys, dict) or not keys:
-                    err("relation_contract.keys must be a non-empty object",
-                        "declare the typed outgoing relation vocabulary")
-                else:
-                    for name, spec in sorted(keys.items()):
-                        if (not isinstance(name, str)
-                                or not SNAKE_KEY_RE.match(name)
-                                or not isinstance(spec, dict)
-                                or set(spec) != {"targets", "inverse_label"}
-                                or not isinstance(spec.get("targets"), list)
-                                or not spec.get("targets")
-                                or not all(value == "*" or (
-                                    isinstance(value, str)
-                                    and KEBAB_RE.match(value))
-                                    for value in spec.get("targets", []))
-                                or not isinstance(spec.get("inverse_label"), str)
-                                or not spec.get("inverse_label")):
-                            err(f"relation_contract key '{name}' has an"
-                                " invalid target or inverse-label contract",
-                                "each relation owns targets and one stable"
-                                " machine-layer inverse label")
-                for name in ("inverse_inline_max", "catalog_page_size"):
-                    value = relations.get(name)
-                    if (not isinstance(value, int) or isinstance(value, bool)
-                            or value < 1):
-                        err(f"relation_contract.{name} must be a positive"
-                            " integer",
-                            "bound inverse relation surfaces mechanically")
-                catalog_root = relations.get("catalog_root")
-                if not isinstance(catalog_root, str) or not catalog_root:
-                    err("relation_contract.catalog_root must be non-empty",
-                        "name the compiler-owned relation catalog root")
-                cardinalities = relations.get("cardinality_by_type")
-                if not isinstance(cardinalities, dict):
-                    err("relation_contract.cardinality_by_type must be an object",
-                        "declare source-type relation cardinalities")
-                else:
-                    for doc_type, specs in sorted(cardinalities.items()):
-                        if not isinstance(specs, dict):
-                            err(f"relation cardinality for '{doc_type}' must"
-                                " be an object", "map relation keys to min/max")
-                            continue
-                        for relation, limits in sorted(specs.items()):
-                            if (relation not in (keys or {})
-                                    or not isinstance(limits, dict)
-                                    or set(limits) != {"min", "max"}
-                                    or not all(isinstance(limits.get(name), int)
-                                               and not isinstance(limits.get(name), bool)
-                                               for name in ("min", "max"))
-                                    or not 0 <= limits["min"] <= limits["max"]):
-                                err(f"invalid relation cardinality"
-                                    f" '{doc_type}.{relation}'",
-                                    "use integer 0 <= min <= max for a known"
-                                    " relation key")
-            # Graph color completeness: every doc type known to the
-            # taxonomy (sibling space-schema doc_types, kebab-ized, UNION
-            # extra_doc_types) owns a tag:#doc/<type> color group, and
-            # every group tag names a known type. An uncolored type or a
-            # dead legend entry is a mechanical error, never an oversight.
-            schema_types: set[str] = set()
-            for skill in skill_dirs(plugin):
-                spath = skill / "data" / "space-schema.json"
-                if not spath.is_file():
-                    continue
-                try:
-                    sdata = json.loads(read_text(spath))
-                except json.JSONDecodeError:
-                    continue  # ba_schema_shape reports the parse failure
-                if isinstance(sdata.get("doc_types"), dict):
-                    schema_types.update(k.replace("_", "-")
-                                        for k in sdata["doc_types"])
-            universe = schema_types | set(extra_types)
-            if color_groups is not None:
-                tagged = {m for query in color_groups
-                          for m in re.findall(r"tag:#doc/([a-z0-9-]+)",
-                                              query)}
-                for name in sorted(universe - tagged):
-                    err(f"doc type '{name}' has no graph color group",
-                        "every known doc type carries a tag:#doc/<type>"
-                        " entry in graph_color_groups; add the group (and"
-                        " its color) in the same commit as the type")
-                for name in sorted(tagged - universe):
-                    err(f"graph color group tag '#doc/{name}' names no"
-                        " known doc type",
-                        "a legend entry without a type is dead; drop the"
-                        " group or declare the type in extra_doc_types")
-            # Parity with the shipped seeds: the policy and templates/vault
-            # describe one product; they may not drift.
-            vault_tpl = plugin / "templates" / "vault"
-            if not vault_tpl.is_dir():
-                continue
-            types_seed = vault_tpl / ".obsidian" / "types.json"
-            if not types_seed.is_file():
-                err("templates/vault/.obsidian/types.json is missing",
-                    "ship the Obsidian property seed beside the vault policy")
-            else:
-                try:
-                    types_document = json.loads(read_text(types_seed))
-                except json.JSONDecodeError:
-                    types_document = None  # json_hygiene reports syntax
-                seed_types = types_document.get("types") \
-                    if isinstance(types_document, dict) else None
-                if seed_types != prop_types:
-                    err("types.json property map does not match policy"
-                        " property_types",
-                        "derive the complete Obsidian property seed from the"
-                        " vault-wide property type map in the same change")
-            maps_dir = policy.get("maps_dir") or "maps"
-            home_file = policy.get("home_file") or "home.md"
-            expected_maps = set(subtrees) | set(extra_maps)
-            seeds_dir = vault_tpl / maps_dir
-            seeds = ({p.stem for p in seeds_dir.glob("*.md")}
-                     if seeds_dir.is_dir() else set())
-            for name in sorted(expected_maps - seeds):
-                err(f"policy names '{name}' but templates/vault/{maps_dir}/"
-                    f"{name}.md is missing",
-                    "ship one map seed per policy subtree and extra map")
-            for name in sorted(seeds - expected_maps):
-                err(f"templates/vault/{maps_dir}/{name}.md is not named by"
-                    " the policy",
-                    "add it to subtrees or extra_maps, or drop the seed")
-            home = vault_tpl / home_file
-            if not home.is_file():
-                err(f"templates/vault/{home_file} is missing",
-                    "the home seed is the vault's navigation root")
-            else:
-                home_text = read_text(home)
-                for name in sorted(extra_maps):
-                    if f"[[{maps_dir}/{name}" not in home_text:
-                        err(f"home seed does not link [[{maps_dir}/{name}]]",
-                            "home always links the extra maps")
-                for name in sorted(subtrees):
-                    if f"[[{maps_dir}/{name}" in home_text:
-                        err(f"home seed links [[{maps_dir}/{name}]]",
-                            "home is dynamic: a subtree's map line is added"
-                            " by the entry that births the tree, never"
-                            " shipped in the seed")
-            graph = vault_tpl / ".obsidian" / "graph.json"
-            if graph.is_file():
-                try:
-                    graph_data = json.loads(read_text(graph))
-                except json.JSONDecodeError:
-                    graph_data = {}  # json_hygiene reports the parse failure
-                queries = [str(group.get("query", ""))
-                           for group in graph_data.get("colorGroups", [])
-                           if isinstance(group, dict)]
-                seed_palette = [
-                    (str(group.get("query", "")),
-                     (group.get("color") or {}).get("rgb"))
-                    for group in graph_data.get("colorGroups", [])
-                    if isinstance(group, dict)
-                ]
-                if palette is not None and seed_palette != palette:
-                    err("graph.json colorGroups do not match policy"
-                        " graph_color_groups (same query, RGB and order)",
-                        "the committed graph legend derives from the policy;"
-                        " regenerate graph.json from the named palette")
-                if graph_search is not None \
-                        and graph_data.get("search", "") != graph_search:
-                    err("graph.json search does not match policy"
-                        " graph_search",
-                        "the global graph filter is policy data; restore it")
-            cp_file = vault_tpl / ".obsidian" / "community-plugins.json"
-            if community:
-                cp_data = None
-                if not cp_file.is_file():
-                    err("templates/vault/.obsidian/community-plugins.json is"
-                        " missing",
-                        "the vetted plugin enable list ships with the"
-                        " payload")
-                else:
-                    try:
-                        cp_data = json.loads(read_text(cp_file))
-                    except json.JSONDecodeError:
-                        cp_data = None  # json_hygiene reports the failure
-                if cp_data is not None and sorted(cp_data) != sorted(community):
-                    err("community-plugins.json does not match policy"
-                        " community_plugins",
-                        "the enable list and the policy set are one fact")
-            for plugin_id in community:
-                plugin_dir = vault_tpl / ".obsidian" / "plugins" / plugin_id
-                if not plugin_dir.is_dir():
-                    continue  # vendored payload lands separately; parity
-                    # binds the moment the directory exists
-                for fname in ("manifest.json", "main.js", "data.json"):
-                    if not (plugin_dir / fname).is_file():
-                        err(f"vendored plugin '{plugin_id}' is missing"
-                            f" {fname}",
-                            "a vendored plugin ships manifest, build and"
-                            " settings together")
-                manifest_path = plugin_dir / "manifest.json"
-                if manifest_path.is_file():
-                    try:
-                        manifest = json.loads(read_text(manifest_path))
-                    except json.JSONDecodeError:
-                        manifest = {}  # json_hygiene reports the failure
-                    if isinstance(manifest, dict) \
-                            and manifest.get("id") != plugin_id:
-                        err(f"vendored plugin manifest id"
-                            f" '{manifest.get('id')}' does not match its"
-                            f" directory '{plugin_id}'",
-                            "the enable list, the directory and the manifest"
-                            " name one plugin")
 
 
 def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
@@ -4016,8 +3446,6 @@ CHECKS = {
     "ba_schema_shape": check_ba_schema_shape,
     "wikilink_ban": check_wikilink_ban,
     "version_sync": check_version_sync,
-    "vault_policy_shape": check_vault_policy_shape,
-    "vault_wiring": check_vault_wiring,
     "model_config_shape": check_model_config_shape,
     "execution_profiles": check_execution_profiles,
     "host_cli_versions": check_host_cli_versions,

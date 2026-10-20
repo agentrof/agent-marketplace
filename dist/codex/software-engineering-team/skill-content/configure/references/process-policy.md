@@ -4,7 +4,7 @@
 registry `data/process-switches.json` declares every switch: what it decides,
 its owning flows, its values with their tradeoffs, the default that keeps
 today's behaviour, its component metric and its promotion rule.
-`workspace/docs/delivery/process-policy.md` records only the project's
+`workspace/docs/operation/process-policy.md` records only the project's
 explicit choices, one row per switch. A missing document, or a switch without
 a row, follows the package default. A switch may declare owner-set parameters
 for the values that take them, such as the limits of `story_size_budget`; its

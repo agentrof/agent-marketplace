@@ -53,10 +53,10 @@
       "061af378328b144f2bd558b73ba735fce82987ee6037cfb5110d5a64112e7fa7"
     ,
     "flows/fast-lane.md":
-      "f113a08d7b446d4c544506270662d65e083ad78342752dc7745794cc3bb3a709"
+      "b0e408ea75e5d17e63e6cb41f29d1394864706dcbb55cde1dfaa3762d5716f55"
     ,
     "hooks/hooks.json":
-      "a0c36ec1026afaf7095852d1478862897e3a67295d6770858969bb72175015a8"
+      "9a16ea0f0fae898c980a2a2a214b23ec604264b6ff2ee3d3311ed0cf55afcaf0"
     ,
     "host-contract.md":
       "405419ec7472b0770f4c1961d797de140c56363fabd7d9abe0855530bba89cd4"
@@ -110,13 +110,13 @@
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/process_policy.py":
-      "13828d1bea43582665e2a7d90719e377b0de65d133d3ddf0608cabfd5588ad8c"
+      "83a35924942656ebbf3a1756268981932b5aaa59a25d2a8b9c07feaa31d3cab6"
     ,
     "scripts/project_config.py":
-      "d20cad53bed9b8d85cf264eee7631a579a3e579392ac74e3782827811e6c6d10"
+      "9de81cd1e2f573b047ee9909b926681cc454391e9e45f2671f03eea83b2c2e8d"
     ,
     "scripts/project_instructions.py":
-      "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
+      "9d47c7f43701efbf02710852b459e7cbf8680372afa58d10b88c460960ad8bd7"
     ,
     "scripts/project_paths.py":
       "40891b6797eb8c6437e4be9173571d451512d9af85fc47aba19db60e09c1f0b8"
@@ -134,13 +134,13 @@
       "c5f573942e2a79c8c3907a0081940309e3325521c03d62841b9718de4dc6dbb4"
     ,
     "scripts/setup_check.py":
-      "94fd9da90f46c45052e3cc2e45c2aca8bc61c022f0dfb7d31392b11b074db7bc"
+      "11ed3660383ed1970870cae04c534ada141a36c7f04f433833de227b6913872d"
     ,
     "scripts/setup_companions.py":
       "1377feb9dd6679bdf0cd2deafd2c7a2b6f2c8a9b576f628be14b91699147f8a4"
     ,
     "scripts/setup_project.py":
-      "7b741b38d79ff6f507565809d7316bf4dd9d3c335294feff082377ad8576436a"
+      "619d463d51b5b2eebd96f311026d9b37ca501b68b46585ba4a93b6c79e279718"
     ,
     "scripts/step_timing.py":
       "f37fa8f00c6b93d145a89784724b37711279cec3b620aab29fe2921916024d23"
@@ -156,6 +156,9 @@
     ,
     "scripts/vault_markdown.py":
       "c71a5914a8849507e5101d593305904e4ef658b5430d2fa328cc7b320defc745"
+    ,
+    "scripts/workspace_guard.py":
+      "92fc147a4da86cdce450bb442c863f1ce75e25e50bad3d6605f5caee293bd98e"
     ,
     "skill-content/autopilot/SKILL.md":
       "b628e18c0612511956dcb3fdb91f2e8b82bf27d79918feca9551130291aac6f1"
@@ -200,22 +203,22 @@
       "5375b3628a1523dfd79eef21f6ac5446702b8444446d6deddd88ef6e8f187acf"
     ,
     "skill-content/configure/data/process-switches.json":
-      "a43242968db714a73b9c7cd489ac674cd2b4f93f47d42e169bc507a187bab993"
+      "93f95e519b372b4fc2cd2f683985c0557c374e6770f959acf1f925a27c18d204"
     ,
     "skill-content/configure/data/step-budgets.json":
       "dd99177f7ffc6e91fe189b9d5cc2eae518071e90b1d73a67913400c7aa955a74"
     ,
     "skill-content/configure/references/config-contract.md":
-      "04c96bfe7ad53da5053eaa074890c888f4a175d3a4ac82cbd2a8a79e39b7dc05"
+      "36f529742180c13643251b04c58f9ba093da42b51369c994a92a98e899990d53"
     ,
     "skill-content/configure/references/process-policy.md":
-      "227fb0c477ec60c28636dd4300711e2f2575af6a6c38c665e4f8092617a28290"
+      "5d42c6229f90a0bf6051b532e77366da542c5ddec9e6cdff32315e00d998de69"
     ,
     "skill-content/configure/references/role-models.md":
       "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
     ,
     "skill-content/deliver/SKILL.md":
-      "02901f6c5c443467cb77209bec9cfeccf1cf77b22c3177e28468b3078b98974a"
+      "7268475852abb660e326c244b822e88b0cc32b96be655f001cc964879b0856bb"
     ,
     "skill-content/deliver/data/role-routing.json":
       "d3e91945ea95e903003f17f14fea5548c1c0dcf026fc7e72dd3b08a0335070b6"
@@ -226,11 +229,11 @@
     "skill-content/deliver/data/task-triggers.json":
       "aa90aab77b2cc6a8df3ee3d545dadadb8c581a69e34c792df545033bbf5a25b6"
     ,
+    "skill-content/deliver/references/fast-lane.md":
+      "b03d48eb837816f5f86855ca9911b1fe61d25655f60fee926e0698e63687bb3d"
+    ,
     "skill-content/deliver/references/switch-pr_proof-local_record.md":
       "7d58d116f06aa2722b75f8b67bc444987c8a2d7d88cd0a86d491c96332e57047"
-    ,
-    "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "a8fd82eb9c0cf20cd4111895f9273227d0ec3181e67c823be84c93741140a1b3"
     ,
     "skill-content/deliver/references/switch-step_budgets-enforced.md":
       "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
@@ -341,13 +344,13 @@
       "822e5d19a3e5be6924a904918c5f9f356c5fea074bbc0ff344f8a6011950fda6"
     ,
     "skill-content/setup/SKILL.md":
-      "26166f8cd72a7feae124fe4ddbd001c2057cff95c1ab899f67d28831511d21cc"
+      "cbc8a4d8eec5159533bc5d1c45ab1552cbcda2ab37cfc3e24b32e88f76c936b2"
     ,
     "skill-content/setup/data/companions.json":
       "1d2b422022d3d84f7a6398a4c382911273012615dde032b8b7301ff106af6dd7"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
-      "e1f9fa41e0138d9ab22c5fdf8d6670cb027d232e89a16c06ae8e18f2b929018c"
+      "d1a8d26ff998f886f46a7d776118fba73ccee242b1d817e89dfee6afc1cc51d8"
     ,
     "skill-content/setup/references/windows-long-paths.md":
       "bc73c5b81da276b332fba05681869b48537e530f1dd01387aa9fbf4db1241fa2"
@@ -473,13 +476,19 @@
       "19bf6da635c58e8f5a7447a52c07413c96b136032e0abe35fa0b65b3facbdde3"
     ,
     "templates/AGENTS.override.md":
-      "1945699a3cdc7065bca254bef1788b5e52dfc1dd39e75f712ab65972f9ed04a8"
+      "c900e54785451bb3c07e6b4921d5a0a93fc728aa263a47134c399cb51f0e5953"
     ,
     "templates/CLAUDE.md":
-      "59d80e7107d5fc028b1eca7119d9ad08e6baf46eecf0f3280da75de92e634d0a"
+      "a8ffc94edcd429e3d840a421da9eda1dbfdadd4c90219b8c2dda7fe280349afd"
     ,
     "templates/ci-tests.yml":
-      "e7f87688646b979dbfbce486edda8ca5489e684b1fb08cf8d7f6b4495777c411"
+      "1e6c663045ba2a1fdd79cbc1e3efa47bba670a42bcb527cd2d57f2078465bfaf"
+    ,
+    "templates/experience-design/DESIGN.md":
+      "885cb216894a11d88cd303eec6e247dcff795f197a49c08f6fbb74da162e4a9b"
+    ,
+    "templates/experience-design/README.md":
+      "970a84a73e76d9e9a77257f1d11c06f91c23afe995d9e167603980073c6c85c2"
     ,
     "templates/gitignore":
       "1cdd332064b7a75a86a95452af43632d04b15029e594a8081c72449292d30ca0"
@@ -487,8 +496,14 @@
     "templates/memory/agent-marketplace.md":
       "682fdb71b913a3eed47868304164ad1c7fc086e497a4e78e064cd59d111d5702"
     ,
+    "templates/memory/current-plan.md":
+      "193db6f556c8ed7a2cb2a98e58687ed59781d30666ee7a7ed5641398fae5a4c1"
+    ,
     "templates/memory/me.md":
       "707506fcae21f5bbcc3f14544cfda8369965dcfc40e808a48e94ab362658fa41"
+    ,
+    "templates/memory/product-decisions.md":
+      "3eaaa34a5b38431c81614902bbd8297f19da374a41da88468667904d3335a887"
     ,
     "templates/memory/profile.md":
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
@@ -509,13 +524,13 @@
       "f34ddfbb22ac7961945f64e863ef99aef95afb8568bf7a00db3f6cd385c570ef"
     ,
     "templates/project-instructions/team.md":
-      "76a0f6efc36efa36ec6ff36b222a299aa2a22d35ff304d63a9ab81bb69710d70"
+      "2784f0e3ecf5a78599b95a0853d0f9e7ef3ffe81c5561e9398653be5f884dd1f"
     ,
     "templates/project-instructions/user-context.json":
-      "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
+      "1948e5b9c4992a9bce42ce83b41d99488d07ee990ffe5413f5ab5f2e191d6212"
     ,
     "templates/task-input-contract.md":
-      "6425cab0f065715d5b5c8c4200f3b50ab66288f362626f685912db7d77849487"
+      "26f8fbdedc23ac816ec9b5b38c72566c7921ddb502295e9c4ac3c51d6d40de92"
     ,
     "templates/task-input-policy.json":
       "7d014489540fb0ad3476d68c411ed8b57a6bfa32b071aa5f4b701db488dee5dc"

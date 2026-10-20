@@ -22,12 +22,11 @@ without changing these semantics.
 
 ## Process switches
 
-Process switch `process_profile` keeps the default at `governed`. At
-`fast_lane`, the orchestrating session runs one task per change itself, with
+The orchestrating session runs one task per change itself, with
 every role in the foreground: one task, one branch and one pull request to the
 target branch, the project's CI plus one reviewer (two at task rigor `high`,
 where the owner merges), and auto-merge. The steps are in `flows/fast-lane.md`
-and `deliver/references/switch-process_profile-fast_lane.md`.
+and `deliver/references/fast-lane.md`.
 
 Process switch `pr_proof` leaves a fast-lane task's proof to the project's CI
 at `remote_ci`. At `local_record`, `task_lane.py prove` runs the project's

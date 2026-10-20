@@ -1099,13 +1099,14 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
                 ("team_guard.py register", "model_fallback.py",
-                 "autopilot_guard.py pre", "autopilot_guard.py post"),
+                 "autopilot_guard.py pre", "autopilot_guard.py post", "workspace_guard.py"),
             ),
             (
                 "Codex",
                 tree.root / "platforms" / "codex" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "autopilot_guard.py pre", "autopilot_guard.py post"),
+                ("team_guard.py register", "autopilot_guard.py pre", "autopilot_guard.py post",
+                 "workspace_guard.py"),
             ),
         )
         for label, hook_path, tokens in hook_contracts:
@@ -1515,7 +1516,8 @@ def check_project_instruction_contract(
     common = templates / "project-instructions" / "common.md"
     if not common.is_file():
         problems.append("common project instruction fragment is missing")
-    for filename in ("agent-marketplace.md", "me.md", "profile.md"):
+    for filename in ("agent-marketplace.md", "current-plan.md", "product-decisions.md",
+                     "me.md", "profile.md"):
         if not (templates / "memory" / filename).is_file():
             problems.append(f"memory template is missing {filename}")
     try:

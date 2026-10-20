@@ -302,7 +302,7 @@ session's model at its own class effort:
 Every new process behaviour ships behind a switch whose default is today's
 behaviour. `plugins/software-engineering-team/skill-content/configure/data/process-switches.json`
 declares each switch; a project's values live in
-`workspace/docs/delivery/process-policy.md`, changed only through
+`workspace/docs/operation/process-policy.md`, changed only through
 `/configure process` and never in `workspace/config.json`. A switch without a
 policy row follows its package default.
 

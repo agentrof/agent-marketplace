@@ -23,11 +23,8 @@ well under it, and only an exceeded maximum is reported, never blocking,
 as
 `skill-content/deliver/references/switch-step_budgets-enforced.md`
 defines.
-Switch `process_profile`: the governed Delivery path is removed, so this flow
-runs at either value. At `fast_lane`, follow
-`skill-content/deliver/references/switch-process_profile-fast_lane.md` and
-the steps below. Read the value with
-`scripts/process_policy.py value --switch process_profile`.
+Follow `skill-content/deliver/references/fast-lane.md` and the steps
+below.
 
 One request becomes one task, one branch and one pull request to the
 target branch. Git, the pull request and the project's CI are the protocol:

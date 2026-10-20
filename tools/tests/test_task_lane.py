@@ -1,5 +1,4 @@
-"""Fast lane: switch `process_profile` keeps every request on the standard
-ceremonies at `governed`. At `fast_lane`, one task, one branch and one
+"""Fast lane: one task, one branch and one
 pull request carry a change; the task holds the request and approval times,
 GitHub the rest, and the retrospective derives steps and proposals from them."""
 
@@ -78,26 +77,6 @@ def run_policy(docs: Path, command: str, *argv: str) -> None:
     if code:
         raise AssertionError(output.getvalue())
 
-
-class SwitchTests(unittest.TestCase):
-    def test_the_switch_defaults_to_governed_and_offers_the_fast_lane(self):
-        spec = process_policy.load_registry()["process_profile"]
-        self.assertEqual(spec["default"], "governed")
-        self.assertEqual(spec["values"], ["governed", "fast_lane"])
-        self.assertNotIn("delivery-execution", spec["spec"]["flows"])
-        self.assertNotIn("delivery-planning", spec["spec"]["flows"])
-
-    def test_profile_reads_governed_without_a_policy_and_fast_lane_when_set(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs = Path(temporary) / "workspace" / "docs"
-            (docs / "delivery").mkdir(parents=True)
-            self.assertEqual(process_policy.process_profile(docs), "governed")
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            self.assertEqual(process_policy.process_profile(docs), "governed",
-                             "a draft policy never opens the fast lane")
-            run_policy(docs, "approve")
-            self.assertEqual(process_policy.process_profile(docs), "fast_lane")
 
 class TaskTests(unittest.TestCase):
     def write(self, text: str) -> Path:

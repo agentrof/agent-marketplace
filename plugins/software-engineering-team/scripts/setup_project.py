@@ -35,11 +35,10 @@ TEAM = "software-engineering-team"
 WORKSPACE = "workspace"
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
-REQUIRED_DIRS = (
-    "apps", "docs/business-analysis", "docs/solution-design",
-    "docs/system-architecture", "docs/operation", "docs/backlog",
-)
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
+# Workspace files setup writes only when absent; the project owns them after.
+SEED_FILES = ("experience-design/DESIGN.md", "experience-design/README.md")
+SEED_ROOT = Path(__file__).resolve().parents[1] / "templates"
 LONG_PATHS_CHOICE = "git.core_longpaths"
 # Each declared choice lists its options with the recommended one first.
 CHOICES = {LONG_PATHS_CHOICE: ("set", "leave")}
@@ -320,6 +319,8 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             "terminology_language": current.get(
                 "terminology_language", args.terminology_language
             ),
+            **{field: current.get(field, default)
+               for field, default in project_config.DEFAULTS.items()},
         }
         # The owner's class and role overrides survive a refresh, and setup
         # writes none of its own; one the installed class map no longer takes
@@ -331,6 +332,7 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             "team_id": TEAM,
             "output_language": args.output_language,
             "terminology_language": args.terminology_language,
+            **project_config.DEFAULTS,
         }
 
     errors = project_config.check(config)
@@ -601,7 +603,7 @@ def build_plan(args) -> dict:
             "ownership": "tracked_managed",
         })
 
-    for relative in REQUIRED_DIRS:
+    for relative in project_config.required_dirs(config):
         target = workspace_root / relative
         assert_not_symlinked(root, target, f"managed target {workspace}/{relative}")
         if not target.is_dir():
@@ -609,6 +611,16 @@ def build_plan(args) -> dict:
                 "action": "create", "surface": "directory",
                 "path": f"{workspace}/{relative}",
                 "ownership": "tracked_container",
+            })
+
+    for relative in seed_files(config):
+        target = workspace_root / relative
+        assert_not_symlinked(root, target, f"seed target {workspace}/{relative}")
+        if not target.exists():
+            operations.append({
+                "action": "create", "surface": "seed_file",
+                "path": f"{workspace}/{relative}",
+                "ownership": "tracked_user_seed",
             })
 
     runtime = runtime_root(root)
@@ -672,6 +684,12 @@ def build_plan(args) -> dict:
     }
 
 
+def seed_files(config: dict) -> tuple[str, ...]:
+    """The seed files whose top-level folder the workspace layout allows."""
+    allowed = project_config.setting(config, "workspace_layout")["workspace"]
+    return tuple(value for value in SEED_FILES if value.split("/")[0] in allowed)
+
+
 def path_fingerprint(path: Path) -> str:
     digest = hashlib.sha256()
     if path.is_symlink():
@@ -705,6 +723,7 @@ def rollback_targets(root: Path, plan: dict) -> list[Path]:
     """
     mutable_surfaces = {
         "workspace_config", "gitignore", "gitattributes", "file_mode",
+        "seed_file",
     }
     targets = {
         root / item["path"] for item in plan["operations"]
@@ -747,7 +766,8 @@ class RefreshSnapshot:
             self.existed[path] = self.copy(path, backup)
             self.copy(path, expected)
         candidates = [root / workspace]
-        candidates.extend(root / workspace / relative for relative in REQUIRED_DIRS)
+        candidates.extend(root / workspace / relative
+                          for relative in project_config.required_dirs(plan["_config"]))
         runtime = runtime_root(root)
         current = runtime
         while current != root:
@@ -907,10 +927,15 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
         if not config_path.is_file() \
                 or config_path.read_text(encoding="utf-8") != desired:
             snapshot.write_text(config_path, desired)
-        for relative in REQUIRED_DIRS:
+        for relative in project_config.required_dirs(plan["_config"]):
             target = workspace_root / relative
             assert_not_symlinked(root, target, "managed target")
             target.mkdir(parents=True, exist_ok=True)
+        for item in plan["operations"]:
+            if item["surface"] == "seed_file":
+                relative = Path(item["path"]).relative_to(args.workspace)
+                snapshot.write_text(root / item["path"],
+                                    (SEED_ROOT / relative).read_text(encoding="utf-8"))
         runtime = create_runtime(root)
         current_ignore, _target_ignore = proposed_gitignore(
             root, args.workspace

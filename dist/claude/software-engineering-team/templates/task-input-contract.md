@@ -17,7 +17,7 @@ A skill may carry `references/switch-<switch>-<value>.md`: the instructions of
 one value of a process switch declared in
 `skill-content/configure/data/process-switches.json`. The manifest binds it as
 a required read only when the project's approved Process Policy,
-`workspace/docs/delivery/process-policy.md`, sets that switch to that value
+`workspace/docs/operation/process-policy.md`, sets that switch to that value
 and the task's entry runs one of the switch's owning flows, for a task that
 selects the skill, or for every task of those flows when the registry gives
 the switch `reference_scope: owning_flows`;

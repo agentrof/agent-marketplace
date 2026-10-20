@@ -1,6 +1,6 @@
 # Process profile: fast lane
 
-At Process Policy `process_profile` `fast_lane`, every change reaches the
+Every change reaches the
 target branch through one task and its own pull request,
 `flows/fast-lane.md`.
 
@@ -66,5 +66,6 @@ a story (source_story, covers) or stand alone.
   `/retrospective`. Nothing is written after the merge.
 - The CI workflow that runs the project's tests on pull requests is copied
   once from the packaged `templates/ci-tests.yml` to
-  `.github/workflows/tests.yml` with the project's test command, committed by
+  `.github/workflows/tests.yml` with the project's test command and
+  `tests_root` from `workspace/config.json`, committed by
   a task, and made a required check.

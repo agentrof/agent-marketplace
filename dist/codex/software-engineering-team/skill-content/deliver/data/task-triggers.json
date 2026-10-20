@@ -32,6 +32,7 @@
     {"flag": "secrets", "keywords": ["secret", "credential", "token", "api key", "private key", "certificate"]},
     {"flag": "data_placement", "keywords": ["tenant", "tenant data", "personal data", "pii", "data residency", "cross-tenant"]},
     {"flag": "migration", "path_globs": ["*migrations/*", "*migration*"], "keywords": ["migration", "migrate", "backfill"]},
+    {"flag": "money", "keywords": ["payment", "billing", "invoice", "refund", "payout"]},
     {"flag": "irreversible", "keywords": ["delete", "drop", "purge", "wipe", "truncate", "irreversible"]}
   ],
   "reviewers": [

@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review framework for the software-engineering-team code reviewer. Defines the finding contract, severity taxonomy, verdict rollup, the single evolving finding record, and the three review passes. Loaded by the reviewer agent during review loops, never invoked directly.
+description: Review framework for the software-engineering-team code reviewer. Defines the finding contract, severity taxonomy, verdict rollup, the single evolving finding record, and the two review passes. Loaded by the reviewer agent during review loops, never invoked directly.
 user-invocable: false
 ---
 

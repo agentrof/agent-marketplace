@@ -1483,6 +1483,6 @@ class TaskTriggerTests(unittest.TestCase):
         self.assertEqual(result["missing_skills"], ["python-fastapi", "sql-database-design"])
 
     def test_an_unknown_risk_flag_fails_lint(self):
-        path = self.project(TASK.replace("rigor: normal\n", "rigor: normal\nrisks: money\n"))
+        path = self.project(TASK.replace("rigor: normal\n", "rigor: normal\nrisks: weather\n"))
         self.assertTrue(any(error.startswith("risks must be among")
                             for error in task_lane.lint(path / task_lane.TASKS / "tk-004-export-invoices.md")))

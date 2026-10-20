@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review framework for the software-engineering-team code reviewer. Defines the finding contract, severity taxonomy, verdict rollup, the single evolving finding record, and the three review passes. Loaded by the reviewer agent during review loops, never invoked directly.
+description: Review framework for the software-engineering-team code reviewer. Defines the finding contract, severity taxonomy, verdict rollup, the single evolving finding record, and the two review passes. Loaded by the reviewer agent during review loops, never invoked directly.
 exposure: internal
 ---
 
@@ -56,7 +56,7 @@ DON'T inflate to look thorough or deflate to pass the gate.
 ## Single Evolving Record
 
 Initial review covers the full change. Repair review covers unresolved
-findings, the new delta and affected consumers; all three passes remain
+findings, the new delta and affected consumers; both passes remain
 mandatory.
 
 One finding set per review loop, evolving across re-reviews. The
@@ -72,18 +72,22 @@ updated set for the orchestrator to record.
 - On re-review, re-check what changed plus anything a fix could have
   touched; do not re-litigate untouched, already-passed code.
 
-## The Three Passes
+## The Two Passes
 
-Fixed order, all three on every cycle. Security is never optional. Full
-checklists per pass live in the passes reference. Follow the
+Fixed order, both on every cycle. Full checklists per pass live in the
+passes reference. Follow the
 [verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
 
-1. **Correctness:** logic, edge cases, error propagation, type safety.
+1. **Correctness:** logic, edge cases, error propagation, type safety, and
+   the correctness of identity source, membership filters and bounds.
 2. **Conformance:** the change against the declared interface contract, data
    model, decisions, and ownership map; every conformance finding carries an
    architectural impact rating (high, medium, low).
-3. **Security:** authentication and authorization, input validation, data
-   protection, common vulnerability classes.
+
+Security is not a pass here: the read-only `security-reviewer` runs it in
+parallel at rigor `high` or on a risk flag (auth, tenant data, secrets,
+money, deletion), and the pull request merges with 0 critical and 0 major
+findings across both reviewers.
 
 ## Architecture-Implicating Findings
 
@@ -108,6 +112,6 @@ Everything else enters the normal fix loop via `fix_required`.
 
 ## References
 
-- [passes](references/passes.md): the full per-pass checklists (correctness, conformance, security) and the architectural impact rating. Read when executing the three passes on any cycle.
+- [passes](references/passes.md): the full per-pass checklists (correctness, conformance) and the architectural impact rating. Read when executing the two passes on any cycle.
 - [pitfalls](references/pitfalls.md): reviewer anti-patterns plus feedback craft for human-facing notes. Read when a verdict feels off (too harsh, too lenient) or when writing PR-body notes for a human.
 - [smells](references/smells.md): smell-to-named-move table for maintainability findings. Read when a finding concerns code structure and its Fix field needs a named refactoring move.

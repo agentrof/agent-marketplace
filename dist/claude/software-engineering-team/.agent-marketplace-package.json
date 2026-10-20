@@ -26,7 +26,7 @@
       "0f87ddbc0888f2316c004ff5ed4d11a7fedd83217e4263f1cab742982211b261"
     ,
     "agents/code-reviewer.md":
-      "c414c9231d5fe63e23434a701c9814f4df1a7d38a9e71e7fbd8c1a776bfcb181"
+      "f622a1dbde629cbf3c7b05b3fdb5b0a173d195df0f2506c1b8782fc708b75958"
     ,
     "agents/devops-engineer.md":
       "a11ea4f4bf280323d8603745481888ed18fcc0e5eb2aee9384d8d6cecebd507d"
@@ -38,7 +38,7 @@
       "3717ce9a5c70090a58bc1bcf16e1d10350dcf1ae6e5c742a44d8c65e65e85718"
     ,
     "agents/security-reviewer.md":
-      "fa39652e1d438e2dc2d99ae2c7a052563ad9e5d292e977f22f38105daf444850"
+      "c3ae5d9497a59a8d0bef7b13d4876833aed4c03cdb70421e15419a0aa0638ab5"
     ,
     "agents/software-architect.md":
       "00eca8dd1b68925f871d7d1fb427e3b433f7e45ab450887ea2b5a37ce6243455"
@@ -53,7 +53,7 @@
       "061af378328b144f2bd558b73ba735fce82987ee6037cfb5110d5a64112e7fa7"
     ,
     "flows/fast-lane.md":
-      "b0e408ea75e5d17e63e6cb41f29d1394864706dcbb55cde1dfaa3762d5716f55"
+      "66f7e932265e42b2164f8f01819b30faefb05363f2170e4ffcf246f56876992f"
     ,
     "hooks/hooks.json":
       "9a16ea0f0fae898c980a2a2a214b23ec604264b6ff2ee3d3311ed0cf55afcaf0"
@@ -188,13 +188,13 @@
       "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
     ,
     "skill-content/code-review/SKILL.md":
-      "44ae72d03dbb163f45b2982892115ea75a751b7c2d14a7acc88cc1cc71b195d0"
+      "3fd51964ce23b52f45824de05cb310b94cba216078964951ffaf0a189897d60f"
     ,
     "skill-content/code-review/references/passes.md":
-      "5bf8b48ba8551e494215e6d20f1d7ec67b65a8b9956dfab1f41c5262e80cacc6"
+      "5e48f385d3014260437f9d4bc960226e4efc1d9c7b70afd6eef58158ded9915a"
     ,
     "skill-content/code-review/references/pitfalls.md":
-      "9e235a5582e48c9f33fe91d16f617c320c308d87ac964f7a25e90bd83f87023c"
+      "594084b63be2a81011a3de9ba88c7ae55edad21d04c682ad38c4e24e4d72a933"
     ,
     "skill-content/code-review/references/smells.md":
       "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
@@ -221,13 +221,13 @@
       "7268475852abb660e326c244b822e88b0cc32b96be655f001cc964879b0856bb"
     ,
     "skill-content/deliver/data/role-routing.json":
-      "d3e91945ea95e903003f17f14fea5548c1c0dcf026fc7e72dd3b08a0335070b6"
+      "e4df0dfeeb7cae08e398b1a0d64d441657b31b2dc557ab316e463677bf3f94f8"
     ,
     "skill-content/deliver/data/targets.json":
       "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
     ,
     "skill-content/deliver/data/task-triggers.json":
-      "aa90aab77b2cc6a8df3ee3d545dadadb8c581a69e34c792df545033bbf5a25b6"
+      "08fb884a5c9544c068cb0c8ac0853f39860eb93107c3689b3e35ac6e5a9abe3d"
     ,
     "skill-content/deliver/references/fast-lane.md":
       "b03d48eb837816f5f86855ca9911b1fe61d25655f60fee926e0698e63687bb3d"
@@ -347,7 +347,7 @@
       "cbc8a4d8eec5159533bc5d1c45ab1552cbcda2ab37cfc3e24b32e88f76c936b2"
     ,
     "skill-content/setup/data/companions.json":
-      "1aa44a19c58ac079265425556d6f37df6f0945e750e35e02a924335c55818dd7"
+      "e80a4fb563cb2058b7355a67919141c3d354c8c4770a1ac3cb189a252a3ec8dd"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "d1a8d26ff998f886f46a7d776118fba73ccee242b1d817e89dfee6afc1cc51d8"
@@ -434,7 +434,7 @@
       "076d21d0224403a0fb0e1775704f9cee010a9c32e0636e6310c5be3eaa12ebd4"
     ,
     "skills/code-review/SKILL.md":
-      "a6741da18a9f1841113f098f11717f0bac195239cea81b00d1a03c1019fec034"
+      "658638bee8dd2414a2ed1adf90d0cf18117e8ae6b2193df01d1646037fafb0c3"
     ,
     "skills/configure/SKILL.md":
       "8caa3466ab26db18c22ec0e1e7c8afcf327d8098e313ec9cfc29efd902a2517d"
@@ -509,7 +509,7 @@
       "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
     ,
     "templates/model-classes.json":
-      "dd5d74812a280a4814ada8c0335fc824704f33cc91b2d39b990a6c1921773b6f"
+      "4bce7e1222a9673ba95875e86e144a368a5de289e780eca4ccc925d71552054c"
     ,
     "templates/project-context-policy.json":
       "33c751e088616132fd76485509434fb0c35cc3f558ae605e08584318ad22a7b4"

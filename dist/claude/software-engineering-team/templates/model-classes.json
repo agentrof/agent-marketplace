@@ -430,6 +430,7 @@
     "secrets",
     "data_placement",
     "migration",
+    "money",
     "irreversible"
   ],
   "roles": {

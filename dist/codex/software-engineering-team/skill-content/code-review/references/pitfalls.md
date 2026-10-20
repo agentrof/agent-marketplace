@@ -40,8 +40,6 @@ Approving without actually reviewing.
 - "Looks fine" without tracing the path is a forbidden behavior. The
   default assumption is that the change is wrong until the evidence shows
   otherwise.
-- The security pass runs on every cycle; skipping it because the diff
-  "looks unrelated to security" is rubber-stamping.
 
 ## Severity Inflation and Deflation
 

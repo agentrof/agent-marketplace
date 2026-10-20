@@ -15,8 +15,9 @@ not exist.
 
 ## When it runs
 - The security pass of a review: the task is at rigor `high` or carries a
-  risk flag (`auth`, `secrets`, `data_placement`, `migration`,
-  `irreversible`). It runs beside the `code-reviewer`, never instead of it.
+  risk flag (`auth`, `secrets`, `data_placement`, `migration`, `money`,
+  `irreversible`), in parallel beside the `code-reviewer`, which runs no
+  security pass; merge needs 0 critical and 0 major across both.
 
 ## Principles
 - Skeptical by default: the change is assumed exploitable until the diff

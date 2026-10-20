@@ -25,23 +25,23 @@ and records each role spawn with `--kind spawn --parent <step span>
 that returns overrun is reported to the owner at once with its
 breakdown, largest contributor and lever. The run ends with
 `step_timing.py report --run <run> --write`, as
-`skill-content/challenge-review/references/switch-step_timing-recorded.md`
+`skill-content/deliver/references/switch-step_timing-recorded.md`
 defines. Switch `step_budgets`: at `enforced`, each budgeted step is
 compared with its maximum, the owner's parameter or the package target
 in `skill-content/configure/data/step-budgets.json`; a step may finish
 well under it, and only an exceeded maximum is reported, never blocking,
 as
-`skill-content/challenge-review/references/switch-step_budgets-enforced.md`
+`skill-content/deliver/references/switch-step_budgets-enforced.md`
 defines.
 Switch `review_scope`: at `impact_closure`, `task_lane.py lint` runs
 before any reviewer is spawned, and the reviewer reads the pull request diff and the change's impact closure, each approved, unchanged note
 outside it only as its hash-bound summary, and reads beyond it when unsure and
 records why, as
-`skill-content/challenge-review/references/switch-review_scope-impact_closure.md`
+`skill-content/deliver/references/switch-review_scope-impact_closure.md`
 defines.
 
-Switch `process_profile`: at `governed`, this flow does not run; the
-`deliver` entry follows the governed Delivery path instead. At `fast_lane`, follow
+Switch `process_profile`: the governed Delivery path is removed, so this flow
+runs at either value. At `fast_lane`, follow
 `skill-content/deliver/references/switch-process_profile-fast_lane.md` and
 the steps below. Read the value with
 `scripts/process_policy.py value --switch process_profile`.

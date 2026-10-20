@@ -344,8 +344,7 @@ def task_text(task: str, title: str, request: str, requested_at: str, delivery: 
                 f"task_kind: knowledge\nrequested_at: {requested_at}\napproved_at: {requested_at}\n"
                 f"size: {size}\nrigor: {rigor}\n{grouped}"
                 f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
-                f"# {title}\n\n## Request\n\n{request.strip()}\n\n<!-- sec: nav -->\n## Navigation\n\n"
-                "- [[maps/backlog|Backlog]]\n")
+                f"# {title}\n\n## Request\n\n{request.strip()}\n\n<!-- sec: nav -->\n## Navigation\n")
     grouped += f"epic: {epic}\n" if epic else ""
     if source_story:
         grouped += f"source_story: {source_story}\ncovers:\n" + "".join(
@@ -354,8 +353,7 @@ def task_text(task: str, title: str, request: str, requested_at: str, delivery: 
             f"requested_at: {requested_at}\nsize: {size}\nrigor: {rigor}\n{grouped}"
             f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
             f"# {title}\n\n## Request\n\n{request.strip()}\n\n## Acceptance Criteria\n\n"
-            "1. \n2. \n3. \n\n## Tests\n\n- \n\n<!-- sec: nav -->\n## Navigation\n\n"
-            "- [[maps/backlog|Backlog]]\n")
+            "1. \n2. \n3. \n\n## Tests\n\n- \n\n<!-- sec: nav -->\n## Navigation\n")
 
 
 def section(body: str, title: str) -> list[str]:
@@ -1562,8 +1560,7 @@ def retrospective_note(data: dict, delivery: str) -> str:
     return (f"---\ntype: retrospective\ntitle: {json.dumps(delivery + ' retrospective')}\n"
             f"status: final\ndelivery: {delivery}\ntags:\n  - doc/retrospective\n"
             f"  - status/final\n---\n# {delivery} retrospective\n\n## Summary\n\n```text\n"
-            f"{render(data)}\n```\n\n<!-- sec: nav -->\n## Navigation\n\n"
-            "- [[maps/delivery|Delivery]]\n")
+            f"{render(data)}\n```\n\n<!-- sec: nav -->\n## Navigation\n")
 
 
 def history(root: Path) -> list[dict]:

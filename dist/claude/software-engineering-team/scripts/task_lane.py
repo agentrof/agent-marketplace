@@ -2180,13 +2180,17 @@ def cmd_open_pr(args, root: Path) -> dict:
             "overlaps": warnings}
 
 
-def refresh_graph(root: Path) -> None:
-    """Start the graph refresh in the background when it and graphify are installed; never blocks a merge."""
+def refresh_graph(root: Path, pr: str) -> None:
+    """Start the graph refresh for the pull request's range in the background when it and graphify
+    are installed; never blocks a merge."""
     if GRAPH_REFRESH.is_file() and shutil.which("graphify"):
         try:
-            subprocess.Popen([sys.executable, str(GRAPH_REFRESH)], cwd=root, stdin=subprocess.DEVNULL,
+            data = json.loads(run("gh", "pr", "view", str(pr), "--json", "baseRefName,headRefOid", cwd=root))
+            commit_range = f"origin/{data['baseRefName']}...{data['headRefOid']}"
+            subprocess.Popen([sys.executable, str(GRAPH_REFRESH), "--project-root", str(root),
+                              "--range", commit_range], cwd=root, stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-        except OSError:
+        except (OSError, Refused, ValueError, KeyError):
             pass
 
 
@@ -2209,9 +2213,9 @@ def cmd_merge(args, root: Path) -> dict:
         if "clean status" not in str(refused):
             raise
         run("gh", "pr", "merge", args.pr, f"--{args.style}", cwd=root)
-        refresh_graph(root)
+        refresh_graph(root, args.pr)
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False, "merged": True}
-    refresh_graph(root)
+    refresh_graph(root, args.pr)
     return {"task_id": args.task, "pr": args.pr, "auto_merge": True}
 
 

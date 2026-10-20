@@ -251,6 +251,22 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertTrue(result["merged"])
         self.assertEqual(calls[-1], ("gh", "pr", "merge", "9", "--merge"))
 
+    def test_the_graph_refresh_gets_the_project_root_and_the_merged_range(self):
+        import graphify_refresh
+        script = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/graphify_refresh.py"
+        view = json.dumps({"baseRefName": "main", "headRefOid": "abc123"})
+        with mock.patch.object(task_lane, "GRAPH_REFRESH", script), \
+                mock.patch.object(task_lane.shutil, "which", return_value="/bin/graphify"), \
+                mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: view if "view" in a else ""), \
+                mock.patch.object(task_lane.subprocess, "Popen") as popen:
+            task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None),
+                                self.project("normal"))
+        argv = popen.call_args.args[0][2:]
+        self.assertEqual(argv[argv.index("--range") + 1], "origin/main...abc123")
+        with mock.patch.object(graphify_refresh.subprocess, "Popen") as child:
+            self.assertEqual(graphify_refresh.main(argv), 0)
+        self.assertIn("--wait", child.call_args.args[0])
+
     def test_high_rigor_leaves_the_merge_to_the_owner(self):
         calls = []
         with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):

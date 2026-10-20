@@ -282,6 +282,7 @@
   "artifact_directory_name": "artifacts",
   "artifact_path_restrictions": [],
   "artifact_forbidden_extensions": [],
+  "os_metadata_basenames": [".DS_Store", "Thumbs.db", "ehthumbs.db", "ehthumbs_vista.db", "desktop.ini"],
   "attachment_extensions": [
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".pdf",
     ".mp3", ".wav", ".m4a", ".mp4", ".webm"

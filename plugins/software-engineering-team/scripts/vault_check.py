@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import functools
 import hashlib
 import json
 import os
@@ -40,9 +41,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import atomic_file
-import ba_compile
-from experience_application_check import is_os_metadata_path
-from ba_compile import (
+from vault_markdown import (
     BARE_ID_RE,
     DATE_RE,
     INLINE_CODE_RE,
@@ -312,6 +311,25 @@ class RelationEdge:
 def load_policy(path: Path) -> dict:
     with path.open(encoding="utf-8") as fh:
         return json.load(fh)
+
+
+@functools.lru_cache(maxsize=1)
+def os_metadata_basenames() -> frozenset[str]:
+    """The exact file basenames operating systems drop into folders."""
+    names = load_policy(DEFAULT_POLICY).get("os_metadata_basenames")
+    if (
+        not isinstance(names, list) or not names
+        or any(not isinstance(name, str) or not name or name in {".", ".."}
+               or "/" in name or "\\" in name or "\0" in name for name in names)
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("os_metadata_basenames must declare unique exact file basenames")
+    return frozenset(names)
+
+
+def is_os_metadata_path(relative: str | Path) -> bool:
+    """Classify only exact declared basenames, independent of file existence."""
+    return Path(relative).name in os_metadata_basenames()
 
 
 def utc_today() -> str:
@@ -596,13 +614,19 @@ def authored(vault: Vault) -> list[Note]:
             if not n.generated]
 
 
-def schema_doc_types() -> set:
-    """The kebab doc-type names of the shipped analysis schema. Read through
-    ba_compile (the single schema parser), fail-soft to empty."""
+def analysis_schema() -> dict | None:
+    """The shipped analysis schema, read through ba_compile (the single schema
+    parser); None when that compiler is not installed or cannot read it."""
     try:
-        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
-    except (OSError, json.JSONDecodeError, SystemExit):
-        return set()
+        import ba_compile
+        return ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
+    except (ImportError, OSError, json.JSONDecodeError, SystemExit):
+        return None
+
+
+def schema_doc_types() -> set:
+    """The kebab doc-type names of the shipped analysis schema, fail-soft to empty."""
+    schema = analysis_schema()
     doc_types = schema.get("doc_types") if isinstance(schema, dict) else None
     return {kebab(t) for t in doc_types} if isinstance(doc_types, dict) else set()
 
@@ -2471,10 +2495,10 @@ def ba_id_lookup(vault: Vault) -> dict[str, str]:
     """id -> vault-absolute owner rel (no .md) for every analysis space
     in the vault, through ba_compile.scan_space (the single parser)."""
     lookup: dict[str, str] = {}
-    try:
-        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
-    except (OSError, json.JSONDecodeError, SystemExit):
+    schema = analysis_schema()
+    if schema is None:
         return lookup
+    import ba_compile
     roots = set()
     for rel in vault.index:
         parts = rel.split("/")
@@ -3161,10 +3185,7 @@ def cmd_normalize(args, policy: dict) -> int:
     skip = {normalize_vault_rel(x) for x in (args.exclude or [])}
     if args.rename:
         return normalize_rename(args, policy, vault, skip)
-    try:
-        schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
-    except (OSError, json.JSONDecodeError, SystemExit):
-        schema = None
+    schema = analysis_schema()
     citation_columns = (list(schema.get("id_citation_columns", []))
                         if schema else [])
     id_lookup = ba_id_lookup(vault) if citation_columns else {}
@@ -3217,6 +3238,7 @@ def build_rename_map(vault: Vault, policy: dict,
     Compliant names are skipped; record ids remain in frontmatter aliases."""
     renames: dict[str, str] = {}
     manual: list[str] = []
+    import ba_compile
     plain_space = ba_compile.space_overview_rel(schema)
     roots = set()
     for rel in vault.index:
@@ -3305,8 +3327,9 @@ def rename_referrers(vault: Vault, old_rel: str) -> list:
 
 def normalize_rename(args, policy: dict, vault: Vault, skip: set) -> int:
     try:
+        import ba_compile
         schema = ba_compile.load_schema(ba_compile.DEFAULT_SCHEMA)
-    except (OSError, json.JSONDecodeError, SystemExit) as exc:
+    except (ImportError, OSError, json.JSONDecodeError, SystemExit) as exc:
         print(f"vault_check: --rename needs the analysis schema: {exc}",
               file=sys.stderr)
         return 2

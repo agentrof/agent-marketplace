@@ -58,7 +58,7 @@ class ArtifactSnapshotMetadataTests(unittest.TestCase):
 
     def test_known_metadata_churn_at_any_depth_leaves_approval_unchanged(self):
         receipt = self.approve()
-        names = json.loads(application.DEFAULT_SCHEMA.read_text())["application"]["os_metadata_basenames"]
+        names = sorted(vault_check.os_metadata_basenames())
         self.assertTrue({".DS_Store", "Thumbs.db", "desktop.ini"}.issubset(names))
         for parent in [self.artifacts, self.artifacts / "nested" / "deep"]:
             parent.mkdir(parents=True, exist_ok=True)

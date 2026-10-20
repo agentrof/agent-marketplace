@@ -15,10 +15,10 @@ import json
 import os
 import stat
 import unicodedata
-from functools import lru_cache
 from pathlib import Path
 
 import atomic_file
+from vault_check import is_os_metadata_path, os_metadata_basenames as _os_metadata_basenames  # noqa: F401
 
 
 ARTIFACTS_RELATIVE = Path("artifacts")
@@ -212,25 +212,6 @@ def artifact_row_path(row: dict) -> str:
     if not _json_contains_non_scalar(decoded):
         raise ValueError("scalar artifact paths must use the legacy path row")
     return decoded
-
-
-@lru_cache(maxsize=1)
-def _os_metadata_basenames() -> frozenset[str]:
-    schema = strict_json_loads(DEFAULT_SCHEMA.read_text(encoding="utf-8"))
-    names = schema.get("application", {}).get("os_metadata_basenames")
-    if (
-        not isinstance(names, list) or not names
-        or any(not isinstance(name, str) or not name or name in {".", ".."}
-               or "/" in name or "\\" in name or "\0" in name for name in names)
-        or len(set(names)) != len(names)
-    ):
-        raise ValueError("application.os_metadata_basenames must declare unique exact file basenames")
-    return frozenset(names)
-
-
-def is_os_metadata_path(relative: str | Path) -> bool:
-    """Classify only exact declared basenames, independent of file existence."""
-    return Path(relative).name in _os_metadata_basenames()
 
 
 def artifact_inventory(root_value: str | Path) -> tuple[list[dict], list[str]]:

@@ -25,9 +25,7 @@ from pathlib import Path
 
 import atomic_file
 import marketplace_paths
-import delivery_governance
 import file_lock
-import operation_compile
 import project_config
 import role_settings
 import setup_check
@@ -447,6 +445,7 @@ def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[P
     legacy_mutation = config.get("mutation_command")
     legacy_env = config.get("env_command")
     if not verification.exists() and (isinstance(legacy_test, str) or isinstance(legacy_mutation, str)):
+        import operation_compile
         props = operation_compile.initial_props("verification", [])
         # A value with nothing to migrate stays absent: the vault rejects an empty text property.
         if isinstance(legacy_test, str) and legacy_test.strip():
@@ -460,6 +459,7 @@ def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[P
     legacy_environment = workspace_root / "environment" / "contract.md"
     if not environment.exists() and legacy_environment.exists():
         text = legacy_environment.read_text(encoding="utf-8")
+        import operation_compile
         try:
             props, _body_line, error = operation_compile.parse_frontmatter(text)
         except ValueError:
@@ -475,6 +475,7 @@ def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[P
             # so a failed closing gate restores the original file.
             deletions.append(legacy_environment)
     elif not environment.exists() and isinstance(legacy_env, str):
+        import operation_compile
         props = operation_compile.initial_props("environment", [])
         if legacy_env.strip():
             props["env_command"] = legacy_env
@@ -496,6 +497,7 @@ def legacy_governance_update(workspace_root: Path, config: dict) -> dict[Path, s
         "tags": ["doc/delivery-governance", "status/approved"],
     }
     body = "# Delivery Governance\n\n## Coordination\n\nMigrated from retired workspace config. This is the hard maximum number of active Delivery slots.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/delivery|Delivery]]"
+    import delivery_governance
     digest = delivery_governance.governance_hash(props, body)
     props["governance_hash"] = digest
     props["source_hash"] = digest

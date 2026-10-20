@@ -17,14 +17,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 
-COMPILER_SCRIPTS = (
-    "vault_check.py", "ba_compile.py", "landscape_check.py",
+COMPILER_SCRIPTS = ("vault_check.py", "marketplace_paths.py", "process_policy.py")
+# The governed compilers the gate also runs; a package that no longer ships
+# one bundles the rest.
+GOVERNED_SCRIPTS = (
+    "ba_compile.py", "landscape_check.py",
     "experience_compile.py", "experience_application_check.py",
     "architecture_compile.py",
     "design_system_compile.py", "backlog_compile.py",
     "requirement_compile.py", "requirement_route.py", "stage_package.py",
-    "operation_compile.py", "delivery_governance.py", "marketplace_paths.py",
-    "delivery_closure.py", "process_policy.py",
+    "operation_compile.py", "delivery_governance.py",
+    "delivery_closure.py",
 )
 DATA_PATHS = (
     "skill-content/obsidian-vault/data",
@@ -68,7 +71,7 @@ def packaged_closure(root: Path) -> tuple[tuple[str, ...], tuple[str, ...]]:
     directories. A named path the package does not hold is skipped.
     """
     scripts = root / "scripts"
-    pending = list(COMPILER_SCRIPTS)
+    pending = [*COMPILER_SCRIPTS, *(name for name in GOVERNED_SCRIPTS if (scripts / name).is_file())]
     included: set[str] = set()
     names = set(DATA_PATHS)
     while pending:

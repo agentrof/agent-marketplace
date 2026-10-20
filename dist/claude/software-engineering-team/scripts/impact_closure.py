@@ -34,7 +34,7 @@ import sys
 from pathlib import Path
 
 import vault_check
-from ba_compile import parse_frontmatter, split_wikilink
+from vault_markdown import parse_frontmatter, split_wikilink
 
 # Relation keys outside the vault relation contract that still draw
 # dependency edges: their owning compilers validate them.
@@ -580,11 +580,11 @@ def approval_state(note) -> dict | None:
 
 def ba_package_proofs(docs: Path, only=None) -> dict:
     """Notes of approved analysis spaces whose package hash still matches (``only`` limits the spaces)."""
-    import ba_compile
     proofs: dict = {}
     root = docs / "business-analysis"
     if not root.is_dir():
         return proofs
+    import ba_compile
     for space in sorted(p for p in root.iterdir() if p.is_dir()):
         if only is not None and not any(rel.startswith(f"business-analysis/{space.name}/") for rel in only):
             continue
@@ -610,13 +610,14 @@ def ba_package_proofs(docs: Path, only=None) -> dict:
 def architecture_proofs(docs: Path, notes) -> dict:
     """A sealed architecture record is proven by its immutable ledger snapshot:
     the record carries no stamp, the snapshot keeps the sealed source hash."""
-    import architecture_compile
     root = Path(docs) / "system-architecture"
     proofs: dict = {}
-    for note in notes:
-        if not note.rel.startswith("system-architecture/") \
-                or note.fm.get("revision_state") != "sealed":
-            continue
+    sealed = [note for note in notes if note.rel.startswith("system-architecture/")
+              and note.fm.get("revision_state") == "sealed"]
+    if not sealed:
+        return proofs
+    import architecture_compile
+    for note in sealed:
         record_id = architecture_compile.stable_id(note.fm)
         snapshot = root / "_ledger" / "records" / record_id / f"r{note.fm.get('revision')}.json"
         try:

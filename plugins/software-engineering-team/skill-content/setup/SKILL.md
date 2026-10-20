@@ -7,9 +7,9 @@ exposure: entry
 # Setup
 
 Setup never writes executable test or environment placeholders into a consuming
-project. Approved Operation Contracts supply those commands at Delivery time.
-Delivery activation replaces `{{test_command}}`, `{{dependency_audit_job}}`
-and `{{environment_smoke_job}}` in its private CI template, while setup alone
+project. The project copies the CI template, replacing `{{test_command}}` and
+dropping or replacing `{{dependency_audit_job}}` and `{{environment_smoke_job}}`,
+as [ci-bootstrap](references/ci-bootstrap.md) describes, while setup alone
 replaces `{{project_local_ignores}}` in its managed gitignore block. No
 placeholder is allowed to reach a consuming repository.
 
@@ -30,8 +30,7 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    <absolute-python> <absolute-package-scripts>/setup_project.py inspect --project-root <root> --json
    ```
 
-   Present its pre-mutation operation list. Requirement Flow determines which
-   stages apply for each request; setup does not infer request routing.
+   Present its pre-mutation operation list.
 2. Resolve any reported blocker and the Windows-only `git.core_longpaths` choice that `references/windows-long-paths.md` defines, then run:
 
    ```text
@@ -71,9 +70,7 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    payload under `workspace/docs/`, rebuilds the closed `workspace/config.json`
    shape, preserves valid language values and the `class_models` and
    `role_classes` overrides, and converges compiler-owned relation reports.
-   Retired command fields migrate to draft `docs/operation/` contracts and a
-   valid legacy `max_parallel` becomes Governance revision 1; authored notes
-   are never edited. The policy includes the fixed backlog keys `backlog`,
+   Retired command fields are dropped; authored notes are never edited. The policy includes the fixed backlog keys `backlog`,
    `backlog-review`, `epic`, `epic-review`, `story` and `test-plan`, plus all
    analysis/design types. Issue reporting is external and stateless, so setup
    never creates an issue type, tree, map or runtime record. Type keys and
@@ -90,8 +87,8 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    reviewable project changes.
 8. Ensure the managed root `.gitattributes` block holds
    `workspace/docs/** -text`. Governed files then check out byte-identical to
-   the repository on every OS, which the byte-exact backlog, Experience and
-   stage-package checks need under Git for Windows' default
+   the repository on every OS, which the byte-exact checks need under Git for
+   Windows' default
    `core.autocrlf=true`. Project lines outside the block stay as written;
    check fails when a later line, a nested `.gitattributes` or
    `.git/info/attributes` turns conversion back on for a governed file. A
@@ -108,15 +105,10 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    `file_mode` operation and `check` reports it as drift. The vault guard
    accepts that widening because it changes no byte; every other mode change
    to compiler-owned Experience state is still restored.
-10. Run the portable vault gate and relevant Requirement compilers. Delivery
-    execution owns its own test and provider gates; setup never emits a
-    template with unresolved command placeholders.
-    Read [ci-bootstrap](references/ci-bootstrap.md) before a Delivery's
-    execution approval, whose pull request check precondition it defines.
+10. Run the portable vault gate; setup never emits a template with
+    unresolved command placeholders.
 11. Run `setup_project.py companions check`; optional third-party skills, and
     `companions apply` installs them only on the owner's go (README Companions).
 12. Review and commit the exact tracked refresh diff before a workflow handoff.
-    Report `requirement` as the next entry. `/requirement` evaluates the
-    request-specific impact matrix and routes only the required stages and
-    backlog handoff; setup never infers routing from repository history.
+    Report `deliver` as the next entry.
     Start a fresh host session after setup.

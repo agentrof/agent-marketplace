@@ -9,7 +9,7 @@ has a second slot, `<class>_escalated`, which a task of size `l`, rigor
 `high` or a risk flag runs; `security_review` and `orchestration` never move.
 The installed package's class map, `templates/model-classes.json`, pins
 every slot of every host to a model and, where the model takes one, an
-effort, and places every role, generated variants included, on a class.
+effort, and places every role on a class.
 `workspace/config.json` records only what the project changes:
 `class_models`, per host and slot a `model` and an `effort`, and
 `role_classes`, per role a class. A slot or role without an entry runs the
@@ -59,8 +59,7 @@ refresh drops them, and their intent is set again as classes.
    Only the owner's confirmation passes `--confirmed`.
 5. Then ask whether any role should run on another class: one question whose
    recommended option keeps every role on its current class. When the owner
-   moves roles, ask which from the report's roles, which cover every role,
-   the `-lens` and `-mechanical` variants included, and for each one a
+   moves roles, ask which from the report's roles, which cover every role, and for each one a
    question with its current class first and recommended, then the other
    classes; the package class's description says that it
    records no override.

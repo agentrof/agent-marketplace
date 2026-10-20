@@ -15,8 +15,6 @@ and derive its inputs with `scripts/task_inputs.py --entry deliver`.
 
 - The project's Process Policy sets `process_profile` to `fast_lane` and the
   user asks for a change in free text.
-- `/deliver DLV-###` resumes a governed Delivery through the hidden
-  `deliver-governed` entry.
 
 ## Invocation
 
@@ -26,10 +24,7 @@ from its task and branch; `/retrospective` reads the times.
 ## Procedure
 
 1. Pre-flight: read `workspace/config.json` (missing: route to the setup entry
-   and stop) and `scripts/process_policy.py value --switch process_profile`.
-   At `governed`, or with an exact `DLV-###` argument for a Delivery opened
-   before the switch, read `skill-content/deliver-governed/SKILL.md`
-   completely and follow it as this entry; it is the governed Delivery path.
+   and stop).
 2. Read `flows/fast-lane.md` completely and run its steps in order, from the
    project checkout, with the request verbatim.
 3. Report the task, its rigor, the pull request and its merge state, or the

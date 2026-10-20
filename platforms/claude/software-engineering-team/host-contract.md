@@ -49,11 +49,6 @@
   recommendation and tradeoffs. `AskUserQuestion` takes at most four questions
   per call and two to four options per question, and adds a free-form `Other`
   option itself.
-- Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside a
-  Delivery only at gate A, gate B, an early gate or for an at-once class, and
-  queue every other question in the Delivery's `User Decisions`. Present each
-  gate through `AskUserQuestion` in calls of at most four questions, with the
-  recommended option first and the tradeoffs in the option descriptions.
 - When the canonical workflow says `spawn`, use the project's rendered
   `software-engineering-team-<agent-id>` identity when the session's
   available agents list it, since it runs the project's model settings, and
@@ -76,53 +71,14 @@
   not help, a managed `strictPluginOnlyCustomization` setting keeps project
   agents from loading. Either way, wait for every required agent before
   synthesis. Never run overlapping writers concurrently.
-- Under switch `review_panels` at `lens_panel`, run a review panel's lens
-  readers in parallel: spawn every reader of the panel in one message, then
-  wait for all of them before triage.
-- Under switch `code_review_panel` at `beside_official`, or at `risk_scoped`
-  when its manifest carries a panel, run the code review
-  panel beside the official reviewer: spawn the official `code-reviewer`,
-  every `code-reviewer-lens` reader of the panel and QA in one message, then
-  wait for all of them before the calibration and `merge-panel`.
-- Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
-  run at the same time only when their approved lane scopes are disjoint.
-  Spawn every lane that waits for no producer in one message, spawn each
-  consumer lane as soon as every producer it waits for has finished, and wait
-  for every lane before the coordinator's commit.
-- Under switch `execution_planning` at `single_source_bundle`, start every
-  reader of an execution-plan bundle together: spawn them in one message, then
-  wait for all of them before triage.
-- Under switch `reader_waves` at `all_at_once`, spawn every reader of a
-  review or recheck wave in one message, then wait for all of them before
-  triage; a
-  finished Claude Code subagent holds no thread, so there is nothing to close
-  first. Every wave's progress message names the wave size and how many of
-  its readers run at once.
 - Under switch `review_scope` at `impact_closure`, run the owning
   compiler's structural check the flow names before spawning any reader, so
   no reader is spent on a package the compiler refuses, and give each reader
   its impact closure in full and every approved, unchanged note outside it as
   its hash-bound summary.
-- Under switch `review_fanout` at `per_unit`, spawn one reader per changed
-  unit of a review in one message, wait for all of them, then spawn the one
-  aggregator with their findings and the compilers' cross-unit facts, and
-  wait for it before triage.
-- Under switch `review_levels` at `concurrent_when_independent`, spawn the
-  readers of every review level the flow declares independent in one
-  message, then wait for all of them before triage; approval still waits for
-  every level.
 - Under switch `context_pack` at `role_digest`, give each spawned role the
   pack `context_pack.py build` returns for its entry, role and mode in place
   of the full required reads.
-- Claude Code's prompt cache keeps a role's context for five minutes from the
-  start of the model call that last used it, and a model call after a longer
-  pause writes the whole context into the cache again, at more than ten times
-  what a read costs. So a role that waits inside its turn never blocks one
-  tool call longer than the Delivery runner's 240-second `wait` bound: it runs
-  `delivery_verification.py wait` in the foreground with a Bash `timeout` of
-  300000, starts a verification command that can run longer with
-  `run_in_background`, and never waits through `sleep`, a polling loop or a
-  longer foreground timeout.
 - A background agent's completion notice reaches the top session, never the
   subagent that spawned it. So a role running as a subagent that spawns
   readers spawns them in the foreground, every reader of a wave in one
@@ -152,12 +108,7 @@
   override the file's pins for that spawn; a per-spawn `effort` needs Claude
   Code 2.1.292 or later. The `haiku` alias resolves to Haiku 4.5 on Bedrock,
   Vertex and Foundry. A role without an `effort` would follow the session's
-  level, `max` included. Every build also ships the `-lens` variants of the
-  read-only document reviewers and `code-reviewer-lens` on `routine_review`;
-  only review panels under switch `review_panels` at `lens_panel` and the
-  code review panel under switch `code_review_panel` at `beside_official` or
-  `risk_scoped` spawn them, and the reviewers themselves keep their own
-  class. The package cannot switch the profile per user.
+  level, `max` included. The package cannot switch the profile per user.
   The pinned models need Claude Code 2.1.293 or later: Haiku 5.5 from
   2.1.293, Sonnet 5.5 from 2.1.284, Opus 5.5 from 2.1.280 and Haiku 4.5,
   which no class runs, from 2.1.74. To run
@@ -173,25 +124,23 @@
   user's and the project's `CLAUDE.md` chain (Claude Code 2.1.271 or later);
   the constitution in its prompt carries the rules every role needs. Their
   `disallowedTools` remove the artifact, workflow and scheduling tools and
-  every MCP server (`mcp__*`); `frontend-developer`, `ux-designer`,
-  `experience-reviewer` and `qa-engineer` keep the browser servers and lose
-  only the desktop, terminal and visualization ones, and only
-  `delivery-coordinator` keeps `Agent`. The list is
+  every MCP server (`mcp__*`); `frontend-developer` and `qa-engineer` keep
+  the browser servers and lose only the desktop, terminal and visualization
+  ones. The list is
   `platforms/claude/agent-tools.json`.
 - A project sets a class slot's model and effort and a role's class through
   `/configure models`, which records only overrides in
   `workspace/config.json`: `class_models`, per host and slot a `model`, an
   exact model ID of this host's model list or `session`, and an `effort`,
-  either one optional, and `role_classes`, which moves any role, the
-  generated variants included, to another class on every host. Setup writes
+  either one optional, and `role_classes`, which moves any role to another
+  class on every host. Setup writes
   neither key and drops the retired `tier_models` and `role_tiers`. A role's
   class comes from `role_classes`, else the package; the slot's model and
   effort come from `class_models`, else the package's `auto` profile, and a
   missing key keeps the package value. `session` renders `model: inherit`,
   which runs the role on the main conversation's model at the slot's
   `effort`, and `model_class.py resolve` then passes no `model`. Setup and
-  refresh render every role, its `-lens` and `-mechanical` variants
-  included, into `.claude/agents/software-engineering-team-<agent-id>.md`
+  refresh render every role into `.claude/agents/software-engineering-team-<agent-id>.md`
   with its resolved `model` and `effort` and report each role's class,
   model, effort and source; `project_config.py classes` prints the
   config-level effective map. Generated role files are never edited by
@@ -265,20 +214,6 @@
     `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so a model the user chose never
     triggers them and a re-spawn never repeats; since every resolved spawn
     passes `model`, the hooks cover only a spawn made without the resolver.
-- Every build also ships the `-mechanical` variants of the document writers
-  `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `mechanical` class, `claude-haiku-5-5` at effort `high`. Only
-  switch `mechanical_pass_tier` at `mechanical` spawns them, for a pass that
-  applies the fixes a review names; the writers themselves keep their own
-  class, and no review, re-check or calibration runs on a variant. A variant
-  runs its pass in a fresh context at that setting.
-- Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
-  is planned inside `/delivery-plan` with one owner gate, presented through
-  `AskUserQuestion`, and handed over to `/deliver-governed DLV-###`; `/execution-plan
-  DLV-###` stays for a plan revision and for a Delivery that left the light
-  path, so the public entries do not change.
-- Delivery execution is available only through the exact public entries
-  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver-governed DLV-###`.
 
 ## Autopilot
 
@@ -329,37 +264,17 @@
     with the queued list of `autopilot.py report`.
 - An entry that ends by naming the next entry asks no question, and without
   a grant it still stops there. Under a grant, running that next entry is a
-  question of class `phase_start` whose recommended option is to run it. Run
-  `autopilot.py record --class phase_start --entry <next entry> --after
-  <kind>:<id>` naming the Requirement or Delivery whose phase just closed. It
-  refuses unless the grant allows `phase_start`, the entry is listed in the
-  policy's `phase_starts`, and the owning compiler reads that phase in a
-  ready state: `backlog-plan` after an `approved` Requirement,
-  `delivery-plan` after an `incorporated` Requirement or a `merged` or
-  `cancelled` Delivery, `execution-plan` after a `scope_approved` Delivery
-  and `deliver` after an `execution_approved` one. Before `delivery-plan`
-  after a Delivery, `closure-audit` must also have returned `closed`. Only
-  after `record` succeeds, invoke the next entry as the user would and run
-  its gates under the same grant; otherwise queue it and stop as before. A
-  grant never starts a new Requirement: that needs the user's request.
+  question of class `phase_start`: `autopilot.py record` refuses it and
+  `queue` keeps it queued, so stop there as before.
 - A grant, broad delegation or time pressure authorizes running the
   prescribed flow and never waives its evidence, integration, PR record or
   closure. The `merge` class takes only the flow's own `merge-pr` on the
-  recorded PR head, never a provider or Git merge of another head, and a
-  Delivery is complete only when `closure-audit` returns `closed`. A quality
+  recorded PR head, never a provider or Git merge of another head. A quality
   exception is taken only at its explicit flow gate, never under a grant
   alone.
 - When `check` reports the grant inactive, expired or completed, ask through
   `AskUserQuestion` again, queued questions first. Roles never ask the user
   and never read the grant.
-- Inside a Delivery that keeps a `User Decisions` table, write an autopilot
-  decision as an `answered` row whose answer states the choice and is marked
-  with the grant id: `blocks` names the Items that waited by Story id,
-  `wait_minutes` records how long they waited, and an approval between the
-  gates names its document as `<document> revision N` in the answer. Write
-  every queued question there too, as a `pending` row of class `queued` or its
-  at-once class with the Items it holds in `blocks`, so the Delivery's
-  refusals apply.
 
 When all remaining work waits on queued owner decisions, call the packaged
 `autopilot.py waiting` before ending the turn. It submits one desktop notice

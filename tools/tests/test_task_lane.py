@@ -56,10 +56,13 @@ Export the month's invoices as CSV.
 1. The export lists every invoice of the month.
 2. Each row carries the invoice number and total.
 3. An empty month yields a header-only file.
+4. Live wiring: the export button downloads the file from the running app.
+5. Docs delta: none.
 
 ## Tests
 
-- tests/test_export.py
+- 1, 2, 3: tests/test_export.py
+- 4, 5: manual check
 
 <!-- sec: nav -->
 ## Navigation
@@ -108,7 +111,9 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task_lane.lint(self.write(TASK)), [])
 
     def test_criteria_size_rigor_and_times_are_checked(self):
-        bad = (TASK.replace("3. An empty month yields a header-only file.\n", "")
+        bad = (TASK.replace("1. The export lists every invoice of the month.\n", "")
+               .replace("2. Each row carries the invoice number and total.\n", "")
+               .replace("3. An empty month yields a header-only file.\n", "")
                .replace("size: s", "size: xl").replace("rigor: normal", "rigor: extreme")
                .replace("requested_at: 2026-10-16T10:00:00+00:00\n", ""))
         errors = task_lane.lint(self.write(bad))
@@ -126,7 +131,8 @@ class TaskTests(unittest.TestCase):
     def test_the_skeleton_is_valid_once_filled(self):
         text = task_lane.task_text("TK-007", "Rotate keys", "Rotate the signing keys.",
                                     "2026-10-16T10:00:00+00:00", "DLV-009", "high")
-        text = text.replace("1. \n2. \n3. \n", "1. One.\n2. Two.\n3. Three.\n").replace("- \n", "- t\n")
+        text = (text.replace("1. \n", "1. One.\n").replace("Live wiring: \n", "Live wiring: seen.\n")
+                .replace("Docs delta: \n", "Docs delta: none.\n").replace(": \n", ": t\n"))
         path = self.write(text)
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
@@ -1436,3 +1442,52 @@ class EntryExposureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaskTriggerTests(unittest.TestCase):
+    def project(self, task: str = TASK) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / task_lane.TASKS).mkdir(parents=True)
+        (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
+        return root
+
+    def test_the_risk_flags_are_the_class_map_flags(self):
+        declared = json.loads((ROOT / "tools/data/models.json").read_text(encoding="utf-8"))["risk_flags"]
+        flags = [rule["flag"] for rule in task_lane.task_triggers()["risk_flags"]]
+        self.assertEqual(sorted(flags), sorted(declared))
+
+    def test_paths_and_words_make_method_skills_mandatory_and_propose_risks(self):
+        triggers = task_lane.task_triggers()
+        text = "Add a migration for the orders table"
+        files = {"deploy/Dockerfile", "web/src/Orders.tsx", "db/migrations/0003_orders.sql"}
+        self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", text, files),
+                         ["docker-compose", "react-typescript", "sql-database-design"])
+        self.assertEqual(task_lane.triggered(triggers["risk_flags"], "flag", text, files), ["migration"])
+        self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "Fix a Go handler", {"cmd/main.go"}), [])
+
+    def test_a_changed_source_is_reported_at_review(self):
+        root = self.project()
+        doc = root / "workspace/docs/solution-design/decision.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text("v1\n", encoding="utf-8")
+        recorded = task_lane.hashed_sources(root, ["workspace/docs/solution-design/decision.md"])
+        self.assertEqual(task_lane.changed_sources(root, recorded), [])
+        doc.write_text("v2\n", encoding="utf-8")
+        self.assertEqual([item["path"] for item in task_lane.changed_sources(root, recorded)],
+                         ["workspace/docs/solution-design/decision.md"])
+
+    def test_review_inputs_route_reviewers_and_report_a_missing_skill(self):
+        task = TASK.replace("rigor: normal\n", "rigor: normal\nrisks: auth\napplied_skills: react-typescript\n")
+        root = self.project(task)
+        self.assertEqual(task_lane.lint(root / task_lane.TASKS / "tk-004-export-invoices.md"), [])
+        changed = {"api/models.py", "workspace/docs/business-analysis/rules.md"}
+        with mock.patch.object(task_lane, "changed_files", return_value=changed):
+            result = task_lane.cmd_review_inputs(SimpleNamespace(task="TK-004", base="main"), root)
+        self.assertEqual(result["reviewers"], ["analysis-challenger", "code-reviewer", "security-reviewer"])
+        self.assertEqual(result["missing_skills"], ["python-fastapi", "sql-database-design"])
+
+    def test_an_unknown_risk_flag_fails_lint(self):
+        path = self.project(TASK.replace("rigor: normal\n", "rigor: normal\nrisks: money\n"))
+        self.assertTrue(any(error.startswith("risks must be among")
+                            for error in task_lane.lint(path / task_lane.TASKS / "tk-004-export-invoices.md")))

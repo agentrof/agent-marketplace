@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Fast-lane task path: one task, one branch, one pull request, one clock.
 
-Process switch ``process_profile`` at ``fast_lane`` routes a request through
-this script instead of the Requirement, Backlog and Delivery ceremonies:
+Every implementation request runs through this script:
 
 - ``start`` creates ``task/<id>-<slug>`` from the target branch and writes
   the task ``workspace/docs/backlog/tasks/<id>-<slug>.md`` with its
@@ -48,7 +47,7 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   merged task's cost and waits to the history once, and later runs read that
   row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``;
   ``--write-report`` keeps a Delivery's summary under
-  ``workspace/docs/delivery/retrospectives/``. ``file-issues`` opens one
+  ``workspace/docs/backlog/retrospectives/``. ``file-issues`` opens one
   issue per proposal the user approved, in the project's own repository.
 
 Nothing is written after a merge, and no file is shared between tasks: each
@@ -76,7 +75,7 @@ import process_policy
 from vault_markdown import parse_frontmatter
 
 TASKS = Path("workspace") / "docs" / "backlog" / "tasks"
-RETROSPECTIVES = Path("workspace") / "docs" / "delivery" / "retrospectives"
+RETROSPECTIVES = Path("workspace") / "docs" / "backlog" / "retrospectives"
 EXPORT = Path(".agentrof") / "retrospective"
 TASK_TYPE = "task"
 TASK_STATUSES = ("active", "delivered", "dropped")

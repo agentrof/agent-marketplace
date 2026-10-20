@@ -127,7 +127,9 @@ its diff changes, has no verdict; a `suggest` role never blocks.
 3. Write. Spawn the owning developer role in the foreground with the task,
    the branch, the files it names and every skill in `applied_skills`, which
    it loads before writing. It writes the change and its tests on
-   the branch, commits, and runs the project's test command for the suites it
+   the branch: an app's own tests stay inside that app, and shared suites
+   go under the configured `tests_root` (default `workspace/tests`). It
+   commits, and runs the project's test command for the suites it
    touched, the command the CI workflow runs on pull requests (`make test`
    unless the project declares another). Architecture records and contracts
    the change needs are edited in the same branch; an architecture record

@@ -91,7 +91,7 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
      tool, owner or process), expected gain and how to verify it.
    Add nothing it does not measure; an empty scope says so.
 3. For a Delivery scope the user may keep the summary: `--write-report` writes
-   `workspace/docs/delivery/retrospectives/dlv-###-retrospective.md`, which a
+   `workspace/docs/backlog/retrospectives/dlv-###-retrospective.md`, which a
    task or docs pull request commits.
 4. `--write-lessons` updates the tracked lessons file as
    [rework causes](references/rework.md) describes; it never writes memory.

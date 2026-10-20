@@ -235,7 +235,7 @@
       "why": "Developer roles write less code without dropping callers, tests or safety; review and retrospective get its review and debt reports.",
       "env": [
         {"name": "PONYTAIL_DEFAULT_MODE", "value": "full"},
-        {"name": "PONYTAIL_SUBAGENT_MATCHER", "value": "^software-engineering-team[:-](backend-developer|frontend-developer|devops-engineer)(-mechanical)?$"}
+        {"name": "PONYTAIL_SUBAGENT_MATCHER", "value": "^software-engineering-team(:|-)(backend-developer|frontend-developer|devops-engineer)(-mechanical)?$"}
       ],
       "hosts": {
         "claude": {

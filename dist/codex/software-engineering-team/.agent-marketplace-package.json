@@ -20,19 +20,19 @@
       "7a7de5fa77d37d3670ca8e43c0c1bf90ecf7179a1447a091ca72d5d2ca7c7934"
     ,
     "agents/backend-developer.md":
-      "da2c2b128017d8be5f55a69f3aa35e4a590b230eb25257d5a12dfa8d63688f50"
+      "ac3c7712f198aa084a734f13eb9f52a9843019cefddde950bb43861ba4753e0b"
     ,
     "agents/business-analyst.md":
       "8689104cf0acc2d5bd74fc07a027d5e8b846a796433e2690e32c2fd3dfaebda1"
     ,
     "agents/code-reviewer.md":
-      "fd5611e16cb3d42c65a9b195f8af3002c4d35fd35c8f915ae1e91b4a2003b95c"
+      "66cca7a3c6544db523d172e1126454530d42fb0ab5633075bc07bc79e27bcc9f"
     ,
     "agents/devops-engineer.md":
-      "285fe79ae24c569e3645255b9e246542834bac1d20b15946b6e27cb9c63b5f3e"
+      "fa9d95646d2c93faf5c64b28d7ed989433aea0d44ccad026e075780a33c33551"
     ,
     "agents/frontend-developer.md":
-      "1c201f3ac65dfdc1e1e84835584c0de5a888ae09bc4a72325b660baa9c70dd02"
+      "1c82247095b107df4e9e651cd91bc889ad5f67fbf84c95e250f32fe52ac32c21"
     ,
     "agents/qa-engineer.md":
       "85a421220446b787e58f8846f89fced1e1734d98848a7abb0f73701380f14c22"
@@ -53,7 +53,7 @@
       "061af378328b144f2bd558b73ba735fce82987ee6037cfb5110d5a64112e7fa7"
     ,
     "flows/fast-lane.md":
-      "8f2a3e9ccda37223b379476e97b2122d61d3da8ce8a283d91f50c4dd97210fda"
+      "f113a08d7b446d4c544506270662d65e083ad78342752dc7745794cc3bb3a709"
     ,
     "hooks/hooks.json":
       "20e6e8a84a9e786493f6ecaf4cd57db86506ca4b2a6015b7501399ae5c820cd5"
@@ -98,7 +98,7 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/model_class.py":
-      "1ce1d1f6cce15fec224b930c0e21babf9103a69988d2d8212e100801c8c895de"
+      "e725ad4d93cbfc751ac180794e10b0baa4d8e4584c024109bdba4f154df45c13"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
@@ -140,10 +140,10 @@
       "f37fa8f00c6b93d145a89784724b37711279cec3b620aab29fe2921916024d23"
     ,
     "scripts/task_inputs.py":
-      "3d73fee736dff0f1a49007baa425cf26e8ffe7581020d632514f4b351d640927"
+      "d19af55eec08738727d088cf154111d97e0621cdd96022973071b720cc332ae3"
     ,
     "scripts/task_lane.py":
-      "c954761a3e55dc18a505cac3961307277d94e80cabb7c655e89cb9d5b3a71300"
+      "e041e68fe10dd80a2e82c6b5307cd41f4569c7fbf6f29a60db38a7e7bf6ba352"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -194,7 +194,7 @@
       "5375b3628a1523dfd79eef21f6ac5446702b8444446d6deddd88ef6e8f187acf"
     ,
     "skill-content/configure/data/process-switches.json":
-      "0ec0961025c8c866b4c090b475d479070fda3da651a98e8cc240d4e8253d9936"
+      "a43242968db714a73b9c7cd489ac674cd2b4f93f47d42e169bc507a187bab993"
     ,
     "skill-content/configure/data/step-budgets.json":
       "dd99177f7ffc6e91fe189b9d5cc2eae518071e90b1d73a67913400c7aa955a74"
@@ -217,11 +217,14 @@
     "skill-content/deliver/data/targets.json":
       "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
     ,
+    "skill-content/deliver/data/task-triggers.json":
+      "aa90aab77b2cc6a8df3ee3d545dadadb8c581a69e34c792df545033bbf5a25b6"
+    ,
     "skill-content/deliver/references/switch-pr_proof-local_record.md":
       "7d58d116f06aa2722b75f8b67bc444987c8a2d7d88cd0a86d491c96332e57047"
     ,
     "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "a6da890fc5187146039051376deb8d4d04a9b276679d63e933aaab2748f438f7"
+      "a8fd82eb9c0cf20cd4111895f9273227d0ec3181e67c823be84c93741140a1b3"
     ,
     "skill-content/deliver/references/switch-step_budgets-enforced.md":
       "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
@@ -251,7 +254,7 @@
       "053421143e9eaa980d17057b48e38a11cf529480f6901714de0b11cf2f6214a2"
     ,
     "skill-content/nosql-database-design/SKILL.md":
-      "ef96e517e938a477d77f63c7b9f8a59d5e52ad92c6d308bf83f581367c7e5d37"
+      "8511eaa8b61b0ff9cc661e4d9ce216f1e5089e2b13fa98838527af0b525daa4d"
     ,
     "skill-content/nosql-database-design/references/aggregation.md":
       "b71d0d487664fb93a9be3989666aade9d90e47c0e59a6903df2060e90141ac41"
@@ -371,7 +374,7 @@
       "e720170ae35e091781dbb7c76e5d285390520f55e14fb729e912ebb03f09dbab"
     ,
     "skill-content/sql-database-design/SKILL.md":
-      "d0946aedfe3e4d8dc5a063cbba8df3be7c65b49882996491b03eac96d604a159"
+      "d1dbda6aadb1dd60e5d8dfccba14d10f8d36b9c18670de99d92a42ba186d5fc8"
     ,
     "skill-content/sql-database-design/references/advanced-patterns.md":
       "e7f1be274a5edad05d60548ada0044173b05fdb831555e7d2927b1b7e3202352"
@@ -494,10 +497,10 @@
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
-      "33b96298624cd34868c6fa2f11ecbae6d8cd8f7a3ede8540f44ae6e9de57ae24"
+      "6425cab0f065715d5b5c8c4200f3b50ab66288f362626f685912db7d77849487"
     ,
     "templates/task-input-policy.json":
-      "bc6548bfaeab8d98703126de7bbe9bfa60ad3c01a9a7ea68c1206fd3000f7e0a"
+      "7d014489540fb0ad3476d68c411ed8b57a6bfa32b071aa5f4b701db488dee5dc"
   },
   "host": "codex",
   "marketplace_release": "2026.10.6",

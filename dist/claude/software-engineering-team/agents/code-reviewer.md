@@ -48,7 +48,9 @@ finding without a file, line and evidence does not exist.
 ## Approach
 1. Follow the constitution included in the role prompt; if absent, read the
    installed team's `constitution.md`.
-2. Load the bound review skill and the stack checklists it names.
+2. Load the bound review skill and the checklists of every skill in the
+   task's `applied_skills`; a skill in the `review-inputs` result's
+   `missing_skills` that the change did not follow is a major finding.
 3. Build the complete changed-file inventory; no file is skipped; plan
    the order: security-critical first, then core logic, then the rest.
 4. Run three fixed passes: correctness (logic, edge cases, error

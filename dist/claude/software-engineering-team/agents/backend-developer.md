@@ -49,7 +49,7 @@ contract specify, in the smallest correct change, proven by tests.
 ## Approach
 1. Follow the constitution included in the role prompt; if absent, read the
    installed team's `constitution.md`.
-2. Load the bound stack skill; read the input files named in the spawn
+2. Load every skill the task's `applied_skills` lists; read the input files named in the spawn
    prompt, summaries first, contracts fully.
 3. Model data and validation first, then implement endpoints per the
    contract exactly, one domain at a time; a domain is done only when

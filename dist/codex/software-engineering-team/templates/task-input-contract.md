@@ -4,10 +4,10 @@ Before delegating a project role, the entry derives its input manifest with
 the packaged `scripts/task_inputs.py`. Use `--entry <entry> --role <agent>
 --mode create|revise|consume|review|repair --project-root <root>`, repeated
 `--input <project-relative-file>` for the complete selected source set, and
-repeated `--skill <method-skill>` from accepted Solution bindings.
-Technology skills are selected from those bindings, never from a role name;
-include the committed, accepted Solution decision in `--input` when selecting
-a technology method for a project.
+repeated `--skill <method-skill>` for each skill the task's `applied_skills`
+lists. `skill-content/deliver/data/task-triggers.json` makes a method skill
+mandatory when the task's files or words hit it; a stack no rule names is
+worked from the code.
 `--findings <record>` binds the existing finding set. `--base <commit>` binds
 the complete committed and working change inventory; it does not infer a baseline.
 Initial Setup may bind an initialized repository before its first commit;

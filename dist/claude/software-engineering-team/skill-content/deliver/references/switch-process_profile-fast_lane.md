@@ -47,15 +47,16 @@ a story (source_story, covers) or stand alone.
 - A task is one branch and one pull request to the target branch.
   `task_lane.py overlap` warns about open pull requests that touch the same
   files and never refuses.
-- Verification is the project's CI on the pull request head plus one
-  `code-reviewer` reading the diff. Only a critical finding blocks; every
-  other finding is filed as an issue in the project's repository. Auto-merge
-  lands the pull request once CI is green and the reviewer passed.
+- Verification is the project's CI on the pull request head plus the
+  reviewers `task_lane.py review-inputs` routes the changed files to. Any
+  critical or major finding blocks and is fixed on the branch in at most one
+  round; out-of-scope minors become one issue in the project's repository.
+  Auto-merge lands the pull request once CI is green and the reviewers passed.
 - The task's `rigor` is `normal` by default. At `high`, proposed for
   authentication, credentials, secrets, data deletion and irreversible
   actions and confirmed by the owner on the task, the read-only
   `security-reviewer` joins, every affected live group runs and the owner
-  merges.
+  merges. Any flag in the task's `risks` also adds the `security-reviewer`.
 - At rigor `normal`, live tests run only when the diff touches environment
   code or live test files and the change can alter what a live group
   proves; otherwise they run on demand.

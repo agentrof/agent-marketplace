@@ -8,7 +8,7 @@ exposure: entry
 
 Setup never writes executable test or environment placeholders into a consuming
 project. The project copies the CI template, replacing `{{test_command}}` and
-dropping or replacing `{{dependency_audit_job}}` and `{{environment_smoke_job}}`,
+`{{tests_root}}` and dropping or replacing `{{dependency_audit_job}}` and `{{environment_smoke_job}}`,
 as [ci-bootstrap](references/ci-bootstrap.md) describes, while setup alone
 replaces `{{project_local_ignores}}` in its managed gitignore block. No
 placeholder is allowed to reach a consuming repository.

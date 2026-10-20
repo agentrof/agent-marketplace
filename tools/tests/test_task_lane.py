@@ -1,5 +1,4 @@
-"""Fast lane: switch `process_profile` keeps every request on the standard
-ceremonies at `governed`. At `fast_lane`, one task, one branch and one
+"""Fast lane: one task, one branch and one
 pull request carry a change; the task holds the request and approval times,
 GitHub the rest, and the retrospective derives steps and proposals from them."""
 
@@ -75,13 +74,6 @@ def run_policy(docs: Path, command: str, *argv: str) -> None:
     if code:
         raise AssertionError(output.getvalue())
 
-
-class SwitchTests(unittest.TestCase):
-    def test_the_switch_has_only_the_fast_lane(self):
-        spec = process_policy.load_registry()["process_profile"]
-        self.assertEqual((spec["default"], spec["values"]), ("fast_lane", ["fast_lane"]))
-        with tempfile.TemporaryDirectory() as temporary:
-            self.assertEqual(process_policy.process_profile(Path(temporary)), "fast_lane")
 
 class TaskTests(unittest.TestCase):
     def write(self, text: str) -> Path:

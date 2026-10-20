@@ -20,8 +20,7 @@ without changing these semantics.
 
 ## Process switches
 
-Process switch `process_profile` has one value, `fast_lane`: the
-orchestrating session runs one task per change itself, with
+The orchestrating session runs one task per change itself, with
 every role in the foreground: one task, one branch and one pull request to the
 target branch, the project's CI plus one reviewer (two at task rigor `high`,
 where the owner merges), and auto-merge. The steps are in `flows/fast-lane.md`

@@ -471,7 +471,6 @@ HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
 SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 # The value each switch ships at: a flip changes every project that chose nothing.
 RELEASED_DEFAULTS = {
-    "process_profile": "fast_lane",
     "pr_proof": "remote_ci",
     "step_budgets": "off",
     "step_timing": "off",
@@ -480,12 +479,6 @@ RELEASED_DEFAULTS = {
 # who decides, who reads independently, which severity holds, which gate stays
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
-    "process_profile": {
-        f"{SKILLS}/deliver/references/fast-lane.md": (
-            "Only a critical finding blocks",
-            "every affected live group runs and the owner merges",
-        ),
-    },
     "pr_proof": {
         f"{SKILLS}/deliver/references/switch-pr_proof-local_record.md": (
             "`open-pr` refuses before it pushes",

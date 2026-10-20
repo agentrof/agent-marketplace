@@ -43,6 +43,7 @@ class CompanionRegistryTests(unittest.TestCase):
                     self.assertIn(f"`{command}`", readme)
 
 
+@integration
 class GraphifyHookEnvTests(unittest.TestCase):
     def test_apply_puts_the_output_folder_into_the_hook_once_and_check_reports_a_bare_hook(self):
         sys.path[:0] = [str(OVERLAY / "scripts"), str(TEAM / "scripts")]

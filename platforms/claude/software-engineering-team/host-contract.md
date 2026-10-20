@@ -3,46 +3,24 @@
 - `team_guard.py` announces the installed team and the exact absolute Python
   and scripts-directory invocation binding at session start, and reports the
   project's rendered role agents whose stamp is not the installed plugin's. It
-  never registers global state or blocks project work. `vault_hook.py`
-  protects only compiler-owned fields and immediately checks changed vault
-  documents.
+  never registers global state or blocks project work.
 - Every hook runs through `hook_launcher.py`, which first checks the plugin's
-  Python runtime floor. Below it the launcher denies only a write to a path the
-  vault hook governs and a command that runs one of the plugin's scripts; a raw
-  shell write to a governed file goes unchecked, since the plugin's own flows
-  are halted. When the session context reports
+  Python runtime floor. Below it the launcher reports the
+  unsupported runtime at session start and blocks the autopilot entry prompt;
+  every other hook passes. When the session context reports
   `AGENT_MARKETPLACE_PYTHON: unsupported`, stop the entry and tell the user the
   reason and the fix that context gives.
 - One Software Engineering Team owns a project. There is no shared project
   state service or cross-project work key.
 - Resolve every canonical "packaged script" reference beneath
-  `${CLAUDE_PLUGIN_ROOT}`. Invoke a machine-owned writer by passing that
-  absolute script path to the active hook runtime's exact absolute Python
-  executable. Bare interpreter names receive no pre-authorized writer grant.
-  For backward compatibility, direct bare-Python `init` and
-  `render-application` commands may retain their exact command-specific output
-  only when PATH resolves to the trusted hook runtime and the owning compiler
-  validates the final application; otherwise the hook restores it. Environment
-  indirection and direct shebang execution are guard-only. No shared dispatcher
-  or second plugin is involved.
-- Native PowerShell lifecycle writes are guard-only because Claude's payload
-  does not attest a PowerShell grammar/runtime identity. Use a supported
-  Bash-compatible tool contract for machine-owned writers. Shared hook logic
-  is portable to Windows, but native Windows writer preservation is not a
-  real-host Claude claim.
+  `${CLAUDE_PLUGIN_ROOT}`. No shared dispatcher or second
+  plugin is involved.
 - Bring an approved source handoff into the local checkout with Git itself,
   never a pull or a wrapped script: fetch it first, then run one direct Bash
   call from the checkout root with Git's absolute path, `<git> merge --no-edit
   <source>`, or, when `HEAD` already holds that source, `<git>
   restore --source=<source> --worktree -- workspace/docs/experience-design`.
-  `<source>` is a committed source holding the current remote target. The
-  vault hook attests only these two forms, against the open project Fence and
-  its target; another merge, pull or checkout that changes compiler-owned
-  Experience state is restored, and the hook's message names the form to run.
-- Vault hooks are workflow-integrity controls for host-dispatched tool effects,
-  not a same-user operating-system sandbox. A process deliberately targeting
-  hook scratch or recovery files has the user's filesystem authority; host
-  sandboxing and OS permissions remain the security boundary.
+  `<source>` is a committed source holding the current remote target.
 - A canonical entry with `project_scope: external` does not require project
   setup, workspace configuration or a Git repository.
 - Present canonical choice gates through `AskUserQuestion`, preserving options,
@@ -98,11 +76,6 @@
   finished Claude Code subagent holds no thread, so there is nothing to close
   first. Every wave's progress message names the wave size and how many of
   its readers run at once.
-- Under switch `review_scope` at `impact_closure`, run the owning
-  compiler's structural check the flow names before spawning any reader, so
-  no reader is spent on a package the compiler refuses, and give each reader
-  its impact closure in full and every approved, unchanged note outside it as
-  its hash-bound summary.
 - Under switch `review_fanout` at `per_unit`, spawn one reader per changed
   unit of a review in one message, wait for all of them, then spawn the one
   aggregator with their findings and the compilers' cross-unit facts, and
@@ -111,9 +84,6 @@
   readers of every review level the flow declares independent in one
   message, then wait for all of them before triage; approval still waits for
   every level.
-- Under switch `context_pack` at `role_digest`, give each spawned role the
-  pack `context_pack.py build` returns for its entry, role and mode in place
-  of the full required reads.
 - Claude Code's prompt cache keeps a role's context for five minutes from the
   start of the model call that last used it, and a model call after a longer
   pause writes the whole context into the cache again, at more than ten times
@@ -132,7 +102,7 @@
   Bash `timeout` of 300000, calling it again while it returns pending. A
   role never ends its turn to wait for a background notice.
 - During setup or a package refresh, regenerate the host projection, run the
-  generated project check and preserve authored vault files. The generator owns
+  generated project check and preserve authored project files. The generator owns
   only portable instruction roots, local project memory and the role agents it
   renders into `.claude/agents/`: the top-level
   `software-engineering-team-<agent-id>.md` files that carry its generated
@@ -291,13 +261,7 @@
   `complete` may end a grant at any time. `autopilot.py` is the packaged
   `skill-content/autopilot/scripts/autopilot.py`.
 - The guard stops an agent that runs the packaged script, not a process that
-  writes the runtime files with the user's filesystem authority. `vault_hook.py`
-  narrows the gap: it denies `Write` and `Edit` into
-  `.agentrof/agent-marketplace/.runtime/autopilot/` and puts back what a `Bash`
-  command adds to the grant or the arming record there, while a command may
-  still end the grant or delete the files. It keeps a grant or arming record
-  whose bytes `autopilot.py` or its prompt hook marked as their latest write,
-  so a long command that overlaps an `on` no longer undoes it.
+  writes the runtime files with the user's filesystem authority.
 - A grant governs only the Claude Code session whose user typed it: the hook
   records its session id, the question hook denies only that session, and
   `on`, `record` and `queue` refuse when `CLAUDE_CODE_SESSION_ID` differs.

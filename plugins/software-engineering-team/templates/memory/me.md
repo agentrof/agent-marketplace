@@ -1,4 +1,4 @@
 # Working preferences
 
-- Challenge assumptions before implementation.
-- Keep workflows explicit, reversible and easy to upgrade.
+User-owned after setup; the team seeds it only when absent. Record the owner's
+own working rules here.

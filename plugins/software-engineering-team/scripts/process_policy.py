@@ -3,7 +3,7 @@
 
 The package registry ``skill-content/configure/data/process-switches.json``
 declares every process switch, its values and its default. The governed
-project document ``workspace/docs/delivery/process-policy.md`` records only
+project document ``workspace/docs/operation/process-policy.md`` records only
 the project's explicit choices, one table row per switch. A missing document
 or a switch without a row follows the package default, including a default
 that a later release promotes.
@@ -34,7 +34,7 @@ from vault_markdown import (
 
 PACKAGE = Path(__file__).resolve().parents[1]
 REGISTRY = "skill-content/configure/data/process-switches.json"
-RELATIVE = "delivery/process-policy.md"
+RELATIVE = "operation/process-policy.md"
 TYPE = "process-policy"
 TITLE = "Process Policy"
 STATUSES = ("draft", "approved")
@@ -426,12 +426,12 @@ def effective_values(docs: Path | None, package: Path | None = None) -> tuple[di
 
 
 def process_profile(docs: Path | None, package: Path | None = None) -> str:
-    """The ``process_profile`` value in force; ``governed`` when the policy cannot be read,
-    so an unreadable policy never opens the fast lane."""
+    """The ``process_profile`` value in force; ``fast_lane``, the only profile, when the
+    policy cannot be read."""
     try:
         return effective_values(docs, package)[0]["process_profile"]["value"]
     except (KeyError, OSError, ValueError):
-        return "governed"
+        return "fast_lane"
 
 
 def fast_lane(docs: Path | None) -> bool:

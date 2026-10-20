@@ -94,7 +94,7 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     instructions live in switch references that `task_inputs.py` binds only
     when the project's Process Policy selects that value, together with the
     package data only that value reads. Project values live in
-    `workspace/docs/delivery/process-policy.md`, never in
+    `workspace/docs/operation/process-policy.md`, never in
     `workspace/config.json`.
 
 Repository issue and release operations are documented separately in

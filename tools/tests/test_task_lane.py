@@ -77,24 +77,11 @@ def run_policy(docs: Path, command: str, *argv: str) -> None:
 
 
 class SwitchTests(unittest.TestCase):
-    def test_the_switch_defaults_to_governed_and_offers_the_fast_lane(self):
+    def test_the_switch_has_only_the_fast_lane(self):
         spec = process_policy.load_registry()["process_profile"]
-        self.assertEqual(spec["default"], "governed")
-        self.assertEqual(spec["values"], ["governed", "fast_lane"])
-        self.assertNotIn("delivery-execution", spec["spec"]["flows"])
-        self.assertNotIn("delivery-planning", spec["spec"]["flows"])
-
-    def test_profile_reads_governed_without_a_policy_and_fast_lane_when_set(self):
+        self.assertEqual((spec["default"], spec["values"]), ("fast_lane", ["fast_lane"]))
         with tempfile.TemporaryDirectory() as temporary:
-            docs = Path(temporary) / "workspace" / "docs"
-            (docs / "delivery").mkdir(parents=True)
-            self.assertEqual(process_policy.process_profile(docs), "governed")
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            self.assertEqual(process_policy.process_profile(docs), "governed",
-                             "a draft policy never opens the fast lane")
-            run_policy(docs, "approve")
-            self.assertEqual(process_policy.process_profile(docs), "fast_lane")
+            self.assertEqual(process_policy.process_profile(Path(temporary)), "fast_lane")
 
 class TaskTests(unittest.TestCase):
     def write(self, text: str) -> Path:

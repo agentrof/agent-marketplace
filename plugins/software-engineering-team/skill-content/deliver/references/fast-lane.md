@@ -1,6 +1,6 @@
 # Process profile: fast lane
 
-At Process Policy `process_profile` `fast_lane`, every change reaches the
+Every change reaches the
 target branch through one task and its own pull request,
 `flows/fast-lane.md`.
 

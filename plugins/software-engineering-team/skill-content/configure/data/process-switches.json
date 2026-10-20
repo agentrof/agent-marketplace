@@ -91,19 +91,15 @@
       }
     },
     "process_profile": {
-      "summary": "Whether a request runs the standard Requirement, Backlog Planning and Delivery ceremonies, or the fast lane: one task per change, approved by the owner, one branch and one pull request to the target branch, the project's CI and one reviewer as verification, and auto-merge; large requests still run the needed analysis stages with single-reader reviews and split into tasks.",
+      "summary": "How a request runs: the fast lane, one task per change, approved by the owner, one branch and one pull request to the target branch, the project's CI and one reviewer as verification, and auto-merge; a large request is split into tasks.",
       "flows": ["fast-lane"],
       "values": [
         {
-          "id": "governed",
-          "tradeoffs": "Every request runs the impact matrix, the Requirement stages, the backlog revision with its review panels and a Delivery with Fence, Slots, Items, plan approvals, path claims, contract pins, architecture stamping and frozen verification. Today's behaviour and the baseline: in one measured project a story took 84 to 221 minutes from start to integration."
-        },
-        {
           "id": "fast_lane",
-          "tradeoffs": "The deliver entry turns a free-text request into one task with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and one reviewer reading the diff verify it; only a critical finding blocks, the rest become issues, and auto-merge lands it. No analysis, solution or design stage, no review panels, no Integration branch, Item refs, plan approvals, exclusive claims or contract pins, and live tests leave the story path, so a defect those would catch surfaces later, on main."
+          "tradeoffs": "The deliver entry turns a free-text request into one task with 3 to 8 acceptance criteria and a test list, checked by lint only, then one branch and one pull request straight to the target branch. The project's CI and one reviewer reading the diff verify it; only a critical finding blocks, the rest become issues, and auto-merge lands it."
         }
       ],
-      "default": "governed",
+      "default": "fast_lane",
       "metric": "Per task: request, approval, pull request opened, CI green, review passed and merged times, read from the task and GitHub by the retrospective, and every defect found on main after a fast-lane merge.",
       "promotion": {
         "unit": "At least 20 fast-lane stories.",

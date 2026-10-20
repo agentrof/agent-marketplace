@@ -91,7 +91,7 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
 
     def test_no_document_means_every_switch_follows_its_default(self):
         self.assertEqual(self.cli("check"), (0, {"ok": True, "exists": False,
-                                                 "path": "delivery/process-policy.md",
+                                                 "path": "operation/process-policy.md",
                                                  "errors": []}))
         self.assertEqual(process_policy.approved_snapshot(self.docs), ({}, []))
         code, result = self.cli("value", "--switch", "fixture_mode")
@@ -122,7 +122,7 @@ class ProcessPolicyLifecycleTests(unittest.TestCase):
         self.assertEqual(props["tags"], ["doc/process-policy", "status/approved"])
         self.assertEqual(props["source_hash"], process_policy.policy_hash(props, body))
         self.assertEqual(process_policy.approved_snapshot(self.docs), ({
-            "process_policy_path": "delivery/process-policy.md",
+            "process_policy_path": "operation/process-policy.md",
             "process_policy_revision": 1,
             "process_policy_source_hash": props["source_hash"],
         }, []))
@@ -471,7 +471,7 @@ HOSTS = {host: f"platforms/{host}/software-engineering-team/host-contract.md"
 SWITCH_REFERENCE = re.compile(r"switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md")
 # The value each switch ships at: a flip changes every project that chose nothing.
 RELEASED_DEFAULTS = {
-    "process_profile": "governed",
+    "process_profile": "fast_lane",
     "pr_proof": "remote_ci",
     "step_budgets": "off",
     "step_timing": "off",
@@ -481,7 +481,7 @@ RELEASED_DEFAULTS = {
 # and which writes never run at once. Any other sentence may be reworded.
 SAFETY_RULES = {
     "process_profile": {
-        f"{SKILLS}/deliver/references/switch-process_profile-fast_lane.md": (
+        f"{SKILLS}/deliver/references/fast-lane.md": (
             "Only a critical finding blocks",
             "every affected live group runs and the owner merges",
         ),

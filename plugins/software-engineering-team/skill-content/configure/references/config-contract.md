@@ -32,7 +32,7 @@ The other configuration targets are documents with their own lifecycle:
 | Test, mutation and dependency-audit commands | `workspace/docs/operation/` | QA Engineer |
 | Runtime environment command and scenarios | `workspace/docs/operation/` | DevOps Engineer |
 | Role model and reasoning effort | the installed package's class map, resolved per spawn by `model_class.py resolve`; `class_models` sets a class slot's model and effort per host and `role_classes` a role's class; a personal session-wide override follows the host contract | Package release for the defaults; `/configure models` for the project's overrides; User for a session-wide override |
-| Process switch values | `workspace/docs/delivery/process-policy.md` over the package registry `data/process-switches.json` | Process Policy lifecycle, `/configure process` |
+| Process switch values | `workspace/docs/operation/process-policy.md` over the package registry `data/process-switches.json` | Process Policy lifecycle, `/configure process` |
 
 No `scale`, `limits`, stack, source-directory, command or process switch field
 is accepted in config: the config stays closed, and the Process Policy is the

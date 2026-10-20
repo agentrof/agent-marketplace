@@ -14,8 +14,10 @@ coming back.
 - each blocking (critical) review finding `merge --critical <n>` recorded;
 - each role `changes` verdict;
 - each commit pushed after the pull request opened that no earlier red run,
-  `changes` verdict or blocking finding explains; a `Merge ...` commit always
-  counts.
+  `changes` verdict or blocking finding explains; a merge of another branch
+  always counts. A merge from main, the `docs: deliver task` commit and, when
+  no feature commit preceded the opening, the first feature commit are
+  routine and never count.
 
 A cause only a person or agent knows is recorded with `task_lane.py rework
 --task TK-### --category <id> --note "<cause>"`. With `--ref <ref>`, a ref the
@@ -25,7 +27,9 @@ adding one. Both land in the task's `## Rework` section with their time.
 ## Causes
 
 Each event takes the first category of `data/rework-causes.json` whose hint,
-a case-insensitive regex, matches its text; no match is `unclassified` and the
+a case-insensitive regex, matches its text, commit prefixes (`test:`,
+`style:`, `fix(review):`) and role verdicts (`code-reviewer changes`)
+included; no match is `unclassified` and the
 report lists it with its ref so a person can classify it. Each category has an
 owner: `project`, `plugin` or `process`. A project replaces or adds a category,
 or overrides a setting, in `.agentrof/rework-causes.json`.
@@ -54,6 +58,6 @@ from GitHub again.
   are marked `Promote: memory` and printed as one-line candidates. Nothing is
   written to any memory store; the main session decides.
 - Process- and plugin-owned recurring groups become proposals
-  `RETRO-<KIND>-REWORK-<CAUSE>` with evidence, the rework minutes they cost
+  `RETRO-REWORK-<CAUSE>` with evidence, the rework minutes they cost
   (first red or blocking event to merge) and a verify line; they rank with the
   time, cost and quality levers and file through `file-issues`.

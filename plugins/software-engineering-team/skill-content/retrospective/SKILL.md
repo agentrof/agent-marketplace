@@ -46,7 +46,10 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
    merged task's cost and waits once to `.agentrof/retrospective/history.jsonl`
    and later runs read that row first, so cost survives the host's transcript
    cleanup. `--rescan` prices every task from the transcripts again and
-   appends the result as its newest row; earlier rows stay.
+   appends the result as its newest row; earlier rows stay. The history is
+   append-only measurement: nothing deletes or rewrites it without the
+   owner's approval. Each summary row keeps a fingerprint of the price
+   table, and a changed one is flagged as a cost-method change.
    Quality comes beside them: the review counts `merge --critical <n>
    --non-critical <n> --filed <n>` writes into its pass comment; the CI first
    pass and the red runs before green from the branch's workflow runs (one
@@ -59,11 +62,13 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
    [rework causes](references/rework.md) for its events, causes, grouping
    and the lessons file.
 2. Return its text as it is:
-   - task count; request-to-merge average, median and max against the target
-     (15 minutes on average, 50 at most for a large task) and the previous
-     retrospective of the same scope;
+   - task count; request-to-merge average, median and max with a verdict
+     against the target, the baseline (the previous retrospective of the same
+     scope, or none) and the average step breakdown;
    - per task the steps (define, write, ci, review, merge_wait; ci and review
-     run side by side), the waits (agent work, CI wait, review wait, owner
+     run side by side, the larger counts) and the unaccounted minutes, so they
+     add up to the total; a missing step or cost is shown as missing with its
+     reason; the waits (agent work, CI wait, review wait, owner
      wait, idle) and the cost: dollars, tokens (input, cache write, cache
      read, output), spawns with the startup context each one began with (its
      first prompt: input plus cache tokens) and the main session's part;
@@ -81,13 +86,16 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
    - per task its rework events and minutes, per kind the one-pass rate, the
      recurring and rare rework groups, unclassified events and memory
      candidates;
-   - the slowest tasks with their largest step;
-   - up to 4 numbered proposals per kind, time, cost (startup context, spawns
+   - the slowest tasks with their steps and verdict against their size target;
+   - per kind the size targets beside the per-size medians calibrated from the
+     scope and the kept history (shown at 5 or more tasks of a size);
+   - up to 5 numbered proposals, one per cause across kinds, only from kinds
+     with at least 5 merged tasks; time, cost (startup context, spawns
      per task, xhigh effort on review or fix, main-session share) and quality
      levers (CI first pass under 80%, any escaped defect, critical findings on
      over 20% of reviewed tasks) and recurring process- or plugin-owned rework
-     causes (`RETRO-<KIND>-REWORK-<CAUSE>`) ranked together by the share of the task's
-     minutes, dollars or tasks they address, each with its evidence, cause owner (project, plugin, host
+     causes (`RETRO-REWORK-<CAUSE>`) ranked together by the share of the task's
+     minutes, dollars or tasks they address, each with its evidence per kind, cause owner (project, plugin, host
      tool, owner or process), expected gain and how to verify it.
    Add nothing it does not measure; an empty scope says so.
 3. For a Delivery scope the user may keep the summary: `--write-report` writes

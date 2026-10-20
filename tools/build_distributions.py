@@ -981,6 +981,7 @@ def companion_section(team_source: Path) -> list[str]:
     return ["\n".join([
         "## Companion skills", "", registry["precedence"], "",
         "| Step | Role | Skill | When |", "|---|---|---|---|", *rows,
+        *(["", *registry["notes"]] if registry.get("notes") else []),
     ])]
 
 

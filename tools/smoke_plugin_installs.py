@@ -38,9 +38,6 @@ CLAUDE_IN_USE_ROOT = ".in_use"
 CLAUDE_PID_RE = re.compile(r"^[1-9][0-9]*$")
 CLAUDE_PID_MAX = (1 << 32) - 1
 CLAUDE_MARKER_MAX_BYTES = 512
-APPLICATION_RESOURCES = (
-    "skill-content/experience-modeling/data/experience-schema.json",
-)
 
 
 class SmokeFailure(RuntimeError):
@@ -287,32 +284,13 @@ def installed_root(inventory: dict | list, host: str) -> Path:
     raise SmokeFailure(f"{host} inventory has no enabled {TEAM} install")
 
 
-def exercise_application_resources(
-    team_root: Path, env: dict[str, str]
-) -> None:
-    application_check = team_root / "scripts" / "experience_application_check.py"
-    for path in (application_check, *(team_root / item for item in APPLICATION_RESOURCES)):
-        if not path.is_file():
-            raise SmokeFailure(
-                f"installed package is missing {path.relative_to(team_root)}"
-            )
-    application_self_check = json.loads(run([
-        sys.executable, str(application_check), "self-check", "--json",
-    ], dict(env, PYTHONDONTWRITEBYTECODE="1")))
-    if application_self_check.get("ok") is not True:
-        raise SmokeFailure(
-            "installed opaque prototype snapshot checker self-check failed: "
-            + json.dumps(application_self_check.get("findings", []))
-        )
-
-
 def exercise_task_inputs(team_root: Path, env: dict[str, str]) -> None:
     """Check the installed role catalog and derive one role task from it."""
     task_inputs = team_root / "scripts" / "task_inputs.py"
     if not task_inputs.is_file():
         raise SmokeFailure("installed package is missing scripts/task_inputs.py")
     for arguments in (["--check-catalog"],
-                      ["--entry", "backlog-plan", "--role", "backlog-reviewer",
+                      ["--entry", "deliver", "--role", "code-reviewer",
                        "--mode", "review"]):
         derived = json.loads(run([sys.executable, str(task_inputs), *arguments], env))
         if derived.get("ok") is False:
@@ -324,46 +302,11 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     env = dict(env, PYTHONDONTWRITEBYTECODE="1")
     setup = team_root / "scripts" / "setup_project.py"
     check = team_root / "scripts" / "setup_check.py"
-    route = team_root / "scripts" / "requirement_route.py"
-    delivery_compile = team_root / "scripts" / "delivery_compile.py"
-    delivery_git = team_root / "scripts" / "delivery_git.py"
-    product_chain_scripts = (
-        "stage_package.py", "ba_compile.py", "landscape_check.py",
-        "design_system_compile.py", "experience_compile.py",
-        "experience_application_check.py",
-        "backlog_compile.py", "architecture_compile.py",
-    )
-    for path in (
-        setup, check, route,
-        *(team_root / "scripts" / name for name in product_chain_scripts),
-        delivery_compile, delivery_git, team_root / "scripts" / "delivery_provider.py",
-    ):
+    for path in (setup, check, team_root / "scripts" / "task_lane.py",
+                 team_root / "flows" / "fast-lane.md"):
         if not path.is_file():
             raise SmokeFailure(f"installed package is missing {path.relative_to(team_root)}")
-    for script in (delivery_compile, delivery_git,
-                   *(team_root / "scripts" / name for name in product_chain_scripts)):
-        run([sys.executable, str(script), "--help"], env)
-    exercise_application_resources(team_root, env)
     exercise_task_inputs(team_root, env)
-    required_flows = {
-        "requirement.md", "business-analysis.md", "solution-design.md",
-        "design-system.md", "experience-design.md", "backlog-planning.md",
-    }
-    present_flows = {path.name for path in (team_root / "flows").glob("*.md")}
-    missing_flows = required_flows - present_flows
-    if missing_flows:
-        raise SmokeFailure("installed package is missing product-chain flows: "
-                           + ", ".join(sorted(missing_flows)))
-    required_agents = {
-        "business-analyst.md", "solution-architect.md", "solution-reviewer.md",
-        "ux-designer.md", "experience-reviewer.md", "product-owner.md",
-        "software-architect.md",
-    }
-    missing_agents = [name for name in sorted(required_agents)
-                      if not (team_root / "agents" / name).is_file()]
-    if missing_agents:
-        raise SmokeFailure("installed package is missing product-chain agents: "
-                           + ", ".join(missing_agents))
     inspected = json.loads(run([
         sys.executable, str(setup), "inspect", "--project-root", str(project),
         "--json",
@@ -374,8 +317,8 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
         sys.executable, str(setup), "apply", "--project-root", str(project),
         "--json",
     ], env))
-    if first.get("next_entry") != "requirement":
-        raise SmokeFailure("fresh setup did not route to Requirement Flow")
+    if first.get("next_entry") != "deliver":
+        raise SmokeFailure("fresh setup did not route to the deliver entry")
     host = "claude" if (team_root / ".claude-plugin" / "plugin.json").is_file() \
         else "codex" if (team_root / ".codex-plugin" / "plugin.json").is_file() \
         else ""
@@ -444,13 +387,6 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     ], env)
     portable = project / ".github" / "agentrof" / "vault-gate.pyz"
     run([sys.executable, str(portable), "check", "--project-root", str(project), "--json"], env)
-    routed = subprocess.run([
-        sys.executable, str(route), "--project-root", str(project),
-        "--json",
-    ], capture_output=True, text=True, env=env, check=False, timeout=60)
-    payload = json.loads(routed.stdout)
-    if routed.returncode != 1 or payload.get("next_entry") != "requirement":
-        raise SmokeFailure("document router did not remain at Requirement Flow")
 
 
 def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:

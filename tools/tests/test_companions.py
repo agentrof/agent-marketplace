@@ -55,12 +55,13 @@ class CompanionCheckTests(unittest.TestCase):
                    for spec in companion["hosts"].values() if "plugin_id" in spec["verify"]]
             listings = {"claude": json.dumps([{"id": value} for value in ids]),
                         "codex": json.dumps({"installed": [{"pluginId": value} for value in ids]})}
+            listings["graphify"] = "post-commit: installed"
             for name, listing in listings.items():
                 tool = fake / name
                 tool.write_text(f"#!/bin/sh\necho '{listing}'\n", encoding="utf-8")
                 tool.chmod(0o755)
             env = {**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}",
-                   "CODEX_HOME": str(codex_home),
+                   "CODEX_HOME": str(codex_home), "HOME": str(temporary),
                    "PYTHONPATH": str(TEAM / "scripts")}
 
             def run(*args: str) -> subprocess.CompletedProcess:
@@ -76,7 +77,7 @@ class CompanionCheckTests(unittest.TestCase):
             for companion in REGISTRY["companions"]:
                 for spec in companion["hosts"].values():
                     if spec["verify"]["kind"] == "path_exists":
-                        skill = project / spec["verify"]["path"]
+                        skill = (temporary if spec["verify"].get("base") else project) / spec["verify"]["path"]
                         skill.parent.mkdir(parents=True, exist_ok=True)
                         skill.write_text("x\n", encoding="utf-8")
             settings = project / ".claude" / "settings.json"
@@ -91,6 +92,7 @@ class CompanionCheckTests(unittest.TestCase):
             self.assertEqual(merged["permissions"]["allow"], ["Bash(ls)"])
             self.assertIn("Skill(superpowers:brainstorming)", merged["permissions"]["deny"])
             self.assertEqual(merged["env"]["IMPECCABLE_CONTEXT_DIR"], "workspace/experience-design")
+            self.assertIn("graphify | git-hook | yes", run("check").stdout)
 
             (project / "DESIGN.md").write_text("x\n", encoding="utf-8")
             last = run("check", "--json")
@@ -105,22 +107,68 @@ class CompanionCheckTests(unittest.TestCase):
             for companion in REGISTRY["companions"]:
                 verify = companion["hosts"]["codex"]["verify"]
                 if verify["kind"] == "path_exists":
-                    (project / verify["path"]).parent.mkdir(parents=True, exist_ok=True)
-                    (project / verify["path"]).write_text("x\n", encoding="utf-8")
-            env = {**os.environ, "PATH": str(empty), "CODEX_HOME": str(Path(raw) / "codex"),
+                    skill = (Path(raw) if verify.get("base") else project) / verify["path"]
+                    skill.parent.mkdir(parents=True, exist_ok=True)
+                    skill.write_text("x\n", encoding="utf-8")
+            env = {**os.environ, "PATH": str(empty), "CODEX_HOME": str(Path(raw) / "codex"), "HOME": raw,
                    "PYTHONPATH": str(TEAM / "scripts")}
             script = str(OVERLAY / "scripts" / "setup_companions.py")
             applied = subprocess.run(
                 [sys.executable, script, "apply", "--host", "codex", "--project-root", str(project)],
                 env=env, capture_output=True, text=True, check=False)
             self.assertEqual(applied.returncode, 1)
-            self.assertNotIn("RUN", applied.stdout)
+            self.assertNotIn("RUN   codex", applied.stdout)
+            self.assertIn("APP   uv not found", applied.stdout)
+            self.assertIn("NOTE  Codex runs the ponytail hooks only after", applied.stdout)
             self.assertIn("APP   Codex CLI not found: install plugin superpowers from marketplace"
                           " openai-curated in the Codex app via /plugins", applied.stdout)
             checked = subprocess.run(
                 [sys.executable, script, "check", "--host", "codex", "--project-root", str(project)],
                 env=env, capture_output=True, text=True, check=False)
             self.assertIn("superpowers | codex | NO", checked.stdout)
+
+
+@integration
+class GraphifyRefreshTests(unittest.TestCase):
+    def test_refresh_extracts_only_after_a_docs_markdown_change(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project, fake = Path(raw) / "project", Path(raw) / "bin"
+            fake.mkdir()
+            (project / "workspace" / "docs").mkdir(parents=True)
+            graph = project / ".agentrof" / "graphify" / "docs"
+            graph.mkdir(parents=True)
+            (graph / "graph.json").write_text("{}\n", encoding="utf-8")
+            tool = fake / "graphify"
+            tool.write_text('#!/bin/sh\necho "fake $* out=$GRAPHIFY_OUT"\n', encoding="utf-8")
+            tool.chmod(0o755)
+
+            def git(*args: str) -> str:
+                return subprocess.run(["git", "-C", str(project), *args], check=True,
+                                      capture_output=True, text=True).stdout.strip()
+
+            git("init", "-q")
+            git("-c", "user.name=t", "-c", "user.email=t@example.invalid",
+                "commit", "-q", "--allow-empty", "-m", "base")
+            (project / "workspace" / "docs" / "a.md").write_text("x\n", encoding="utf-8")
+            (project / "README.txt").write_text("x\n", encoding="utf-8")
+            git("add", "workspace", "README.txt")
+            git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "docs")
+            env = {**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}",
+                   "PYTHONPATH": str(TEAM / "scripts")}
+            env.pop("GRAPHIFY_OUT", None)
+
+            def refresh(commit_range: str) -> str:
+                result = subprocess.run(
+                    [sys.executable, str(OVERLAY / "scripts" / "graphify_refresh.py"), "--wait",
+                     "--project-root", str(project), "--range", commit_range],
+                    env=env, capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                return (project / ".agentrof" / "graphify" / "refresh.log").read_text(encoding="utf-8")
+
+            log = refresh("HEAD~1..HEAD")
+            self.assertIn(f"fake extract workspace/docs --backend claude-cli out={graph.resolve()}", log)
+            self.assertIn("done: graphify exit 0", log)
+            self.assertIn("skip: no Markdown", refresh("HEAD..HEAD"))
 
 
 if __name__ == "__main__":

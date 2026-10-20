@@ -56,6 +56,13 @@ The team flow owns plans, task files, branches, worktrees, commits, pull request
 | Architecture change | software-architect | diagram-design (architecture, architecture-delta, sequence, ER) | a structural change to system-architecture |
 | Write UI | frontend-developer | impeccable (craft, polish, harden, adapt) | the task touches UI |
 | Review, UI | code-reviewer | impeccable detect and critique, read-only | the change touches UI |
+| Find context | all roles | graphify query, path, explain | `.agentrof/graphify` holds a graph |
+| Docs graph refresh | deliver | graphify_refresh.py in the background | a merged task changed Markdown under workspace/docs |
+| Write code | developer roles | ponytail, level full | always |
+| Review | code-reviewer | /ponytail-review | inside its single review pass |
+| Retrospective | retrospective | /ponytail-debt | report the shortcut debt ledger |
+
+Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph is `--graph .agentrof/graphify/docs/graph.json`); otherwise read the task file's sources and grep.
 
 # Load user context
 

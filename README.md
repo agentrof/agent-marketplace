@@ -44,6 +44,28 @@ skills become `Skill(<plugin>:<skill>)` deny rules in `.claude/settings.json`
 and `[[skills.config]]` entries with `enabled = false` in the user Codex
 config; the environment is written to the Claude project settings.
 
+### Setup
+
+1. Run `scripts/setup_project.py companions apply --project-root <root>`
+   (add `--host claude` or `--host codex` for one host). It installs every
+   missing companion: the Claude plugins and project skills, the Codex
+   plugins and skills when the `codex` CLI is present, the graphify CLI
+   through `uv`, its skill for each host and its git hooks.
+2. Run what it prints. `RUN` lines are install commands that did not
+   succeed; `APP` lines are steps for the owner, once: without the `codex`
+   CLI, add the listed plugins in the Codex app via `/plugins`, and install
+   `uv` if it is missing. `NOTE` lines are one-time owner steps the check
+   cannot see, such as trusting the ponytail hooks in Codex `/hooks`.
+3. Run `scripts/setup_project.py companions check --project-root <root>`.
+   It exits 0 when every row reads `yes` or `-` and nothing is printed below
+   the table.
+
+The docs graph is built once by the owner
+(`GRAPHIFY_OUT=.agentrof/graphify/docs graphify extract workspace/docs --backend claude-cli`);
+after that, deliver refreshes it in the background for each merged task
+that changed Markdown under `workspace/docs`, logging to
+`.agentrof/graphify/refresh.log`.
+
 <!-- companions:start -->
 
 The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.
@@ -104,6 +126,36 @@ Environment: `IMPECCABLE_CONTEXT_DIR=workspace/experience-design`, `IMPECCABLE_N
 Setup writes `.impeccable/config.json`.
 
 Check fails on `DESIGN.md`, `PRODUCT.md`, `docs/DESIGN.md`, `docs/PRODUCT.md`. DESIGN.md and PRODUCT.md live only in workspace/experience-design.
+
+### graphify
+
+Knowledge graph of the project's code and documents. Roles find context with a graph query instead of reading many files; the code graph refreshes through git hooks on commit, checkout and merge, the docs graph in the background after deliver merges a task. [https://github.com/Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify), Apache-2.0.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| cli | user | `uv tool install graphifyy` | `graphify --version` succeeds |
+| git-hook | project | `graphify hook install` | `graphify hook status` succeeds and prints `post-commit: installed` |
+| claude | user | `graphify install --platform claude` | `.claude/skills/graphify/SKILL.md` exists in the home directory |
+| codex | user | `graphify install --platform codex` | `.codex/skills/graphify/SKILL.md` exists in the home directory |
+
+uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply.
+
+Environment: `GRAPHIFY_OUT=.agentrof/graphify`.
+
+Setup writes `.agentrof/graphify/.gitignore`.
+
+### ponytail
+
+Smallest complete change, plain-language review and a shortcut debt ledger. Developer roles write less code without dropping callers, tests or safety; review and retrospective get its review and debt reports. [https://github.com/DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add DietrichGebert/ponytail`<br>`claude plugin install ponytail@ponytail --scope project` | `claude plugin list --json` lists `ponytail@ponytail` |
+| codex | user | `codex plugin marketplace add DietrichGebert/ponytail`<br>`codex plugin add ponytail@ponytail` | `codex plugin list --json` lists `ponytail@ponytail` |
+
+Codex runs the ponytail hooks only after the owner trusts them once in /hooks.
+
+Environment: `PONYTAIL_DEFAULT_MODE=full`.
 
 <!-- companions:end -->
 

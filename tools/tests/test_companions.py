@@ -43,6 +43,27 @@ class CompanionRegistryTests(unittest.TestCase):
                     self.assertIn(f"`{command}`", readme)
 
 
+class GraphifyHookEnvTests(unittest.TestCase):
+    def test_apply_puts_the_output_folder_into_the_hook_once_and_check_reports_a_bare_hook(self):
+        sys.path[:0] = [str(OVERLAY / "scripts"), str(TEAM / "scripts")]
+        import setup_companions
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".gitattributes").write_text("graph.json merge=graphify\n", encoding="utf-8")
+            hook = root / ".git" / "hooks" / "post-commit"
+            hook.write_text("#!/bin/sh\n# graphify-hook-start\ngraphify update .\n", encoding="utf-8")
+            line = "export GRAPHIFY_OUT=.agentrof/graphify"
+            _rows, findings = setup_companions.status(REGISTRY, root, ())
+            self.assertEqual([item for item in findings if "post-commit" in item],
+                             [f"graphify: hook post-commit lacks `{line}`; rerun companions apply"])
+            for _ in range(2):
+                setup_companions.write_hook_env(REGISTRY, root)
+            self.assertEqual(hook.read_text(encoding="utf-8").splitlines()[:2], ["#!/bin/sh", line])
+            self.assertEqual(hook.read_text(encoding="utf-8").count(line), 1)
+            self.assertEqual(setup_companions.status(REGISTRY, root, ())[1], [])
+
+
 @integration
 class CompanionCheckTests(unittest.TestCase):
     def test_check_and_apply_against_fake_host_clis(self):

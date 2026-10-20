@@ -191,7 +191,12 @@
           "name": "git-hook",
           "scope": "project",
           "install": ["graphify hook install"],
-          "verify": {"kind": "command", "command": "graphify hook status", "contains": "post-commit: installed"}
+          "verify": {"kind": "command", "command": "graphify hook status", "contains": "post-commit: installed"},
+          "hook_env": {
+            "hooks": ["post-commit", "post-checkout", "post-merge", "post-rewrite"],
+            "marker": "graphify",
+            "line": "export GRAPHIFY_OUT=.agentrof/graphify"
+          }
         }
       ],
       "env": [

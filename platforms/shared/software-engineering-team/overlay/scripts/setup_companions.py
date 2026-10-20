@@ -94,6 +94,35 @@ def file_present(path: Path, content) -> bool:
     return all(current.get(key) == value for key, value in content.items())
 
 
+def hook_files(step: dict, root: Path) -> list[Path]:
+    """The step's installed hook scripts; git resolves core.hooksPath and linked worktrees."""
+    spec = step.get("hook_env")
+    if not spec or shutil.which("git") is None:
+        return []
+    result = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=root,
+                            capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        return []
+    hooks = root / result.stdout.strip()
+    return [hooks / name for name in spec["hooks"]
+            if (hooks / name).is_file() and spec["marker"] in (hooks / name).read_text(encoding="utf-8")]
+
+
+def hook_missing(step: dict, root: Path) -> list[Path]:
+    line = step.get("hook_env", {}).get("line")
+    return [path for path in hook_files(step, root)
+            if line not in path.read_text(encoding="utf-8").splitlines()]
+
+
+def write_hook_env(registry: dict, root: Path) -> None:
+    """Put the step's env line right under each installed hook's shebang, once."""
+    for companion in registry["companions"]:
+        for step in companion.get("steps", []):
+            for path in hook_missing(step, root):
+                head, _, body = path.read_text(encoding="utf-8").partition("\n")
+                path.write_text(f"{head}\n{step['hook_env']['line']}\n{body}", encoding="utf-8")
+
+
 def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dict], list[str]]:
     settings = read_json(root / ".claude" / "settings.json")
     deny = set(settings.get("permissions", {}).get("deny", []))
@@ -108,6 +137,9 @@ def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dic
             rows.append({"id": companion["id"], "host": step["name"],
                          "installed": installed(step["verify"], root),
                          "blocked_rules_present": None, "env_present": None, "files_present": None})
+            for path in hook_missing(step, root):
+                findings.append(f"{companion['id']}: hook {path.name} lacks `{step['hook_env']['line']}`;"
+                                " rerun companions apply")
         for path in companion.get("forbidden_paths", []):
             if (root / path).exists():
                 findings.append(f"{companion['id']}: {path} must not exist; {companion['forbidden_reason']}")
@@ -225,6 +257,7 @@ def main(argv=None) -> int:
         if "codex" in hosts:
             write_codex_config(registry)
         write_files(registry, root)
+        write_hook_env(registry, root)
     rows, findings = status(registry, root, hosts)
     info = [spec["note"] for companion in registry["companions"]
             for host in hosts if (spec := companion["hosts"][host]).get("note")]

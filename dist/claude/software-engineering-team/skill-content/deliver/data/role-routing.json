@@ -10,7 +10,7 @@
       "path_globs": ["*migrations/*", "*migration*", "*.sql", "*schema*", "*models/*", "*models.py", "*entities/*", "*entity*", "*.prisma", "*openapi*", "*swagger*", "*.proto", "*.graphql", "*contracts/*", "*package.json", "*pyproject.toml", "*go.mod", "*Cargo.toml", "*pom.xml", "*build.gradle*"],
       "keywords": ["table", "schema", "migration", "data model", "model", "entity", "column", "database", "new service", "new module", "new package", "new app", "new application", "interface", "contract", "public api", "breaking change", "dependency", "refactor"],
       "time_budget_minutes": 3,
-      "ask": "Check the task and its plan against the architecture records and the solution design: data model and schema changes, module and service boundaries, public interfaces and contracts, cross-component dependencies. Return go, or changes with a reason for each; a finding that is not critical becomes an issue instead of a change."
+      "ask": "Check the task and its plan against the architecture records and the solution design: data model and schema changes, module and service boundaries, public interfaces and contracts, cross-component dependencies. Return go, or changes with a reason for each; a minor finding becomes an issue instead of a change."
     },
     {
       "role": "solution-architect",

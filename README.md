@@ -155,7 +155,7 @@ Smallest complete change, plain-language review and a shortcut debt ledger. Deve
 
 Codex runs the ponytail hooks only after the owner trusts them once in /hooks.
 
-Environment: `PONYTAIL_DEFAULT_MODE=full`, `PONYTAIL_SUBAGENT_MATCHER=^software-engineering-team[:-](backend-developer|frontend-developer|devops-engineer)(-mechanical)?$`.
+Environment: `PONYTAIL_DEFAULT_MODE=full`, `PONYTAIL_SUBAGENT_MATCHER=^software-engineering-team(:|-)(backend-developer|frontend-developer|devops-engineer)(-mechanical)?$`.
 
 <!-- companions:end -->
 
@@ -168,8 +168,9 @@ Environment: `PONYTAIL_DEFAULT_MODE=full`, `PONYTAIL_SUBAGENT_MATCHER=^software-
 `/deliver` turns a request into one task under
 `workspace/docs/backlog/tasks/` with its acceptance criteria and tests, the
 owner approves it, and the owning developer role writes the change on its own
-branch. The project's CI and one `code-reviewer` verify the pull request; only
-a critical finding blocks. The flow is defined in
+branch. The project's CI and the routed reviewers verify the pull request,
+with the read-only `security-reviewer` in parallel on a risky change; it
+merges with 0 critical and 0 major findings. The flow is defined in
 `plugins/software-engineering-team/flows/fast-lane.md`.
 
 `/issue-report` is a stateless support path for Agent Marketplace defects and

@@ -88,7 +88,7 @@ role in the foreground with the task, the plan and only the architecture or
 solution notes it rests on, within the rule's `time_budget_minutes`, and give
 it the rule's `ask`. Record its answer with `role-check --task <id> --role
 <role> --verdict go|changes --note "<reasons>"`; apply a `changes` verdict
-before writing, and file a finding that is not critical as an issue.
+before writing, and file a minor finding as an issue.
 `open-pr` refuses while a `require` role, routed by the task or by the files
 its diff changes, has no verdict; a `suggest` role never blocks.
 

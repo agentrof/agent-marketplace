@@ -1107,8 +1107,8 @@ class SetupTests(unittest.TestCase):
         config.unlink()
         applied = run_script(setup, "apply", "--project-root", str(project), "--json")
         self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-        # Setup writes no model, effort or tier into the config.
-        self.assertEqual(set(load(config)), BASE_KEYS)
+        # Setup writes no model, effort or tier into the config, only the layout defaults.
+        self.assertEqual(set(load(config)), BASE_KEYS | {"tests_root", "workspace_layout"})
         value = load(config)
         effort = self.market.non_default("claude", HIGH)
         value["class_models"] = {"claude": {HIGH: {"effort": effort}, LOW: {}}, "codex": {}}

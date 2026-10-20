@@ -207,48 +207,6 @@ class TaskInputTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "HEAD changed"):
                     task_inputs.manifest(entry="deliver", role="business-analyst", mode="review", project=root)
 
-    @integration
-    def test_technology_methods_require_selected_committed_accepted_decisions(self):
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw).resolve()
-            self.make_project(root)
-            path = root / "workspace/docs/solution-design/decisions/api-decision.md"
-            path.parent.mkdir(parents=True)
-            text = "---\ntype: decision\nstatus: proposed\nmethod_skills:\n  - python-fastapi\n---\n\n# API\n"
-            path.write_text(text, encoding="utf-8")
-            kwargs = dict(entry="deliver", role="code-reviewer", mode="review", project=root,
-                          skills=["python-fastapi"], inputs=[path.relative_to(root).as_posix()])
-            for value in (text, text.replace("proposed", "accepted")):
-                path.write_text(value, encoding="utf-8")
-                with self.assertRaisesRegex(ValueError, "committed accepted"):
-                    task_inputs.manifest(**kwargs)
-            self.commit(root)
-            result = task_inputs.manifest(**kwargs)
-            self.assertEqual(result["method_bindings"]["python-fastapi"], [path.relative_to(root).as_posix()])
-            with self.assertRaisesRegex(ValueError, "internal skills"):
-                task_inputs.manifest(entry="deliver", role="code-reviewer", mode="review", skills=["setup"])
-
-    @integration
-    def test_technology_binding_rejects_git_clean_crlf_bytes_that_differ_from_head(self):
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw).resolve()
-            self.make_project(root)
-            subprocess.run(["git", "-C", str(root), "config", "core.autocrlf", "true"], check=True, capture_output=True)
-            relative = "workspace/docs/solution-design/decisions/api-decision.md"
-            path = root / relative
-            path.parent.mkdir(parents=True)
-            committed = b"---\ntype: decision\nstatus: accepted\nmethod_skills:\n  - python-fastapi\n---\n\n# API\n"
-            path.write_bytes(committed.replace(b"\n", b"\r\n"))
-            self.commit(root)
-            self.assertEqual(subprocess.check_output(["git", "-C", str(root), "show", "HEAD:" + relative]), committed)
-            self.assertEqual(subprocess.check_output(["git", "-C", str(root), "status", "--porcelain", "--", relative]), b"")
-            kwargs = dict(entry="deliver", role="code-reviewer", mode="review", project=root,
-                          skills=["python-fastapi"], inputs=[relative])
-            with self.assertRaisesRegex(ValueError, "committed accepted"):
-                task_inputs.manifest(**kwargs)
-            path.write_bytes(committed)
-            self.assertEqual(task_inputs.manifest(**kwargs)["method_bindings"], {"python-fastapi": [relative]})
-
     def test_catalog_covers_current_roles_skills_and_flows(self):
         policy = task_inputs.catalog()
         self.assertEqual(set(policy["role_skills"]), {p.stem for p in (task_inputs.PACKAGE / "agents").glob("*.md")})

@@ -164,15 +164,12 @@ def catalog(package: Path = PACKAGE) -> dict:
     if mapped_skills != skills or mapped_flows != flows:
         raise ValueError("task input policy has missing or unknown skills or flows")
     internal = skills - entries
-    if not set(policy["technology_method_skills"]).issubset(internal):
-        raise ValueError("technology methods must be installed internal skills")
     for role, bound in policy["role_skills"].items():
         required = policy["required_role_skills"][role]
         if (len(bound) != len(set(bound)) or len(required) != len(set(required))
                 or not set(required).issubset(bound)
-                or set(bound) - internal
-                or set(required) & set(policy["technology_method_skills"])):
-            raise ValueError("required role skills must be unique declared non-technology methods")
+                or set(bound) - internal):
+            raise ValueError("required role skills must be unique declared methods")
     if set(policy["read_only_roles"]) - agents or set(policy["stack_reference_by_role"]) - agents:
         raise ValueError("task input role policy names an unknown role")
     for entry, roles in policy["read_only_entry_roles"].items():
@@ -321,16 +318,6 @@ def write_scope(read_only: bool) -> dict:
             "reason": "role or task mode is read-only" if read_only else "owning compiler has not resolved a supported write scope"}
 
 
-def committed(project: Path, relative: str) -> bool:
-    """Whether a tracked path matches HEAD in the index and byte for byte in the worktree."""
-    command = ["git", "-C", str(project)]
-    staged = subprocess.run([*command, "diff", "--quiet", "--cached", "HEAD", "--", relative], capture_output=True)
-    # Git's clean filter (autocrlf) hides worktree bytes that differ from HEAD, so compare the bytes.
-    blob = subprocess.run([*command, "cat-file", "blob", f"HEAD:{relative}"], capture_output=True)
-    return (staged.returncode == 0 and blob.returncode == 0
-            and blob.stdout == (project / relative).read_bytes())
-
-
 def task_skills(policy: dict, entry: str, role: str | None, skills: list[str] | None,
                 route: dict) -> set[str]:
     """Return the skills a task reads: its entry, the selected methods and its role's required ones."""
@@ -458,23 +445,6 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     records = identity(project, project_files) if project is not None else []
     inventory = source_inventory(project, read_set) if project is not None else []
     membership = source_paths(project) if input_scoped else None
-    method_bindings = {}
-    technology = set(skills or []) & set(policy["technology_method_skills"])
-    if project is not None and technology:
-        from vault_markdown import parse_frontmatter
-        for relative in sorted(project_files):
-            if not relative.startswith("workspace/docs/solution-design/decisions/") or not relative.endswith(".md"):
-                continue
-            path = regular(project, relative)
-            props, _end, error = parse_frontmatter(path.read_text(encoding="utf-8"))
-            bound = props.get("method_skills", [])
-            if not error and props.get("status") == "accepted" and isinstance(bound, list):
-                selected = technology & {value for value in bound if isinstance(value, str)}
-                if selected and committed(project, relative):
-                    for skill in selected:
-                        method_bindings.setdefault(skill, []).append(relative)
-        if technology - set(method_bindings):
-            raise ValueError("technology methods require selected committed accepted Solution decision inputs")
     scope = write_scope(read_only)
     transitions = [
         {"condition": "source_identity", "status": "required",
@@ -532,7 +502,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     result = {"schema_version": 1, "entry": entry, "role": role, "mode": mode,
               "required_reads": sorted(required), "conditional_reads": [references[path] for path in sorted(references) if path not in required],
               "instructions": instruction_files, "project_inputs": records, "head": head, "base": base,
-              "canonical_source_inventory": inventory, "method_bindings": method_bindings,
+              "canonical_source_inventory": inventory,
               "working_inputs": working,
               "changed_paths": changes, "open_findings": findings,
               "write_boundary": "read_only" if read_only else "named_owner_only",

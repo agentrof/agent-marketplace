@@ -161,13 +161,6 @@
       "security-reviewer"
     ]
   },
-  "technology_method_skills": [
-    "python-fastapi",
-    "react-typescript",
-    "docker-compose",
-    "sql-database-design",
-    "nosql-database-design"
-  ],
   "session_entries": [
     "autopilot",
     "retrospective"

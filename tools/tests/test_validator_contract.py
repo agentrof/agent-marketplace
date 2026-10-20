@@ -31,18 +31,14 @@ MODEL_CONFIG_READERS = ("model_config_shape", "frontmatter_shape", "execution_pr
                         "process_switches")
 
 PLUGIN_ROOT = "plugins/software-engineering-team"
-PANELS = f"{PLUGIN_ROOT}/skill-content/challenge-review/data/review-panels.json"
 SWITCHES = f"{PLUGIN_ROOT}/skill-content/configure/data/process-switches.json"
-MEASURES_RELPATH = "skill-content/product-planning/data/story-size-measures.json"
-MEASURES = f"{PLUGIN_ROOT}/{MEASURES_RELPATH}"
+MEASURES_RELPATH = "skill-content/deliver/data/fixture-measures.json"
 MODEL_CONFIG = "tools/data/models.json"
 HOST_CLI_PINS = "tools/data/host-cli-versions.json"
-VERIFICATION_POLICY = f"{PLUGIN_ROOT}/skill-content/deliver/data/delivery-verification-policy.json"
 
 # The repository paths a check reads. A mutation test copies only these, runs
 # only its check, and first sees the copy clean, so no finding comes from a
 # file the copy left out.
-DELIVERY_READS = (f"{PLUGIN_ROOT}/skill-content/deliver/data", SWITCHES)
 VAULT_POLICY_READS = (f"{PLUGIN_ROOT}/skill-content/obsidian-vault/data",
                       f"{PLUGIN_ROOT}/skill-content/business-analysis/data",
                       f"{PLUGIN_ROOT}/templates/vault")
@@ -50,8 +46,6 @@ PROFILE_READS = ("product.json", "platforms", MODEL_CONFIG)
 HOST_CLI_READS = ("product.json", "platforms", HOST_CLI_PINS)
 PACKAGE_READS = (PLUGIN_ROOT, MODEL_CONFIG)
 INSTRUCTION_READS = (PLUGIN_ROOT, "platforms")
-MEASURE_READS = (f"{PLUGIN_ROOT}/skill-content/product-planning/data",
-                 f"{PLUGIN_ROOT}/scripts/backlog_compile.py")
 
 _VALID_ROOT: list = []
 
@@ -225,21 +219,6 @@ class ValidatorContractTests(unittest.TestCase):
             with self.subTest(case=case):
                 self.assertIn(message, messages(mutate))
 
-    def test_delivery_contract_set_and_merge_policy_are_validated(self):
-        data = f"{PLUGIN_ROOT}/skill-content/deliver/data"
-        for name, mutate in (
-                ("delivery-receipt-contract.json", None),
-                ("delivery-protocol-1.json",
-                 lambda protocol: protocol.update(merge_policy="provider default"))):
-            with self.subTest(contract=name, missing=mutate is None):
-                root = self.partial(DELIVERY_READS)
-                self.assert_silent(root, "delivery_contract_shape")
-                if mutate is None:
-                    (root / data / name).unlink()
-                else:
-                    self.write_json(root / data / name, mutate)
-                self.assert_reported(root, "delivery_contract_shape")
-
     def test_execution_profile_tables_are_validated(self):
         # build_distributions owns the table and catalog rules, and
         # test_single_team_distribution proves them one by one; here each
@@ -398,95 +377,6 @@ class ValidatorContractTests(unittest.TestCase):
                 self.assertEqual([finding for finding in findings
                                   if finding.check == "frontmatter_shape"], [])
 
-    def test_delivery_verification_policy_rejects_diagnostic_seal_and_weakened_scope(self):
-        for mutate in (
-                lambda value: value["final_modes"].update(qa_engineer=["qa_diagnostic", "qa_final"]),
-                lambda value: value["mutation_scope"].update(unknown_file_policy="skip"),
-                lambda value: value.update(raw_evidence_max_age_seconds=86401),
-                lambda value: value.update(undeclared_field=True)):
-            with self.subTest(mutate=mutate):
-                root = self.partial(DELIVERY_READS)
-                self.assert_silent(root, "delivery_contract_shape")
-                path = root / VERIFICATION_POLICY
-                value = json.loads(path.read_text())
-                mutate(value)
-                path.write_text(json.dumps(value))
-                self.assert_reported(root, "delivery_contract_shape")
-
-    def test_delivery_verification_policy_bounds_every_wait_under_the_prompt_cache(self):
-        """A wait call that leaves no room under the shortest host prompt cache lifetime, 300 seconds, one so
-        short that its cache reads add up, a bound that is no whole number of seconds and none at all each fail
-        validation."""
-        wait_bound = "verification wait bound must be a whole number of seconds from 60 to 270"
-        field_set = "verification policy has an unsupported schema or field set"
-        for mutate, problem in (
-                (lambda value: value.update(wait_bound_seconds=300), wait_bound),
-                (lambda value: value.update(wait_bound_seconds=271), wait_bound),
-                (lambda value: value.update(wait_bound_seconds=59), wait_bound),
-                (lambda value: value.update(wait_bound_seconds=True), wait_bound),
-                (lambda value: value.update(wait_bound_seconds=240.0), wait_bound),
-                (lambda value: value.update(wait_bound_seconds="240"), wait_bound),
-                (lambda value: value.pop("wait_bound_seconds"), field_set)):
-            with self.subTest(problem=problem):
-                root = self.partial(DELIVERY_READS)
-                path = root / VERIFICATION_POLICY
-                value = json.loads(path.read_text())
-                mutate(value)
-                path.write_text(json.dumps(value))
-                self.assertTrue(any(finding.check == "delivery_contract_shape" and problem in finding.message
-                                    for finding in fixtures.validator_findings(
-                                        root, "delivery_contract_shape")))
-        root = self.partial(DELIVERY_READS)
-        self.assertFalse(any(finding.check == "delivery_contract_shape"
-                             for finding in fixtures.validator_findings(root, "delivery_contract_shape")))
-
-    def test_item_implementation_schedules_follow_the_switch_registry(self):
-        """An Item records an implementation_schedule switch value, and one without reads as today's order."""
-        document = "plugins/software-engineering-team/skill-content/deliver/data/delivery-document-contract.json"
-        registry = "plugins/software-engineering-team/skill-content/configure/data/process-switches.json"
-        for relative, mutate in (
-                (document, lambda value: value["document_types"]["delivery_item"].update(
-                    implementation_schedules=["sequential_v1"])),
-                (document, lambda value: value["document_types"]["delivery_item"].update(
-                    missing_implementation_schedule="parallel_lanes_v1")),
-                (registry, lambda value: value["switches"]["implementation_schedule"]["values"].append(
-                    {"id": "parallel_lanes_v2", "tradeoffs": "Unmeasured."}))):
-            with self.subTest(path=relative):
-                root = self.partial(DELIVERY_READS)
-                self.assert_silent(root, "delivery_contract_shape")
-                self.write_json(root / relative, mutate)
-                self.assertTrue(any(
-                    finding.check == "delivery_contract_shape"
-                    and "implementation schedules" in finding.message
-                    for finding in fixtures.validator_findings(root, "delivery_contract_shape")))
-
-    def test_instructions_name_only_declared_delivery_finding_codes(self):
-        """A refusal an instruction tells a role to expect is one the result envelope can carry,
-        whether the plugin or a host contract or overlay under platforms/ names it."""
-        sources = ("plugins/software-engineering-team/flows/delivery-execution.md",
-                   "platforms/claude/software-engineering-team/host-contract.md",
-                   "platforms/codex/software-engineering-team/host-contract.md",
-                   "platforms/claude/_team/overlay/templates/project-instructions/host.md",
-                   "platforms/codex/_team/overlay/templates/project-instructions/host.md")
-        root = self.partial(INSTRUCTION_READS)
-        self.assertEqual(fixtures.validator_findings(root, "finding_code_references"), [])
-        for relative in sources:
-            with self.subTest(source=relative):
-                path = root / relative
-                original = path.read_text(encoding="utf-8")
-                lines = original.splitlines()
-                path.write_text("\n".join([*lines, "", "Freeze refuses with `DELIVERY_PRE_HANDOFF_ABSENT`,"
-                                           " never with `DELIVERY_PRE_HANDOFF_MISSING` alone."]) + "\n",
-                                encoding="utf-8")
-                try:
-                    findings = fixtures.validator_findings(root, "finding_code_references")
-                finally:
-                    path.write_text(original, encoding="utf-8")
-                self.assertEqual([(finding.path, finding.line) for finding in findings],
-                                 [(relative, len(lines) + 2)])
-                self.assertIn("DELIVERY_PRE_HANDOFF_ABSENT", findings[0].message)
-                self.assertNotIn("DELIVERY_PRE_HANDOFF_MISSING", findings[0].message)
-
     def test_a_host_that_drops_the_shared_user_context_is_a_finding_not_a_crash(self):
         """Each host fragment renders the one shared user context list on one line."""
         # The check compares the sources with the built dist/, so it reads the whole fixture.
@@ -509,235 +399,9 @@ class ValidatorContractTests(unittest.TestCase):
                 self.assertIn(named, findings[0].message)
 
 
-class ReviewPanelValidatorTests(unittest.TestCase):
-    """Lens sets are validated data; flows and prose anchor to declared ids."""
-
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = partial_root(Path(self.temporary.name) / "partial", PACKAGE_READS)
-        self.panels = self.root / PANELS
-        self.original = self.panels.read_bytes()
-
-    def use_whole_root(self) -> None:
-        """Move the test onto the full fixture, for a claim about the whole validator run."""
-        self.root = valid_root(Path(self.temporary.name) / "whole")
-        self.panels = self.root / PANELS
-
-    def panel_messages(self) -> list[str]:
-        return [finding.message for finding in fixtures.validator_findings(self.root, "review_panels")]
-
-    def write_data(self, mutate) -> None:
-        data = json.loads(self.original)
-        mutate(data)
-        self.panels.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-    def write_steps(self, mutate) -> None:
-        self.write_data(lambda data: mutate(data["review_steps"]))
-
-    def edit_text(self, relative: str, old: str, new: str) -> str:
-        path = self.root / relative
-        before = path.read_text(encoding="utf-8")
-        self.assertIn(old, before)
-        path.write_text(before.replace(old, new, 1), encoding="utf-8")
-        return before
-
-    def assert_rejected(self, fragment: str) -> None:
-        messages = self.panel_messages()
-        self.assertTrue(any(fragment in message for message in messages), messages)
-
-    def test_data_shape_errors_are_rejected(self):
-        def duplicate_lens(steps):
-            steps["solution_design"]["lenses"].append(dict(steps["solution_design"]["lenses"][0]))
-
-        def unknown_panel_lens(steps):
-            steps["solution_design"]["default_panel"][0].append("ghost-lens")
-
-        def unassigned_lens(steps):
-            steps["design_system"]["default_panel"].pop()
-
-        def twice_assigned_lens(steps):
-            steps["design_system"]["default_panel"].append(["accessibility-and-states"])
-
-        def uncovered_section(steps):
-            steps["backlog_epic"]["lenses"][0]["covers"].remove("Slicing")
-
-        def unknown_section(steps):
-            steps["backlog_epic"]["lenses"][0]["covers"].append("Ghost Section")
-
-        def double_owned_section(steps):
-            steps["backlog_epic"]["lenses"][1]["covers"].append("Scope")
-
-        def lens_owns_panel_section(steps):
-            steps["backlog_root"]["lenses"][2]["covers"].append("Verdict")
-
-        def uncovering_lens(steps):
-            del steps["backlog_epic"]["lenses"][2]["covers"]
-
-        def covers_without_note(steps):
-            steps["solution_design"]["lenses"][0]["covers"] = ["Scope"]
-
-        def unresolvable_note(steps):
-            steps["backlog_root"]["review_note"]["sections"] = "backlog_contract.no_such_list"
-
-        def bad_step_id(steps):
-            steps["Design-System"] = steps.pop("design_system")
-
-        def bad_lens_id(steps):
-            steps["design_system"]["lenses"][0]["id"] = "Token_System"
-
-        def extra_step_key(steps):
-            steps["design_system"]["severity"] = "strict"
-
-        def blank_focus(steps):
-            steps["design_system"]["lenses"][1]["focus"] = "  "
-
-        cases = (
-            (duplicate_lens, "duplicate lens id 'technology-fit-and-traceability'"),
-            (unknown_panel_lens, "default_panel names unknown lens id 'ghost-lens'"),
-            (lambda steps: steps["design_system"].update(lenses=[]),
-             "empty panel, lenses declares no lens"),
-            (lambda steps: steps["design_system"].update(default_panel=[]),
-             "empty panel, default_panel has no assignment"),
-            (lambda steps: steps["design_system"]["default_panel"].append([]),
-             "empty panel assignment"),
-            (unassigned_lens,
-             "lens 'contradictions-and-upstream-fit' is in no default_panel assignment"),
-            (twice_assigned_lens,
-             "duplicate lens id 'accessibility-and-states' across default_panel assignments"),
-            (lambda steps: steps["design_system"].update(reader_role="ghost-reviewer"),
-             "unknown reader_role 'ghost-reviewer'"),
-            (uncovered_section, "no lens covers review-note section 'Slicing'"),
-            (unknown_section, "unknown review-note section 'Ghost Section'"),
-            (double_owned_section, "review-note section 'Scope' has more than one owner"),
-            (lens_owns_panel_section, "review-note section 'Verdict' has more than one owner"),
-            (uncovering_lens,
-             "lens 'dependencies-and-role-ownership' must list the note sections it covers"),
-            (covers_without_note, "covers needs a review_note declaration"),
-            (unresolvable_note, "review_note needs sections"),
-            (bad_step_id, "id must be lowercase snake_case"),
-            (bad_lens_id, "lens id 'Token_System' must be kebab-case"),
-            (extra_step_key, "must hold reader_role, lenses, default_panel"),
-            (blank_focus, "every lens holds an id, non-empty focus text"),
-            (lambda steps: steps.clear(), "review_steps must declare at least one review step"),
-        )
-        for mutate, fragment in cases:
-            with self.subTest(fragment=fragment):
-                self.panels.write_bytes(self.original)
-                self.write_steps(mutate)
-                self.assert_rejected(fragment)
-
-        data = json.loads(self.original)
-        data["schema_version"] = 2
-        self.panels.write_text(json.dumps(data), encoding="utf-8")
-        self.assert_rejected("data must hold exactly schema_version 1 and review_steps")
-
-    def test_every_read_only_reader_runs_as_its_lens_variant(self):
-        registry = self.root / SWITCHES
-        original = registry.read_bytes()
-
-        def variants(mutate) -> None:
-            data = json.loads(original)
-            mutate(data["switches"]["review_panels"])
-            registry.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-        variants(lambda switch: switch["agent_variants"]["lens_panel"]["agents"].remove(
-            "solution-reviewer"))
-        self.assert_rejected("read-only panel reader 'solution-reviewer' has no 'lens_panel'"
-                             " agent variant")
-        variants(lambda switch: switch["agent_variants"]["lens_panel"]["agents"].append(
-            "analysis-challenger"))
-        self.assert_rejected("'lens_panel' agent variant 'analysis-challenger' reads no"
-                             " read-only review step")
-        variants(lambda switch: switch.pop("agent_variants"))
-        self.assert_rejected("switch 'review_panels' must declare the 'lens_panel' agent variants")
-        registry.write_bytes(original)
-        self.assertEqual(self.panel_messages(), [])
-
-    def test_a_panel_flow_must_name_the_review_panels_switch(self):
-        flow = f"{PLUGIN_ROOT}/flows/design-system.md"
-        self.edit_text(flow, "Switch `review_panels`:", "The panel switch:")
-        self.assert_rejected(
-            "flow design-system.md runs a review panel but never names switch `review_panels`")
-
-    def test_duplicate_raw_json_key_is_rejected(self):
-        self.edit_text(PANELS, '"reader_role": "design-system-reviewer",',
-                       '"reader_role": "design-system-reviewer",'
-                       ' "reader_role": "design-system-reviewer",')
-        self.assert_rejected("not valid unique-key JSON")
-
-    def test_steps_and_flow_anchors_must_match(self):
-        self.write_steps(lambda steps: steps.update(ghost_step=dict(steps["design_system"])))
-        self.assert_rejected("review step 'ghost_step' is unknown to every flow")
-
-        self.panels.write_bytes(self.original)
-        self.write_steps(lambda steps: steps.pop("design_system"))
-        self.assert_rejected("review panel 'design_system' is missing from the lens data")
-
-        self.panels.write_bytes(self.original)
-        flow = f"{PLUGIN_ROOT}/flows/operation.md"
-        before = self.edit_text(flow, "review panel `operation_environment`",
-                                "review panel `operation_runtime`")
-        messages = self.panel_messages()
-        self.assertTrue(any("review panel 'operation_runtime' is missing" in message
-                            for message in messages), messages)
-        self.assertTrue(any("review step 'operation_environment' is unknown to every flow"
-                            in message for message in messages), messages)
-        (self.root / flow).write_text(before, encoding="utf-8")
-
-        # An anchor outside flows/ does not wire a step into a flow.
-        protocol = (f"{PLUGIN_ROOT}/skill-content/challenge-review/references/"
-                    "switch-review_panels-lens_panel.md")
-        self.edit_text(f"{PLUGIN_ROOT}/flows/design-system.md",
-                       "review panel `design_system`", "the design panel")
-        self.assertIn("review panel `design_system`",
-                      (self.root / protocol).read_text(encoding="utf-8").replace("\n", " "))
-        self.assert_rejected("review step 'design_system' is unknown to every flow")
-
-    def test_prose_lens_names_must_be_declared(self):
-        flow = self.root / PLUGIN_ROOT / "flows/backlog-planning.md"
-        flow.write_text(flow.read_text(encoding="utf-8")
-                        + "\nThe lens `scope-and-slicing` owns story size.\n", encoding="utf-8")
-        self.assertEqual(self.panel_messages(), [])
-        self.edit_text(f"{PLUGIN_ROOT}/flows/backlog-planning.md",
-                       "`scope-and-slicing` owns", "`scope-and-sizing` owns")
-        self.assert_rejected("prose names unknown lens 'scope-and-sizing'")
-
-    def test_missing_data_with_live_anchors_is_rejected(self):
-        self.panels.unlink()
-        self.assert_rejected("review panels are referenced but their lens data is missing")
-
-    @integration
-    def test_new_lens_regrouping_and_step_are_data_plus_anchor(self):
-        self.use_whole_root()
-
-        def extend(steps):
-            steps["design_system"]["lenses"].append({
-                "id": "content-and-voice",
-                "focus": "Microcopy and voice rules are complete and consistent.",
-            })
-            steps["design_system"]["default_panel"].append(["content-and-voice"])
-            steps["solution_design"]["default_panel"] = [
-                ["technology-fit-and-traceability", "sustainability-and-operability"],
-                ["cost-and-lock-in", "security-and-compliance"],
-            ]
-            steps["operation_governance"] = {
-                "reader_role": "qa-engineer",
-                "lenses": [{"id": "gate-fit", "focus": "Every gate names its owner."}],
-                "default_panel": [["gate-fit"]],
-            }
-
-        self.write_steps(extend)
-        flow = self.root / PLUGIN_ROOT / "flows/operation.md"
-        flow.write_text(flow.read_text(encoding="utf-8")
-                        + "\nGovernance changes run review panel `operation_governance`.\n",
-                        encoding="utf-8")
-        self.assertEqual(validate.run(self.root), [])
-
-
 FIXTURE_SWITCH = {
     "summary": "How the fixture step runs.",
-    "flows": ["operation"],
+    "flows": ["fast-lane"],
     "values": [
         {"id": "current", "tradeoffs": "Today's behaviour and the measured baseline."},
         {"id": "fast", "tradeoffs": "Fewer passes; its recall is still unmeasured."},
@@ -761,7 +425,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.root = root
         self.registry = self.root / SWITCHES
         self.original = self.registry.read_bytes()
-        self.flow = self.root / PLUGIN_ROOT / "flows/operation.md"
+        self.flow = self.root / PLUGIN_ROOT / "flows/fast-lane.md"
         self.flow_text = self.flow.read_text(encoding="utf-8")
 
     def use_whole_root(self) -> None:
@@ -807,7 +471,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
             (switch(promotion={"unit": "3 Deliveries"}),
              "needs a promotion rule with a unit and a threshold"),
             (switch(flows=[]), "flows must list at least one owning flow"),
-            (switch(flows=["operation", "ghost-flow"]), "names unknown flow 'ghost-flow'"),
+            (switch(flows=["fast-lane", "ghost-flow"]), "names unknown flow 'ghost-flow'"),
             (switch(values=[FIXTURE_SWITCH["values"][0]]), "values must list at least two values"),
             (switch(values=[*FIXTURE_SWITCH["values"], dict(FIXTURE_SWITCH["values"][1])]),
              "duplicate value 'fast'"),
@@ -836,6 +500,9 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         declared = {"summary": "Owner-set limit per fixture measure.", "values": ["fast"],
                     "declared_by": {"path": MEASURES_RELPATH, "key": "measures"},
                     "type": "positive_integer", "min_count": 1}
+        (self.root / PLUGIN_ROOT / MEASURES_RELPATH).write_text(json.dumps({"measures": {
+            "acceptance_criteria": {"summary": "Criteria per story."},
+            "touched_files": {"summary": "Files per change."}}}) + "\n", encoding="utf-8")
         self.anchor()
         self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=declared))
         self.assertEqual(self.messages(), [])
@@ -879,18 +546,11 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
 
     def test_flows_and_switches_must_name_each_other(self):
         self.declare(fixture_mode=FIXTURE_SWITCH)
-        self.assert_rejected("switch 'fixture_mode' is not named by its owning flow 'operation'")
+        self.assert_rejected("switch 'fixture_mode' is not named by its owning flow 'fast-lane'")
 
         self.registry.write_bytes(self.original)
         self.anchor()
-        self.assert_rejected("flow operation.md names undeclared switch 'fixture_mode'")
-
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, flows=["design-system"]))
-        messages = self.messages()
-        self.assertTrue(any("flow operation.md names switch 'fixture_mode' but is not one of"
-                            " its owning flows" in message for message in messages), messages)
-        self.assertTrue(any("is not named by its owning flow 'design-system'" in message
-                            for message in messages), messages)
+        self.assert_rejected("flow fast-lane.md names undeclared switch 'fixture_mode'")
 
         self.registry.unlink()
         self.assert_rejected("process switches are named but the switch registry is missing")
@@ -898,7 +558,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
     @integration
     def test_switch_references_are_bound_by_the_policy_never_linked(self):
         self.use_whole_root()
-        reference = "skill-content/challenge-review/references/switch-fixture_mode-fast.md"
+        reference = "skill-content/deliver/references/switch-fixture_mode-fast.md"
         path = self.root / PLUGIN_ROOT / reference
         self.declare(fixture_mode=FIXTURE_SWITCH)
         self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
@@ -924,7 +584,7 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
                 extra.write_text("# Other\n", encoding="utf-8")
                 self.assert_rejected(fragment)
                 extra.unlink()
-        skill = self.root / PLUGIN_ROOT / "skill-content/challenge-review/SKILL.md"
+        skill = self.root / PLUGIN_ROOT / "skill-content/deliver/SKILL.md"
         skill.write_text(skill.read_text(encoding="utf-8")
                          + "\n- [fast](references/switch-fixture_mode-fast.md): fast mode."
                            " Read when fast.\n", encoding="utf-8")
@@ -933,54 +593,25 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.flow.write_text(self.flow_text, encoding="utf-8")
         self.assert_rejected("process switches are named but the switch registry is missing")
 
-    def test_agent_variants_are_validated(self):
-        variant = {"suffix": "quick", "class": "routine_authoring", "description": "Quick variant.",
-                   "agents": ["backlog-reviewer"]}
-        self.anchor()
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, agent_variants={"fast": variant}))
-        self.assertEqual(self.messages(), [])
-        cases = (
-            ({"current": variant}, "agent variants belong to a declared value other than the default"),
-            ({"fast": dict(variant, **{"class": "extreme"})},
-             "variant class 'extreme' is not a declared purpose class"),
-            ({"fast": dict(variant, agents=["ghost-reviewer"])}, "unknown variant agent 'ghost-reviewer'"),
-            ({"fast": dict(variant, agents=[])}, "variant agents must list at least one canonical agent"),
-            ({"fast": dict(variant, suffix="Quick_Pass")}, "variant suffix must be kebab-case"),
-            ({"fast": dict(variant, description="Runs as: quick")},
-             "variant description must be one non-empty line without a colon"),
-            ({"fast": dict(variant, model="fast")},
-             "an agent variant holds exactly suffix, class, description and agents"),
-            ({}, "agent_variants must map a switch value to its variant"),
-        )
-        for variants, fragment in cases:
-            with self.subTest(fragment=fragment):
-                self.declare(fixture_mode=dict(FIXTURE_SWITCH, agent_variants=variants))
-                self.assert_rejected(fragment)
-        second = dict(FIXTURE_SWITCH, agent_variants={"fast": variant})
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, agent_variants={"fast": variant}),
-                     other_mode=second)
-        self.anchor(FIXTURE_ANCHOR + "Switch `other_mode` selects the same step.\n")
-        self.assert_rejected("variant 'backlog-reviewer-quick' collides with switch 'fixture_mode'")
-
     def test_value_data_is_bound_with_one_value_and_its_references(self):
-        reference = "skill-content/challenge-review/references/switch-fixture_mode-fast.md"
-        data = "skill-content/challenge-review/data/fast-table.json"
+        reference = "skill-content/deliver/references/switch-fixture_mode-fast.md"
+        data = "skill-content/deliver/data/fast-table.json"
         (self.root / PLUGIN_ROOT / reference).write_text("# Fast fixture step\n", encoding="utf-8")
         (self.root / PLUGIN_ROOT / data).write_text("{}\n", encoding="utf-8")
         self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
         self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data]}))
         self.assertEqual(self.messages(), [])
         # A file that values of several switches read is listed under each.
-        shared = "skill-content/challenge-review/data/review-panels.json"
+        shared = "skill-content/deliver/data/targets.json"
         self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data, shared]}))
         self.assertEqual(self.messages(), [])
         cases = (
             ({"current": [data]}, "value data belongs to a declared value other than the default"),
             ({"slow": [data]}, "value data belongs to a declared value other than the default"),
             ({"fast": []}, "value data must list at least one data file"),
-            ({"fast": ["skill-content/challenge-review/references/triage.md"]},
+            ({"fast": ["skill-content/deliver/references/switch-step_timing-recorded.md"]},
              "is not a skill data JSON file"),
-            ({"fast": ["skill-content/challenge-review/data/ghost.json"]}, "does not exist"),
+            ({"fast": ["skill-content/deliver/data/ghost.json"]}, "does not exist"),
             ({"fast": [data, data]}, f"value data {data!r} is listed more than once"),
             ({}, "value_data must map a switch value to its data files"),
         )
@@ -994,83 +625,17 @@ class ProcessSwitchValidatorTests(unittest.TestCase):
         self.assert_rejected("value data needs a switch reference of that value to bind it")
 
 
-class StorySizeMeasureValidatorTests(unittest.TestCase):
-    """Every story size measure names a derivation the backlog compiler has."""
-
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = partial_root(Path(self.temporary.name), MEASURE_READS)
-        self.path = self.root / MEASURES
-        self.original = json.loads(self.path.read_text(encoding="utf-8"))
-        self.assertEqual(self.messages(), [])
-
-    def messages(self) -> list[str]:
-        return [finding.message
-                for finding in fixtures.validator_findings(self.root, "story_size_measures")]
-
-    def write(self, mutate) -> None:
-        value = json.loads(json.dumps(self.original))
-        mutate(value)
-        self.path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-    def test_measure_shape_and_derivation_errors_are_rejected(self):
-        def measure(name, **changes):
-            return lambda value: value["measures"][name].update(changes)
-
-        def extra(value):
-            value["measures"]["acceptance_criteria"]["limit"] = 12
-
-        def rename(value):
-            value["measures"]["Test-Scenarios"] = value["measures"].pop("test_scenarios")
-
-        cases = (
-            (measure("acceptance_criteria", derivation="ghost_count"),
-             "measure 'acceptance_criteria': derivation 'ghost_count' is not one the backlog"
-             " compiler implements"),
-            # A list is a finding, never a crash on an unhashable value.
-            (measure("acceptance_criteria", derivation=["acceptance_checklist_lines"]),
-             "measure 'acceptance_criteria': derivation must be one derivation name, not list"),
-            (measure("test_scenarios", derivation={"name": "plan_scenario_blocks"}),
-             "measure 'test_scenarios': derivation must be one derivation name, not dict"),
-            (measure("contract_deltas", derivation="owner_and_supporting_roles"),
-             "measure 'implementation_roles': repeats the derivation of measure"
-             " 'contract_deltas'"),
-            (measure("test_scenarios", summary=" "), "holds exactly a non-empty summary and a"
-             " derivation"),
-            (extra, "holds exactly a non-empty summary and a derivation"),
-            (rename, "measure 'Test-Scenarios': id must be lowercase snake_case"),
-            (lambda value: value.update(schema_version=2), "must hold exactly schema_version 1"),
-            (lambda value: value.update(measures={}), "must hold exactly schema_version 1"),
-        )
-        for mutate, fragment in cases:
-            with self.subTest(fragment=fragment):
-                self.write(mutate)
-                messages = self.messages()
-                self.assertTrue(any(fragment in message for message in messages), messages)
-        self.path.write_text('{"schema_version": 1, "measures": {}, "measures": {}}\n',
-                             encoding="utf-8")
-        self.assertTrue(any("not valid unique-key JSON" in message for message in self.messages()))
-
-    def test_a_compiler_without_the_derivation_registry_is_rejected(self):
-        compiler = self.root / PLUGIN_ROOT / "scripts/backlog_compile.py"
-        compiler.write_text(compiler.read_text(encoding="utf-8").replace(
-            "STORY_SIZE_DERIVATIONS = {", "STORY_SIZE_COUNTS = {", 1), encoding="utf-8")
-        self.assertIn("scripts/backlog_compile.py declares no STORY_SIZE_DERIVATIONS registry",
-                      self.messages())
-
-
 # ---------------------------------------------------------------------------
 # Builder registry: one deliberately broken fixture per validator check, the
-# doctrine test_ba_compile.py and test_vault_check.py apply to their checkers.
+# doctrine test_vault_check.py applies to its checker.
 # Each builder breaks the valid fixture repository so that its check reports
 # it; a check without a builder fails the lockstep test. Builders change files
 # only through the helpers below, which remember every original so the test
 # puts the fixture back after each builder instead of copying it per check.
 # ---------------------------------------------------------------------------
 
-AGENT = f"{PLUGIN_ROOT}/agents/product-owner.md"
-FLOW = f"{PLUGIN_ROOT}/flows/operation.md"
+AGENT = f"{PLUGIN_ROOT}/agents/code-reviewer.md"
+FLOW = f"{PLUGIN_ROOT}/flows/fast-lane.md"
 ORIGINALS: dict = {}
 
 
@@ -1162,7 +727,7 @@ class TreeGuard:
 VALIDATOR_BUILDERS = {
     "frontmatter_shape": lambda root: edit(
         root, AGENT, "output_contract: prose", "output_contract: table"),
-    "agent_name": lambda root: edit(root, AGENT, "name: product-owner", "name: product-lead"),
+    "agent_name": lambda root: edit(root, AGENT, "name: code-reviewer", "name: code-auditor"),
     "skill_name": lambda root: edit(
         root, f"{PLUGIN_ROOT}/skill-content/configure/SKILL.md",
         "name: configure", "name: configuration"),
@@ -1179,7 +744,7 @@ VALIDATOR_BUILDERS = {
     "handwritten_counts": lambda root: append(root, FLOW, "\nThe team ships 12 agents.\n"),
     "dead_links": lambda root: append(root, FLOW, "\nSee [the ghost](ghost.md).\n"),
     "reference_triggers": lambda root: append(
-        root, f"{PLUGIN_ROOT}/skill-content/challenge-review/SKILL.md",
+        root, f"{PLUGIN_ROOT}/skill-content/docker-compose/SKILL.md",
         "- [triage again](references/triage.md): triage.\n"),
     "registration": lambda root: edit_json(
         root, ".claude-plugin/marketplace.json",
@@ -1206,7 +771,7 @@ VALIDATOR_BUILDERS = {
     "project_instruction_contract": lambda root: remove(
         root, f"{PLUGIN_ROOT}/templates/memory/profile.md"),
     "spawn_shape_constitution": lambda root: append(
-        root, f"{PLUGIN_ROOT}/skill-content/challenge-review/references/triage.md",
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/references/switch-step_timing-recorded.md",
         "\n## Spawn Shape\n\nSpawn the reviewer with the named files.\n"),
     "ba_schema_shape": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/business-analysis/data/space-schema.json",
@@ -1230,47 +795,19 @@ VALIDATOR_BUILDERS = {
     "effort_policy": lambda root: edit_json(
         root, "platforms/codex/effort-policy.json",
         lambda value: value["refuse"].update(extreme=value["refuse"]["ultra"])),
-    "review_panels": lambda root: edit_json(
-        root, PANELS, lambda value: value["review_steps"]["design_system"].update(lenses=[])),
-    "code_review_panel": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/code-review/data/code-review-panel.json",
-        lambda value: value["review_steps"]["code_review"]["default_panel"].pop()),
     "process_switches": lambda root: edit_json(
-        root, SWITCHES, lambda value: value["switches"]["review_panels"].update(default="ghost")),
-    "switch_variant_references": lambda root: edit_json(
-        root, SWITCHES, lambda value: value["switches"]["mechanical_pass_tier"]["agent_variants"]
-        ["mechanical"]["agents"].remove("devops-engineer")),
-    "story_size_measures": lambda root: edit_json(
-        root, MEASURES,
-        lambda value: value["measures"]["acceptance_criteria"].update(derivation="ghost_count")),
-    "fact_ownership": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/execution-plan/data/fact-ownership.json",
-        lambda value: value["fact_classes"]["runtime_topology"].pop("owner")),
-    "fact_ownership_anchors": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/execution-plan/data/fact-ownership.json",
-        lambda value: value["fact_classes"]["structural_decisions"]["owner"].update(
-            section="Decision")),
-    "owner_decision_classes": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/owner-decision-classes.json",
-        lambda value: value["classes"].append(dict(value["classes"][0]))),
-    "assertion_kinds": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/assertion-kinds.json",
-        lambda value: [spec.update(weak=False) for spec in value["kinds"].values()]),
+        root, SWITCHES, lambda value: value["switches"]["review_scope"].update(default="ghost")),
     "autopilot_policy": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/autopilot/data/autopilot-policy.json",
         lambda value: value["goal_kinds"].append(dict(value["goal_kinds"][0]))),
     "limits_config_shape": lambda root: edit_json(
         root, "tools/data/limits.json",
         lambda value: value["authoring_caps"].update(ghost_cap=1)),
-    "delivery_contract_shape": lambda root: remove(
-        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/delivery-receipt-contract.json"),
-    "finding_code_references": lambda root: append(
-        root, FLOW, "\nFreeze refuses with `DELIVERY_PRE_HANDOFF_ABSENT` before the readers start.\n"),
     "product_namespace": lambda root: append(
         root, f"{PLUGIN_ROOT}/scripts/marketplace_paths.py", "# drift\n"),
     "task_input_catalog": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/templates/task-input-policy.json",
-        lambda value: value["role_skills"].pop("ux_designer")),
+        lambda value: value["role_skills"].pop("qa_engineer")),
 }
 
 

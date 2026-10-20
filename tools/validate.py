@@ -66,7 +66,7 @@ TECH_SKILLS = {
     "react-typescript",
     "sql-database-design",
     "nosql-database-design",
-    "docker-compose",
+    "container-environment",
 }
 RESERVED_CHECKLISTS = ["review-checklist.md", "qa-checklist.md"]
 

@@ -665,7 +665,7 @@ VALIDATOR_BUILDERS = {
     "handwritten_counts": lambda root: append(root, FLOW, "\nThe team ships 12 agents.\n"),
     "dead_links": lambda root: append(root, FLOW, "\nSee [the ghost](ghost.md).\n"),
     "reference_triggers": lambda root: append(
-        root, f"{PLUGIN_ROOT}/skill-content/docker-compose/SKILL.md",
+        root, f"{PLUGIN_ROOT}/skill-content/container-environment/SKILL.md",
         "- [triage again](references/triage.md): triage.\n"),
     "registration": lambda root: edit_json(
         root, ".claude-plugin/marketplace.json",

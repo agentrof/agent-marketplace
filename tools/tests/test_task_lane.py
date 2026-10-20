@@ -1564,9 +1564,21 @@ class TaskTriggerTests(unittest.TestCase):
         text = "Add a migration for the orders table"
         files = {"deploy/Dockerfile", "web/src/Orders.tsx", "db/migrations/0003_orders.sql"}
         self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", text, files),
-                         ["docker-compose", "react-typescript", "sql-database-design"])
+                         ["container-environment", "react-typescript", "sql-database-design"])
         self.assertEqual(task_lane.triggered(triggers["risk_flags"], "flag", text, files), ["migration"])
         self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "Fix a Go handler", {"cmd/main.go"}), [])
+
+    def test_a_project_rule_naming_a_renamed_skill_maps_to_the_new_name(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / ".agentrof").mkdir()
+        (root / ".agentrof/task-triggers.json").write_text(json.dumps({"method_skills": [
+            {"skill": "docker-compose", "path_globs": ["*infra/*"]}]}), encoding="utf-8")
+        triggers = task_lane.task_triggers(root)
+        self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "", {"infra/x"}),
+                         ["container-environment"])
+        self.assertEqual(task_lane.applied_skills({"applied_skills": "docker-compose"}), ["container-environment"])
 
     def test_a_changed_source_is_reported_at_review(self):
         root = self.project()

@@ -12,7 +12,7 @@
       "keywords": ["mongodb", "document store", "document database", "dynamodb", "firestore", "couchdb"]
     },
     {
-      "skill": "docker-compose",
+      "skill": "container-environment",
       "path_globs": ["*Dockerfile*", "*.dockerignore", "*docker-compose*", "*compose.yml", "*compose.yaml", "*Chart.yaml", "*charts/*", "*helm/*", "*kind*.yaml", "*kind*.yml", "*k8s/*", "*kubernetes/*", "*manifests/*"],
       "keywords": ["docker", "dockerfile", "compose", "container", "helm", "kubernetes", "kind cluster"]
     },

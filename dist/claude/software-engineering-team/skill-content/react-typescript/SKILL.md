@@ -102,4 +102,4 @@ No error boundary above it. Add boundaries at route and widget level with fallba
 
 ## Related Skills
 
-Pairs with the python-fastapi skill on the serving backend; schema decisions live in the sql-database-design and nosql-database-design skills; the docker-compose skill packages the built client into the containerized environment.
+Pairs with the python-fastapi skill on the serving backend; schema decisions live in the sql-database-design and nosql-database-design skills; the container-environment skill packages the built client into the containerized environment.

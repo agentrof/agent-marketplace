@@ -1,5 +1,5 @@
 ---
-name: docker-compose
+name: container-environment
 description: Containerized environment expertise (Docker Compose, Kubernetes with Helm, kind) loaded by software-engineering-team agents for environment work. Use when defining or changing the project's containerized environment or local cluster, writing Helm charts, authoring image build recipes, wiring healthchecks and service dependencies, designing deterministic seed scenarios, isolating parallel environment instances, or verifying a one-command full-stack bring-up with clean logs.
 exposure: internal
 ---

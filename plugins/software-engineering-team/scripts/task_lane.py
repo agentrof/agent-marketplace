@@ -108,6 +108,8 @@ PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
 TRIGGERS_FILE = TARGETS_FILE.with_name("task-triggers.json")
 PROJECT_TRIGGERS = Path(".agentrof") / "task-triggers.json"
 TRIGGER_KEYS = {"method_skills": "skill", "risk_flags": "flag", "reviewers": "role"}
+# Renamed skills: a project trigger rule or an open task may still name the old one.
+SKILL_ALIASES = {"docker-compose": "container-environment"}
 SKILLS = Path(__file__).resolve().parent.parent / "skill-content"
 SOURCE_HASH = 12
 GRAPH_REFRESH = Path(__file__).resolve().with_name("graphify_refresh.py")
@@ -313,7 +315,9 @@ def task_triggers(root: Path | None = None) -> dict:
     result = {}
     for table, key in TRIGGER_KEYS.items():
         rules = {rule[key]: rule for rule in tables[table]}
-        rules.update({rule[key]: rule for rule in extra.get(table, [])})
+        own_rules = [dict(rule, skill=SKILL_ALIASES.get(rule["skill"], rule["skill"])) if key == "skill" else rule
+                     for rule in extra.get(table, [])]
+        rules.update({rule[key]: rule for rule in own_rules})
         result[table] = list(rules.values())
     unknown = {rule["skill"] for rule in result["method_skills"]} - {
         path.parent.name for path in SKILLS.glob("*/SKILL.md")}
@@ -331,6 +335,10 @@ def field_items(props: dict, key: str) -> list[str]:
     value = props.get(key) or []
     items = value if isinstance(value, list) else str(value).split(",")
     return [str(item).strip() for item in items if str(item).strip()]
+
+
+def applied_skills(props: dict) -> list[str]:
+    return [SKILL_ALIASES.get(skill, skill) for skill in field_items(props, "applied_skills")]
 
 
 def source_hash(root: Path, relative: str) -> str:
@@ -513,7 +521,7 @@ def lint(path: Path) -> list[str]:
     bad = sorted(set(field_items(props, "risks")) - flags)
     if bad:
         errors.append(f"risks must be among {', '.join(sorted(flags))}, found {', '.join(bad)}")
-    bad = sorted(skill for skill in field_items(props, "applied_skills")
+    bad = sorted(skill for skill in applied_skills(props)
                  if not (SKILLS / skill / "SKILL.md").is_file())
     if bad:
         errors.append("applied_skills names skills this package does not ship: " + ", ".join(bad))
@@ -2110,7 +2118,7 @@ def cmd_review_inputs(args, root: Path) -> dict:
         reviewers.append("security-reviewer")
     return {"ok": True, "task_id": args.task, "reviewers": reviewers, "risks": risks,
             "triggered_skills": skills,
-            "missing_skills": sorted(set(skills) - set(field_items(props, "applied_skills"))),
+            "missing_skills": sorted(set(skills) - set(applied_skills(props))),
             "changed_sources": changed_sources(root, field_items(props, "sources"))}
 
 

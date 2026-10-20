@@ -146,7 +146,7 @@
       "d19af55eec08738727d088cf154111d97e0621cdd96022973071b720cc332ae3"
     ,
     "scripts/task_lane.py":
-      "df34e71dd9ce3843a2813c096d0158b41025c33f3adb79981e1f6813b10e0a40"
+      "5d9e0f09fe5020578f841b53bd1977f3c96a1ce9a046e6a0bd4cbae02ca8bbc1"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -214,6 +214,27 @@
     "skill-content/configure/references/role-models.md":
       "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
     ,
+    "skill-content/container-environment/SKILL.md":
+      "363a73b7f8fb20d62e58e9660fad61180edac4ff1ef2571758a908c6f19f81ec"
+    ,
+    "skill-content/container-environment/references/cluster-patterns.md":
+      "ed93f25faf248e1538aee2de165cbb4d07c705b3229125c80c931e12a6df25a9"
+    ,
+    "skill-content/container-environment/references/compose-patterns.md":
+      "26b99ad6550a5049129ac25aed49c686962ca8e6b08fc9b79d73777ed33be073"
+    ,
+    "skill-content/container-environment/references/image-build.md":
+      "5111fa50883dda4494679d2572afbcc09ca394b77cbb4181dd9a483ecd0e1a48"
+    ,
+    "skill-content/container-environment/references/qa-checklist.md":
+      "acb390d812b303bbdafff02a5826b7da64743333e16c4ff0a2cfa411cfc1656f"
+    ,
+    "skill-content/container-environment/references/review-checklist.md":
+      "56a18e8395698988e469f93234888dcf8858e98947043f9f6a2427b13b6b4e70"
+    ,
+    "skill-content/container-environment/references/seed-scenarios.md":
+      "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
+    ,
     "skill-content/deliver/SKILL.md":
       "a20b5e59b5e3f201effe0e27f6bbff04acd9c402294fa0f6f784d1294cf584a1"
     ,
@@ -224,7 +245,7 @@
       "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
     ,
     "skill-content/deliver/data/task-triggers.json":
-      "08fb884a5c9544c068cb0c8ac0853f39860eb93107c3689b3e35ac6e5a9abe3d"
+      "09bb304997a0ca720744c97af3e04d0498959e47bbc967d57dab6d1b8b7125de"
     ,
     "skill-content/deliver/references/fast-lane.md":
       "b3f0a7ad40925c7060162f5e60fa9395b71e11c2a564bc48c97c3423991560e2"
@@ -237,27 +258,6 @@
     ,
     "skill-content/deliver/references/switch-step_timing-recorded.md":
       "0d4e563158e27d724752b6b87fabaccaa6f6f6bef9420a0de8f1e451cdbe1fee"
-    ,
-    "skill-content/docker-compose/SKILL.md":
-      "6c609831407c9f08b824e61ec242673c720995c047faffe0cf87f8763ad0b972"
-    ,
-    "skill-content/docker-compose/references/cluster-patterns.md":
-      "ed93f25faf248e1538aee2de165cbb4d07c705b3229125c80c931e12a6df25a9"
-    ,
-    "skill-content/docker-compose/references/compose-patterns.md":
-      "26b99ad6550a5049129ac25aed49c686962ca8e6b08fc9b79d73777ed33be073"
-    ,
-    "skill-content/docker-compose/references/image-build.md":
-      "5111fa50883dda4494679d2572afbcc09ca394b77cbb4181dd9a483ecd0e1a48"
-    ,
-    "skill-content/docker-compose/references/qa-checklist.md":
-      "acb390d812b303bbdafff02a5826b7da64743333e16c4ff0a2cfa411cfc1656f"
-    ,
-    "skill-content/docker-compose/references/review-checklist.md":
-      "56a18e8395698988e469f93234888dcf8858e98947043f9f6a2427b13b6b4e70"
-    ,
-    "skill-content/docker-compose/references/seed-scenarios.md":
-      "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
     ,
     "skill-content/issue-report/SKILL.md":
       "053421143e9eaa980d17057b48e38a11cf529480f6901714de0b11cf2f6214a2"
@@ -293,7 +293,7 @@
       "4ebfa5db83ff108d0352bca68e8ea13d2c7c860f13d876bd0f1a49d03db0802e"
     ,
     "skill-content/python-fastapi/SKILL.md":
-      "272726e7bfe1bc1ebfa483308db203b99b962cc7cd5bc4c73c9d81ef69935058"
+      "a4e03edf64df13eb569d5b3cf6b42b2b1d7d3e782f02f279a70b2706b318b078"
     ,
     "skill-content/python-fastapi/references/patterns.md":
       "352007b984f1b4596e85a2c85ab7d343c7d80f5abbae49e4cd44526fc03d49ff"
@@ -305,7 +305,7 @@
       "cf3e72e400119cb400830138fd10ea64e7a337777d839ec49ce0e1c09ca5f753"
     ,
     "skill-content/react-typescript/SKILL.md":
-      "984f7d53d65ff739695781ed9e1cf4b69f1b7be0062adce84654fd9568f73ece"
+      "9978c100ef1605524a7b09ae6fd9279294c17f0b1c110312759248ead61acc16"
     ,
     "skill-content/react-typescript/references/accessibility.md":
       "bae66259020b2b669c23530bbe110171e3fef27148032fb0a1ffe3d7f4a7fe09"
@@ -524,7 +524,7 @@
       "2df577ed4a9169aecb376ca5d88d72beec84b744abf1bab9ec1aa16e12551f13"
     ,
     "templates/task-input-policy.json":
-      "7d014489540fb0ad3476d68c411ed8b57a6bfa32b071aa5f4b701db488dee5dc"
+      "b0794c145d146afe029ecc59eb50043a53d6e3425bb28f3b95594b131ac768a3"
   },
   "host": "codex",
   "marketplace_release": "2026.10.6",

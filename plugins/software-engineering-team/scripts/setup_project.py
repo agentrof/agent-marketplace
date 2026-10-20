@@ -30,7 +30,6 @@ import file_lock
 import project_config
 import role_settings
 import setup_check
-import vault_check
 
 
 TEAM = "software-engineering-team"
@@ -45,10 +44,6 @@ REQUIRED_DIRS = (
     "docs/delivery", "docs/delivery/governance", "docs/backlog",
 )
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
-JSON_PAYLOAD_FILES = (
-    "app.json", "appearance.json", "core-plugins.json", "graph.json",
-    "types.json", "community-plugins.json",
-)
 LONG_PATHS_CHOICE = "git.core_longpaths"
 # Each declared choice lists its options with the recommended one first.
 CHOICES = {LONG_PATHS_CHOICE: ("set", "leave")}
@@ -134,15 +129,6 @@ def legacy_topology_blockers(vault_root: Path) -> list[str]:
             text = path.read_text(encoding="utf-8", errors="ignore")
             if any(marker in text for marker in ("baseline_id:", "program_id:", "release_id:", "type: experience-baseline", "type: experience-space", "type: experience-domain")):
                 blockers.append(f"legacy Experience metadata exists at {path.relative_to(vault_root)}; no migration is available")
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        for path in entries:
-            if not (path.is_file() or path.is_symlink()):
-                continue
-            relative = path.relative_to(vault_root).as_posix()
-            violation = vault_check.artifact_hard_cut_violation(
-                policy, relative)
-            if violation:
-                blockers.append(violation + "; remove it before setup")
     architecture = vault_root / "system-architecture"
     for name in ("api-contract.md", "data-model.md", "threat-model.md", "environment.md"):
         if (architecture / name).exists():
@@ -255,17 +241,6 @@ def managed_block(workspace: str) -> str:
         START,
         *(f"/{value}/" for value in roots),
         f"{workspace}/junit-*.xml",
-        f"{workspace}/docs/.obsidian/*",
-        f"!{workspace}/docs/.obsidian/app.json",
-        f"!{workspace}/docs/.obsidian/appearance.json",
-        f"!{workspace}/docs/.obsidian/core-plugins.json",
-        f"!{workspace}/docs/.obsidian/graph.json",
-        f"!{workspace}/docs/.obsidian/types.json",
-        f"!{workspace}/docs/.obsidian/snippets/",
-        f"!{workspace}/docs/.obsidian/snippets/**",
-        f"{workspace}/docs/.obsidian/workspace.json",
-        f"{workspace}/docs/.obsidian/workspace-mobile.json",
-        f"{workspace}/docs/.trash/",
         END,
     ))
 
@@ -329,63 +304,6 @@ def run_checked(argv: list[str], label: str) -> str:
         detail = (result.stderr or result.stdout).strip()
         raise SetupError(label + " failed" + (f": {detail}" if detail else ""))
     return result.stdout
-
-
-def package_surfaces() -> tuple[Path, Path, dict]:
-    package_root = Path(__file__).resolve().parents[1]
-    policy_path = (
-        package_root / "skill-content" / "obsidian-vault" / "data"
-        / "vault-policy.json"
-    )
-    payload_root = package_root / "templates" / "vault" / ".obsidian"
-    return payload_root, policy_path, vault_check.load_policy(policy_path)
-
-
-def payload_sources(policy: dict, payload_root: Path,
-                    vault_root: Path) -> list[tuple[Path, Path]]:
-    values: list[tuple[Path, Path]] = []
-    home_rel = Path(str(policy.get("home_file", "home.md")))
-    home_source = payload_root.parent / home_rel
-    if home_source.is_file():
-        values.append((home_source, vault_root / home_rel))
-    for source in sorted(path for path in payload_root.rglob("*")
-                         if path.is_file()):
-        values.append((source, vault_root / ".obsidian"
-                       / source.relative_to(payload_root)))
-    return values
-
-
-def relation_report_updates(vault_root: Path, policy: dict) -> dict[Path, str]:
-    """Plan only compiler-owned relation reports, never authored note blocks."""
-    effective = vault_check.effective_policy(policy, vault_root)
-    vault = vault_check.build_vault(vault_root, effective)
-    updates: dict[Path, str] = {}
-    for relative, content in vault_check.relation_reports(vault).items():
-        target = vault_root / relative
-        current = target.read_text(encoding="utf-8") \
-            if target.is_file() else ""
-        if current != content:
-            updates[target] = content
-    return updates
-
-
-def projection_ownership(target: Path, vault_root: Path) -> str:
-    relative = target.relative_to(vault_root).as_posix()
-    if relative == ".obsidian/community-plugins.json" \
-            or relative.startswith(".obsidian/plugins/"):
-        return "package_local"
-    return "tracked_managed"
-
-
-def expected_gate_bytes() -> bytes:
-    installer = Path(__file__).with_name("vault_gate.py")
-    with tempfile.TemporaryDirectory(prefix="setup-gate-plan.") as temporary:
-        root = Path(temporary)
-        run_checked([
-            sys.executable, str(installer), "install", "--project-root",
-            str(root),
-        ], "portable gate planning")
-        return (root / ".github" / "agentrof" / "vault-gate.pyz").read_bytes()
 
 
 def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
@@ -751,8 +669,6 @@ def restore_long_paths(root: Path, before: str | None) -> bool:
 
 
 def build_plan(args) -> dict:
-    import vault_index
-    vault_index.capabilities()
     root = git_root(Path(args.project_root).resolve())
     workspace = args.workspace
     workspace_root = root / workspace
@@ -760,7 +676,7 @@ def build_plan(args) -> dict:
     vault_root = workspace_root / "docs"
     for target, label in (
         (workspace_root, "workspace"), (config_path, "workspace config"),
-        (vault_root, "vault root"), (vault_root / ".obsidian", "Obsidian payload"),
+        (vault_root, "docs root"),
     ):
         assert_not_symlinked(root, target, label)
     alternate = alternate_workspaces(root)
@@ -773,7 +689,6 @@ def build_plan(args) -> dict:
 
     legacy_config = load_json(config_path)
     config, changed_fields = desired_config(args, config_path)
-    payload_root, policy_path, policy = package_surfaces()
     operations: list[dict] = []
     blockers: list[str] = legacy_topology_blockers(vault_root)
     target_config = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
@@ -808,16 +723,6 @@ def build_plan(args) -> dict:
     )
     governance_updates = legacy_governance_update(workspace_root, legacy_config)
     blockers.extend(migration_blockers)
-    if operation_updates:
-        operation_map = vault_root / "maps" / "operation.md"
-        if not operation_map.exists():
-            source = payload_root.parent / "maps" / "operation.md"
-            operation_updates[operation_map] = source.read_text(encoding="utf-8")
-    if governance_updates:
-        delivery_map = vault_root / "maps" / "delivery.md"
-        if not delivery_map.exists():
-            source = payload_root.parent / "maps" / "delivery.md"
-            governance_updates[delivery_map] = source.read_text(encoding="utf-8")
     for target, content in sorted(
         {**operation_updates, **governance_updates}.items(), key=lambda item: str(item[0])
     ):
@@ -861,111 +766,6 @@ def build_plan(args) -> dict:
         if not finding.startswith("missing project-local runtime:")
     )
 
-    seen_payload: set[Path] = set()
-    materializations: dict[Path, tuple[bytes, int]] = {}
-    for source, target in payload_sources(policy, payload_root, vault_root):
-        assert_not_symlinked(root, target, "vault payload target")
-        if not target.exists():
-            seen_payload.add(target)
-            content = source.read_bytes()
-            materializations[target] = (
-                content, source.stat().st_mode & 0o777,
-            )
-            operation = {
-                "action": "create", "surface": "vault_payload",
-                "path": target.relative_to(root).as_posix(),
-                "ownership": projection_ownership(target, vault_root),
-            }
-            if target.suffix == ".json":
-                try:
-                    after_value = json.loads(content.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    after_value = None
-                if isinstance(after_value, dict):
-                    operation["changes"] = value_deltas({}, after_value)
-                elif after_value is not None:
-                    operation["changes"] = [{
-                        "key": "$", "before": None, "after": after_value,
-                    }]
-            if "changes" not in operation:
-                operation["after_hash"] = bytes_hash(content)
-            operations.append(operation)
-    obsidian = vault_root / ".obsidian"
-    for name in JSON_PAYLOAD_FILES:
-        target = obsidian / name
-        if not target.is_file():
-            continue
-        try:
-            json.loads(target.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            blockers.append(
-                f"{target.relative_to(root).as_posix()} is not valid JSON: {exc}"
-            )
-    planned_updates = vault_check.payload_reconcile_updates(
-        vault_root, policy, payload_root
-    )
-    for target in sorted(planned_updates, key=lambda value: str(value)):
-        if target in seen_payload:
-            continue
-        assert_not_symlinked(root, target, "vault payload target")
-        operation = {
-            "action": "update", "surface": "vault_payload",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": projection_ownership(target, vault_root),
-        }
-        content = planned_updates[target]
-        if target.suffix == ".json":
-            try:
-                before_value = json.loads(target.read_text(encoding="utf-8"))
-                after_value = json.loads(content.decode("utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                before_value, after_value = None, None
-            if before_value is not None and after_value is not None:
-                operation["changes"] = value_deltas(
-                    before_value, after_value
-                )
-        if "changes" not in operation:
-            operation["before_hash"] = (
-                bytes_hash(target.read_bytes()) if target.is_file() else None
-            )
-            operation["after_hash"] = bytes_hash(content)
-        operations.append(operation)
-    planned_deletions = vault_check.payload_reconcile_deletions(
-        vault_root, policy, payload_root
-    )
-    for target in planned_deletions:
-        if not target.is_symlink():
-            assert_not_symlinked(root, target, "vault payload target")
-        operation = {
-            "action": "delete", "surface": "vault_payload",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "package_local",
-            "before_kind": (
-                "symlink" if target.is_symlink() else
-                "directory" if target.is_dir() else
-                "file" if target.is_file() else "missing"
-            ),
-        }
-        if target.is_file() and not target.is_symlink():
-            operation["before_hash"] = bytes_hash(target.read_bytes())
-        operations.append(operation)
-
-    relation_updates = relation_report_updates(vault_root, policy)
-    for target, content in sorted(
-        relation_updates.items(), key=lambda item: str(item[0])
-    ):
-        assert_not_symlinked(root, target, "generated relation report")
-        operations.append({
-            "action": "create" if not target.exists() else "update",
-            "surface": "generated_relation_report",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "tracked_generated",
-            "before_hash": (
-                bytes_hash(target.read_bytes()) if target.is_file() else None
-            ),
-            "after_hash": bytes_hash(content.encode("utf-8")),
-        })
-
     current_ignore, target_ignore = proposed_gitignore(root, workspace)
     operations.extend(managed_block_operations(
         "gitignore", ".gitignore", (root / ".gitignore").exists(),
@@ -978,22 +778,6 @@ def build_plan(args) -> dict:
         "gitattributes", ".gitattributes", (root / ".gitattributes").exists(),
         current_attributes, target_attributes,
     ))
-
-    gate_path = root / ".github" / "agentrof" / "vault-gate.pyz"
-    assert_not_symlinked(root, gate_path, "portable gate")
-    gate_bytes = expected_gate_bytes()
-    if not gate_path.is_file() or gate_path.read_bytes() != gate_bytes:
-        operations.append({
-            "action": "create" if not gate_path.exists() else "update",
-            "surface": "portable_gate",
-            "path": gate_path.relative_to(root).as_posix(),
-            "ownership": "tracked_generated",
-            "before_hash": (
-                bytes_hash(gate_path.read_bytes())
-                if gate_path.is_file() else None
-            ),
-            "after_hash": bytes_hash(gate_bytes),
-        })
 
     mode_repairs = owner_only_repairs(root, workspace)
     for target, mode in sorted(mode_repairs.items(), key=lambda item: str(item[0])):
@@ -1023,14 +807,6 @@ def build_plan(args) -> dict:
         "warnings": long_paths["warnings"],
         "_long_paths_before": long_paths["before"],
         "_config": config,
-        "_policy": policy,
-        "_policy_path": policy_path,
-        "_payload_root": payload_root,
-        "_payload_materializations": materializations,
-        "_payload_updates": planned_updates,
-        "_payload_deletions": planned_deletions,
-        "_gate_bytes": gate_bytes,
-        "_relation_reports": relation_updates,
         "_legacy_contract_updates": {**operation_updates, **governance_updates},
         "_legacy_contract_deletions": operation_deletions,
         "_gitignore_content": target_ignore,
@@ -1071,9 +847,8 @@ def rollback_targets(root: Path, plan: dict) -> list[Path]:
     exclusively from planned file and payload operations.
     """
     mutable_surfaces = {
-        "workspace_config", "vault_payload", "generated_relation_report",
-        "legacy_contract_migration",
-        "gitignore", "gitattributes", "portable_gate", "file_mode",
+        "workspace_config", "legacy_contract_migration",
+        "gitignore", "gitattributes", "file_mode",
     }
     targets = {
         root / item["path"] for item in plan["operations"]
@@ -1274,8 +1049,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
     root = Path(plan["project_root"])
     workspace_root = root / args.workspace
     snapshot = RefreshSnapshot(root, args.workspace, plan)
-    copied = 0
-    reconciled = 0
     ignore_changed = False
     long_paths_set = False
     rollback_conflicts: list[str] = []
@@ -1298,27 +1071,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             assert_not_symlinked(root, target, "managed target")
             target.mkdir(parents=True, exist_ok=True)
         runtime = create_runtime(root)
-        # Execute the exact inspected payload plan one path at a time. Each
-        # mutation is mirrored into the private expected tree, so rollback can
-        # distinguish setup's postimage from a concurrent user edit.
-        for target in plan["_payload_deletions"]:
-            snapshot.delete(target)
-        for target, (content, mode) in sorted(
-            plan["_payload_materializations"].items(),
-            key=lambda item: str(item[0]),
-        ):
-            snapshot.write_bytes(target, content, mode)
-        for target, content in sorted(
-            plan["_payload_updates"].items(), key=lambda item: str(item[0])
-        ):
-            snapshot.write_bytes(target, content)
-        copied = len(plan["_payload_materializations"])
-        reconciled = (
-            len(plan["_payload_deletions"])
-            + len(plan["_payload_updates"])
-        )
-        for target, content in plan["_relation_reports"].items():
-            snapshot.write_text(target, content)
         for target, content in sorted(
             plan["_legacy_contract_updates"].items(), key=lambda item: str(item[0])
         ):
@@ -1339,12 +1091,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
         if current_attributes != plan["_gitattributes_content"]:
             snapshot.write_text(
                 root / ".gitattributes", plan["_gitattributes_content"]
-            )
-        if any(item["surface"] == "portable_gate"
-               for item in plan["operations"]):
-            snapshot.write_bytes(
-                root / ".github" / "agentrof" / "vault-gate.pyz",
-                plan["_gate_bytes"], 0o755,
             )
         # Writes above keep an existing file's mode, so the repair comes last.
         for target, mode in sorted(
@@ -1393,8 +1139,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             "workspace": args.workspace,
             "plan": public_plan(plan),
             "applied_operations": plan["operations"],
-            "payload_files_copied": copied,
-            "payload_files_reconciled": reconciled,
             "gitignore_changed": ignore_changed,
             "runtime_root": str(runtime),
             "next_entry": next_entry(root),

@@ -27,9 +27,7 @@
     "code_reviewer": [
       "code-review"
     ],
-    "delivery_coordinator": [
-      "obsidian-vault"
-    ],
+    "delivery_coordinator": [],
     "design_system_reviewer": [
       "ui-ux-design",
       "challenge-review"
@@ -291,19 +289,6 @@
       },
       "next_transition": "Complete the setup preflight and selected scaffold checks before presenting the configured project."
     },
-    "organize_docs": {
-      "flows": [],
-      "roles": [
-        "business-analyst"
-      ],
-      "scope_kind": "vault",
-      "project_state": true,
-      "write_scope": {
-        "resolver": "unresolved",
-        "roles": []
-      },
-      "next_transition": "The vault checker must validate each authorized write and the final selected vault structure."
-    },
     "sketch": {
       "flows": [
         "design"
@@ -387,9 +372,7 @@
     "code_reviewer": [
       "code-review"
     ],
-    "delivery_coordinator": [
-      "obsidian-vault"
-    ],
+    "delivery_coordinator": [],
     "design_system_reviewer": [
       "ui-ux-design",
       "challenge-review"

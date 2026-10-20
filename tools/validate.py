@@ -1515,7 +1515,8 @@ def check_project_instruction_contract(
     common = templates / "project-instructions" / "common.md"
     if not common.is_file():
         problems.append("common project instruction fragment is missing")
-    for filename in ("agent-marketplace.md", "me.md", "profile.md"):
+    for filename in ("agent-marketplace.md", "current-plan.md", "product-decisions.md",
+                     "me.md", "profile.md"):
         if not (templates / "memory" / filename).is_file():
             problems.append(f"memory template is missing {filename}")
     try:

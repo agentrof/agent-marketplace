@@ -302,7 +302,7 @@ def plan_project_files(
         changes[memory_target] = memory_rendered
 
     if seed_user_files:
-        for filename in ("me.md", "profile.md"):
+        for filename in ("current-plan.md", "product-decisions.md", "me.md", "profile.md"):
             target_path = memory_root / filename
             if target_path.exists() or target_path in changes:
                 continue

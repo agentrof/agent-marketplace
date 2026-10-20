@@ -24,7 +24,6 @@ sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overla
 sys.path.insert(0, str(ROOT / "tools"))
 import process_policy  # noqa: E402
 import task_lane  # noqa: E402
-import vault_check  # noqa: E402
 
 try:
     from tools.tests.levels import integration
@@ -564,34 +563,6 @@ class LocalProofTests(unittest.TestCase):
 
 
 class FastLaneOwnershipTests(unittest.TestCase):
-    def test_task_owners_need_no_inbound_map_link(self):
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        self.assertIn("task", policy["navigation_exempt_types"])
-        task = SimpleNamespace(rel="backlog/tasks/tk-004-a.md", fm={"type": "task"},
-                               generated=False)
-        story = SimpleNamespace(rel="backlog/epics/e/stories/s/story.md", fm={"type": "story"},
-                                generated=False)
-        vault = SimpleNamespace(policy=policy, notes={task.rel: task, story.rel: story})
-        self.assertEqual([note.rel for note in vault_check.navigated(vault)], [story.rel])
-
-    def test_every_field_the_lane_writes_is_a_registered_property(self):
-        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
-                            .read_text(encoding="utf-8"))
-        source = (TEAM / "scripts/task_lane.py").read_text(encoding="utf-8")
-        written = set(re.findall(r'set_field\(\w+, "([a-z_]+)"', source))
-        self.assertIn("roles", written)
-        self.assertEqual(sorted(written - set(policy["property_types"])), [])
-
-    def test_the_task_type_is_registered_in_the_vault_policy(self):
-        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
-                            .read_text(encoding="utf-8"))
-        self.assertIn("task", policy["extra_doc_types"])
-        self.assertIn("retrospective", policy["extra_doc_types"])
-        for key, kind in (("requested_at", "datetime"), ("size", "text"), ("rigor", "text"),
-                          ("delivery", "text")):
-            self.assertEqual(policy["property_types"][key], kind)
-
-
 STORY = """---
 type: story
 title: "Invoice export"
@@ -672,15 +643,6 @@ class TaskLinkTests(unittest.TestCase):
         earlier = {"ST-012": "2026-10-16T09:00:00+00:00"}
         self.assertEqual([item["task"] for item in task_lane.drift(stories, opened, later)], ["TK-002"])
         self.assertEqual(task_lane.drift(stories, opened, earlier), [])
-
-    def test_the_link_properties_are_registered(self):
-        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
-                            .read_text(encoding="utf-8"))
-        for key, kind in (("epic", "text"), ("source_story", "text"), ("covers", "multitext")):
-            self.assertEqual(policy["property_types"][key], kind)
-        self.assertEqual(policy["type_path_patterns"]["task"],
-                         ["^backlog/tasks/tk-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"])
-
 
 class RetrospectiveCostTests(unittest.TestCase):
     """Cost per task from transcripts, waits with an owner, reading waste, targets and history."""
@@ -775,23 +737,6 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
         self.assertEqual((props["task_kind"], props["approved_at"]), ("knowledge", props["requested_at"]))
-
-    def test_every_property_a_task_can_carry_is_registered_in_the_vault_schema(self):
-        texts = [task_lane.task_text("TK-009", "T", "R.", "2026-10-16T10:00:00Z", "DLV-001", "normal",
-                                     epic="EP-1", source_story="ST-1", covers=[1], size="m", fixes="TK-008"),
-                 task_lane.task_text("TK-010", "T", "R.", "2026-10-16T10:00:00Z", "DLV-001", "normal",
-                                     kind="knowledge", fixes="TK-008")]
-        emitted = {match for text in texts
-                   for match in re.findall(r"(?m)^([a-z_]+):", text.split("\n---\n")[0])}
-        self.assertIn("fixes", emitted)
-        plugin = ROOT / "plugins" / "software-engineering-team"
-        registered = (
-            set(json.loads((plugin / "skill-content/obsidian-vault/data/vault-policy.json")
-                           .read_text(encoding="utf-8"))["property_types"]),
-            set(json.loads((plugin / "templates/vault/.obsidian/types.json")
-                           .read_text(encoding="utf-8"))["types"]))
-        for names in registered:
-            self.assertEqual(emitted - names, set())
 
     def test_the_report_sums_each_kind_and_ranks_its_levers_by_the_target_gap(self):
         build = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001"},
@@ -1466,8 +1411,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
 
 class EntryExposureTests(unittest.TestCase):
     # Agents may call every entry the user can; arming autopilot stays the user's.
-    MODEL_INVOCABLE = ["configure", "deliver", "issue-report", "organize-docs", "retrospective",
-                       "setup"]
+    MODEL_INVOCABLE = ["configure", "deliver", "issue-report", "retrospective", "setup"]
     USER_ONLY = ["autopilot"]
 
     def test_the_model_invocable_entries_are_listed_on_both_hosts(self):

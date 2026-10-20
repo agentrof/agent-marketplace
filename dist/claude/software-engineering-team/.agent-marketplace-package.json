@@ -17,49 +17,49 @@
       "58eda52389624f995f8642994345d56f77c871ed6b599745f7d1eff8c3ab994e"
     ,
     "agents/analysis-challenger.md":
-      "efabf03898d03b7827b6af726aadf61b944ce9d3ad8789585aa0e3b0aa0b478f"
+      "c354b4a638526fbb17d08ee451837bbf6b7ac5d3ce49416478b770bcfabbb869"
     ,
     "agents/backend-developer.md":
-      "16689a8c9a70809e7a01ab39b43ee0cc46c1f38be2cf6da8e4b1d6663538dab1"
+      "ecaaeeef2eafe65bcee57fa32024ebfef47ad05b7f2eb05ac24f0353f481dfa3"
     ,
     "agents/business-analyst.md":
-      "04230372e3fb4fe713ee4df4ea64b321d4c5f611a8e136fa9fbf176a8378f9b0"
+      "0f87ddbc0888f2316c004ff5ed4d11a7fedd83217e4263f1cab742982211b261"
     ,
     "agents/code-reviewer.md":
-      "1af398548d89f521ec7863f88a384f82fd429157119d3e9e013036f8923adb4d"
+      "9b4440ce094b0c2bef96c3d6592abdb3dc0265bca7bc42862691035a554def5f"
     ,
     "agents/devops-engineer.md":
-      "75b81779795908a7f2417d167a5b55d1985aa44ed0aaf20d87c10c222a10e4e4"
+      "3652a8e9f9d3c2ee227a8e722c8b2b2db88b44496914f29b7be60401051e7dce"
     ,
     "agents/frontend-developer.md":
-      "2169d5c98fa44ec0e1d5f94fe3df485ea49db44f30f58acb2cecf00cab286be1"
+      "3d49fbcd3ae52ab36502de7656c9dd7a1d229eba629f7aad5bb9356d0ce5115b"
     ,
     "agents/qa-engineer.md":
-      "ec50f240aaef82530ef880be709809a0a77fc897c01c5bdbe28743505bef7ce7"
+      "3717ce9a5c70090a58bc1bcf16e1d10350dcf1ae6e5c742a44d8c65e65e85718"
     ,
     "agents/security-reviewer.md":
-      "46aef217b69c264bfe25024ec89f17a8871150c0d59c51db481cf1b2482fd8e0"
+      "fa39652e1d438e2dc2d99ae2c7a052563ad9e5d292e977f22f38105daf444850"
     ,
     "agents/software-architect.md":
-      "3d381fa01bdb470de61d31158e7f76a8f6dfaa36954ab0778b1354926a5e0b33"
+      "00eca8dd1b68925f871d7d1fb427e3b433f7e45ab450887ea2b5a37ce6243455"
     ,
     "agents/solution-architect.md":
-      "8848faceaa50ff60c5a1bce8f3efdd86a263e14ac24c4ad841996406f9588faf"
+      "dcc855c5c15d29a405d7f61f1c3839d57296e3133b25abdfa1fbc95859802ad5"
     ,
     "agents/solution-reviewer.md":
-      "0819f5b7d38867d680988e28fa208c645c2193cd595424ff79478f3b18b1eb10"
+      "7e8b7c700ed292abc39be8b52248c0e7afb3aed38c59d13f0d9aba7dfa32bdc9"
     ,
     "constitution.md":
-      "67bd2b8cac8ead82129171c81607249a00e415f3a6bfc1002c388c4b3176548d"
+      "061af378328b144f2bd558b73ba735fce82987ee6037cfb5110d5a64112e7fa7"
     ,
     "flows/fast-lane.md":
-      "5ebf4565b5114bfd2a6ad01eb3988833e17cf8d7efdfe0114c077005984cace2"
+      "8f2a3e9ccda37223b379476e97b2122d61d3da8ce8a283d91f50c4dd97210fda"
     ,
     "hooks/hooks.json":
-      "c9c89e9b225215bcc6b9681111d83a70151214968c2bee4e5234d82e79c8be7a"
+      "d517398305738f3033f9905d1dbfd1b78a300d33b2ef427613c6b52288390494"
     ,
     "host-contract.md":
-      "2a36ff2474dc6b375a60a96f6aa73cb8547fbb5ffadae036e7ebf96ebc189b15"
+      "347154a072b0971a0af6f7fafb69f03712f5daa654100c228e30a34c57728aa9"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -67,20 +67,8 @@
     "scripts/atomic_file.py":
       "2835d96b91f37e472a73f1540aead9aa3d0a9165db4fa0f2cb457373aa629320"
     ,
-    "scripts/autopilot_provenance.py":
-      "0d519c668272376b009da01e1e4a9a959a7f8c7939e327e9a0d63344fcee144a"
-    ,
     "scripts/await_outputs.py":
       "d82184a2c9bb1f7529c2042aa2fd030bec9dc8b2f2cb49c7daa364f2375e643f"
-    ,
-    "scripts/context_catalog.py":
-      "aacb4e627c4bdca9dab654744b81190774c3acdfeaf54d30893bdbdfe93ebd6a"
-    ,
-    "scripts/context_history.py":
-      "0223ced93f8c9c656f8456d371523fc0cf89dad6d01ff0a6202ce29593acf510"
-    ,
-    "scripts/context_pack.py":
-      "b8c09eb237282de015db0e04a913d5faa80de3ca7680f02a1392974173eb095b"
     ,
     "scripts/file_issue.py":
       "99bb5ce4c91560911d0155f8ac34cc75ca05943bb0b2de3b41c5e035d6e1d28b"
@@ -92,16 +80,13 @@
       "5f32f030276a4860b2607a1b23f5d4db830e93621a22c0e82c23d7d083ec977c"
     ,
     "scripts/hook_launcher.py":
-      "450086b054cecaa8070947ea5829691c7278f88df05a684555101dfdac23196a"
+      "f5dfa03e324467e05754048c0edac9751f1f8e76844b026fce151668cbf761fc"
     ,
     "scripts/host_listing.py":
       "508f6ad2e048594e5228c736647fd273588f080430d74c637e3e13dfef5a94c3"
     ,
     "scripts/host_models.py":
       "bd3bc6d9c4043f4bf68a33ca76332b7e5a7911f1e14ea691f8bc2dd0920f0dd3"
-    ,
-    "scripts/impact_closure.py":
-      "59655c06858179d1a37b08311d55dd8a06cf17d61526027ab90d109390a654a2"
     ,
     "scripts/marketplace_paths.py":
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
@@ -120,9 +105,6 @@
     ,
     "scripts/project_config.py":
       "d20cad53bed9b8d85cf264eee7631a579a3e579392ac74e3782827811e6c6d10"
-    ,
-    "scripts/project_context.py":
-      "0a705d6d27acb30820258cb373a2fb9e6548a69630851026a4e3dd1b4d6d22d2"
     ,
     "scripts/project_instructions.py":
       "9a7640c22a23006f748a153bb6c7e68fd5297072166f8f3614178cf985c9309e"
@@ -143,46 +125,31 @@
       "c5f573942e2a79c8c3907a0081940309e3325521c03d62841b9718de4dc6dbb4"
     ,
     "scripts/setup_check.py":
-      "107f2d03643069116211bf51ec9ce10e32787abac7b08b957aee2318ed03c876"
+      "94fd9da90f46c45052e3cc2e45c2aca8bc61c022f0dfb7d31392b11b074db7bc"
     ,
     "scripts/setup_companions.py":
       "90a99648460071f38b037d8a55819ecbf0b1acc373e360c2d305fde7a19a7c56"
     ,
     "scripts/setup_project.py":
-      "71bbedfbe7199867d21763b37713b85ff78e4f80165244d09af4386673c53879"
+      "7b741b38d79ff6f507565809d7316bf4dd9d3c335294feff082377ad8576436a"
     ,
     "scripts/step_timing.py":
-      "2472f5fe71b3b6a56bd9e510884e184fa520424983a57f273694c31b275bac89"
+      "f37fa8f00c6b93d145a89784724b37711279cec3b620aab29fe2921916024d23"
     ,
     "scripts/task_inputs.py":
-      "b7cafa9774d1e1eb3d4584a16ad05fe65b6f832265d2b02b7a33954b0dc66380"
+      "3d73fee736dff0f1a49007baa425cf26e8ffe7581020d632514f4b351d640927"
     ,
     "scripts/task_lane.py":
-      "0bd97333648665ceb733aaef5f464abb42105b88bf1e4a4d86e3f775fede93ee"
+      "77479ba706858e714d9a2d73a11a97c1b67025748879e8b3f18688c54bd141c8"
     ,
     "scripts/team_guard.py":
-      "9e24126771b14439000f9b9af580e5e12cdbc7365809ccb48b133c17108a8802"
-    ,
-    "scripts/vault_check.py":
-      "408acd17f798b27ed57c28756963748e1f9071ed1989209c32194e1364feba9e"
-    ,
-    "scripts/vault_gate.py":
-      "9efd86f1b58f63c50804c7dc40c34a7e1f2d1c8cbd219e94a040132a666cec17"
-    ,
-    "scripts/vault_hook.py":
-      "f3419c55eecb6483d5a8206d7759a35d41cf5cf3b7c09d081c793e3517a74391"
-    ,
-    "scripts/vault_index.py":
-      "e71cc817cae308e57ae5e78804966343606c683a1830b95b4e394b5282eded1f"
+      "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
     ,
     "scripts/vault_markdown.py":
-      "f21fd6e7e5691891bcd16d296e2255c96373cf0e0e5eb8e5d7482f6f89d4396f"
-    ,
-    "scripts/vault_query.py":
-      "2278dfc155f1c18d13262f1a6aff22893c17f8ee4791594ba4059448a9801138"
+      "c71a5914a8849507e5101d593305904e4ef658b5430d2fa328cc7b320defc745"
     ,
     "skill-content/autopilot/SKILL.md":
-      "6a8382c27ee236ea9fb14aea73249d3956b46f3ab94715a1d65df0f8bd36df77"
+      "75600b0c2ece1b4557193cf42f61cd7e5a156ffaa90240236bd1c7a3cf9cdbe6"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
       "cde9d72c1ae4a029e2afce76fc4cdfd4939582537e38a36d8e05c91e11f66a18"
@@ -191,7 +158,7 @@
       "7a3ea3f0b5b5235315d2532f8c44427e27d3f30790491330d24246c1421b87b2"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "44015377f1b818dc9cde50a678c3fae87f03a6b7000a83a2fb0a78b4e93ad7bc"
+      "5a840fca62c854b0458980b012602da2fe17e8985b5576beb9dcd48b4c86f3dd"
     ,
     "skill-content/autopilot/scripts/autopilot_recovery.py":
       "80f96c50339cf002d9ca9d3ef5c9a7d0d9d6806c1950f61ddb793acf917b3e56"
@@ -221,10 +188,10 @@
       "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
     ,
     "skill-content/configure/SKILL.md":
-      "15b31626110c633f2b8e0b4d0f415346a13f5abcd1c92dba579967b9b8ff240b"
+      "5375b3628a1523dfd79eef21f6ac5446702b8444446d6deddd88ef6e8f187acf"
     ,
     "skill-content/configure/data/process-switches.json":
-      "69940bfb7d1824e5fb1bdd2d55ae7b398184e30ceecda44cd39cae29ed4b3a7a"
+      "cc317a003b5da79c75efa58cd8920024605dca1aa27ff15ecc1cb400aef0dacb"
     ,
     "skill-content/configure/data/step-budgets.json":
       "dd99177f7ffc6e91fe189b9d5cc2eae518071e90b1d73a67913400c7aa955a74"
@@ -248,13 +215,10 @@
       "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
     ,
     "skill-content/deliver/references/switch-pr_proof-local_record.md":
-      "74fffb6893e144f59f5c16fffc15ec281c199639b1a4dbe418f53966becbbfb5"
+      "7d58d116f06aa2722b75f8b67bc444987c8a2d7d88cd0a86d491c96332e57047"
     ,
     "skill-content/deliver/references/switch-process_profile-fast_lane.md":
-      "065a4b33c072658d21d50f94dd145ecbe437f5b95f48d86ecb272b84dd56b363"
-    ,
-    "skill-content/deliver/references/switch-review_scope-impact_closure.md":
-      "d7a87291bd575b063f79cfe878fb0516e2407fce77a01db3c0538e6bc682ea22"
+      "a6da890fc5187146039051376deb8d4d04a9b276679d63e933aaab2748f438f7"
     ,
     "skill-content/deliver/references/switch-step_budgets-enforced.md":
       "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
@@ -263,7 +227,7 @@
       "0d4e563158e27d724752b6b87fabaccaa6f6f6bef9420a0de8f1e451cdbe1fee"
     ,
     "skill-content/docker-compose/SKILL.md":
-      "758e65bc4bf542ed5be998718708e381b8bc3af79162faefbbc5afb2b9a5424b"
+      "f3a207b6ad053c006b454afb391bff6859b4797cb5b600ac258cb45f86e30cec"
     ,
     "skill-content/docker-compose/references/compose-patterns.md":
       "26b99ad6550a5049129ac25aed49c686962ca8e6b08fc9b79d73777ed33be073"
@@ -313,27 +277,6 @@
     "skill-content/nosql-database-design/references/schema-validation.md":
       "4ebfa5db83ff108d0352bca68e8ea13d2c7c860f13d876bd0f1a49d03db0802e"
     ,
-    "skill-content/obsidian-vault/SKILL.md":
-      "931c87622196a746700885aa5a78081954df37d0b6dc571ff54e70a93dcf9a05"
-    ,
-    "skill-content/obsidian-vault/data/vault-policy.json":
-      "3ec877d6d209d029e3b80b9dcab587cf7b16575f123c625182a1da4a7ace7727"
-    ,
-    "skill-content/obsidian-vault/references/graph.md":
-      "e730f2e176541e1db640f3aadec9a35e51cfa8af95a62331e0e2894a65862a1e"
-    ,
-    "skill-content/obsidian-vault/references/linking.md":
-      "7cdd63dcd67ed3326765abe065744e1b39c189e5399f1dfe8baa62f786ca52e9"
-    ,
-    "skill-content/obsidian-vault/references/metadata.md":
-      "90d77814efbebff0828b0586cd270d1f4eeac8728cefb74a4c8e7ad0243015e6"
-    ,
-    "skill-content/obsidian-vault/references/vault-structure.md":
-      "ed6fb5780b0a0214a27cf448de91542edaf44622137ed097c9304d0190e98415"
-    ,
-    "skill-content/organize-docs/SKILL.md":
-      "3e162775f2d478a4e37a0c14974389cefff970ef26e65cf2701605f47856f878"
-    ,
     "skill-content/python-fastapi/SKILL.md":
       "b335164b3bc4bdc80be739b1a99606881577ae198307d0ce89c9a819e1d51421"
     ,
@@ -374,19 +317,19 @@
       "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a"
     ,
     "skill-content/retrospective/SKILL.md":
-      "715bf4011315f40e85d9cf2b4a7c9ad061ddac0c6b04eca97b9499d4b8c275a5"
+      "5b6eacb242cff1a712b54d8d88ae12c9efa52eda20c6a0695775de1dfa0c1a25"
     ,
     "skill-content/retrospective/data/pricing.json":
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"
     ,
     "skill-content/retrospective/data/rework-causes.json":
-      "3b13762493710f05b47cfd7124649523d332b7ae191e5dba361aff3f11a3369b"
+      "07cb58e9d45c28eff7a5ee6450e478870033915479f26586c107caffa67f7ae8"
     ,
     "skill-content/retrospective/references/rework.md":
       "822e5d19a3e5be6924a904918c5f9f356c5fea074bbc0ff344f8a6011950fda6"
     ,
     "skill-content/setup/SKILL.md":
-      "858918baf26b442c9722496dc982a460df9cafb50f1863f240fb568ed263a4fd"
+      "26166f8cd72a7feae124fe4ddbd001c2057cff95c1ab899f67d28831511d21cc"
     ,
     "skill-content/setup/data/companions.json":
       "9a51eff45f55b8f1f094d7cf294930b57d4048dc4b835d86d9963e6faafe2d37"
@@ -398,7 +341,7 @@
       "bc73c5b81da276b332fba05681869b48537e530f1dd01387aa9fbf4db1241fa2"
     ,
     "skill-content/software-architecture/SKILL.md":
-      "5aee54ff6733ee8d7984e86ec377921ab1b9bc0eb8bb4ff7fc9ad028c0fd5e6d"
+      "28775e20c06b8ec69cb6fdb186aa0a2574bb1de692ae29e27632551f41696064"
     ,
     "skill-content/software-architecture/references/api-design.md":
       "b9d5f25154fd170da480ae40151db662edaa17b43afc07bc164f86f29c8c5055"
@@ -493,12 +436,6 @@
     "skills/nosql-database-design/SKILL.md":
       "4147fa00254efaab084a98e31ca30ca27b62857696c9e8135daeb572cd893b66"
     ,
-    "skills/obsidian-vault/SKILL.md":
-      "0cb0c4d4018374b7080d35495743777ed38fa0c95973597a283fae6fb78ce920"
-    ,
-    "skills/organize-docs/SKILL.md":
-      "ca9fa4740fdcafac5ae4ca5d941bad58e2f37969a587dac2e34532de972f186b"
-    ,
     "skills/python-fastapi/SKILL.md":
       "d3bf9e471a59c8905d01ea59e14ae3ee852974b996043b8a7e1345ab4da7a0ca"
     ,
@@ -524,16 +461,16 @@
       "19bf6da635c58e8f5a7447a52c07413c96b136032e0abe35fa0b65b3facbdde3"
     ,
     "templates/AGENTS.override.md":
-      "27bbc2fd64223f6e2b52887b61b083106a76f9fae3b022a606d72b79c0fd1bd8"
+      "8c4bf00b6fbe24d6350cbae37806015b19115bee9e148d4ca7c729f8fdf448c5"
     ,
     "templates/CLAUDE.md":
-      "6ecabe5c834981c3ad140cf7ba69a50e80d5ee6f55cd2d6ad4f1248da63a0c94"
+      "34b240b4eabadfbc5d1f9fa148cb6e05dd4d12a7c817e70650b7b121648bd9e1"
     ,
     "templates/ci-tests.yml":
-      "cd4e817fabcf4d15aff21ee9dbd713542f2e8ea9987d78c9f5c45fca6db5e48d"
+      "e7f87688646b979dbfbce486edda8ca5489e684b1fb08cf8d7f6b4495777c411"
     ,
     "templates/gitignore":
-      "fa6da40c9313474f7d39f430d2311c2a6d646dfbceb5df566b454af6052d6a8e"
+      "1cdd332064b7a75a86a95452af43632d04b15029e594a8081c72449292d30ca0"
     ,
     "templates/memory/agent-marketplace.md":
       "682fdb71b913a3eed47868304164ad1c7fc086e497a4e78e064cd59d111d5702"
@@ -548,94 +485,28 @@
       "dd5d74812a280a4814ada8c0335fc824704f33cc91b2d39b990a6c1921773b6f"
     ,
     "templates/project-context-policy.json":
-      "1064215323cacff3ba2748f6992ac5d43026183c4f30e43b1633d579800d951f"
+      "33c751e088616132fd76485509434fb0c35cc3f558ae605e08584318ad22a7b4"
     ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
     ,
     "templates/project-instructions/common.md":
-      "0f57bcb1fdc0fc36dce76767f9ff91e44fca7897e7fc024752ec227acc04ca7e"
+      "ac1ff9524fe42658d7c7eaf90156d69a9db1bc194f26fd9fbe82a3525cb95107"
     ,
     "templates/project-instructions/host.md":
       "f34ddfbb22ac7961945f64e863ef99aef95afb8568bf7a00db3f6cd385c570ef"
     ,
     "templates/project-instructions/team.md":
-      "efbffd43cbf53fceaa4831de42742002c78550fca47511d85b4d0cea96b2e16b"
+      "76a0f6efc36efa36ec6ff36b222a299aa2a22d35ff304d63a9ab81bb69710d70"
     ,
     "templates/project-instructions/user-context.json":
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
     ,
     "templates/task-input-contract.md":
-      "c4f61face4a0ce92d536cc9fd312b54c5d89d1aec147b617254f6523b69db414"
+      "33b96298624cd34868c6fa2f11ecbae6d8cd8f7a3ede8540f44ae6e9de57ae24"
     ,
     "templates/task-input-policy.json":
-      "ebb99f73ef30b3439cf90b858e7085d85dd2c044ff24d60236cad30787bd54d3"
-    ,
-    "templates/vault-index-policy.json":
-      "d44d46600e86a49f6b054d6a79ce989ff8b43740357fa8c8b0cfe9b015755584"
-    ,
-    "templates/vault/.obsidian/app.json":
-      "d81f5f2d2db5f65f24db5235301c5dffd41412e66db7202cf65f9f032cde078d"
-    ,
-    "templates/vault/.obsidian/appearance.json":
-      "208f3a78f0bc1d2209a4bd36e0dd05d875434e66bb3859deb3f7659bf4a49ed1"
-    ,
-    "templates/vault/.obsidian/community-plugins.json":
-      "065b2ec3606b793e7322744adc2e4143af53c72a2ef2c5a045d2b25676c7048c"
-    ,
-    "templates/vault/.obsidian/core-plugins.json":
-      "81afebcd42fe23baf54427e809ab4521be53884cc07085ee136f9c62e8187f36"
-    ,
-    "templates/vault/.obsidian/graph.json":
-      "ea803c202c87b5122611adb3cebda137e779c7e698b5f37ce923280d256b632d"
-    ,
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/LICENSE":
-      "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-    ,
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/data.json":
-      "2381b820b8f3e929056b55f497fd2579765777b693c2c0762f995ef6bdff02fd"
-    ,
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/main.js":
-      "8a55ac74ea628a9db5b2fae5fd57031638c794279e24610efc19ad0f5a6fc444"
-    ,
-    "templates/vault/.obsidian/plugins/obsidian-front-matter-title-plugin/manifest.json":
-      "a83265e1e8a0db3658d7121f8611650b74daa8b11760ead3579ad1953e71f136"
-    ,
-    "templates/vault/.obsidian/snippets/brand.css":
-      "46b840eaddc2c50abf29b4b0b145e1e0774c4760e89b4d09a7a9ce122b33bbbe"
-    ,
-    "templates/vault/.obsidian/types.json":
-      "20505ded3456e6a17746b4b5e8018127802961de9f184a5089931e3db3c29349"
-    ,
-    "templates/vault/home.md":
-      "b62efb50cb11a9e14ea667a2e12cbff4789ec458c705cd226440c9d5d25b3397"
-    ,
-    "templates/vault/maps/backlog.md":
-      "b4e9c92f341ef5599bf8e6980856f6e8e74dd8e4effe01c0d8f8ec88eb4e2a7b"
-    ,
-    "templates/vault/maps/business-analysis.md":
-      "4401acf304330465362dc4888b0de2da5bf8088e107343f7ee7a0d639eb0a4fa"
-    ,
-    "templates/vault/maps/delivery.md":
-      "72f6669654bc129149b128ba104a9605c8d3d1e23e9411030b402cc9af667637"
-    ,
-    "templates/vault/maps/design-system.md":
-      "4ef95429c9d4bc7699db7b4f94adee0edc13a57c41ce5fbb770d956262c9da87"
-    ,
-    "templates/vault/maps/experience-design.md":
-      "58db39a90b479587a8aa12ede9eab7a9291591e79bc3a0138adf214edac389c3"
-    ,
-    "templates/vault/maps/operation.md":
-      "1f5d0ec5516fd60f48326cec634825406d8d8a7fc78e9076ec4934fd0d68ed38"
-    ,
-    "templates/vault/maps/requirements.md":
-      "6a8b9d9d5577cca9fa7f9c1cada975214c685b6091e02730e88ec810934ab295"
-    ,
-    "templates/vault/maps/solution-design.md":
-      "ca671249c77bfd95ed2bc57f65248a005f0d56c991c4de023be2e86843420682"
-    ,
-    "templates/vault/maps/system-architecture.md":
-      "6608e750755077fc1828b1fe40456f9828ca1fc1da82234c5864f5e996e41d77"
+      "d8e634167d876d881a67b7fe157d9b58ce1f450c4356b8eef309c2673b76bc8a"
   },
   "host": "claude",
   "marketplace_release": "2026.10.6",

@@ -31,7 +31,6 @@ if str(SCRIPTS) not in sys.path:
 
 import project_config  # noqa: E402
 import setup_project  # noqa: E402
-import vault_check  # noqa: E402
 
 SAMPLE = "first line\nsecond line\n"
 MODE = re.compile(r"[rwxabtU+]{1,4}")
@@ -167,8 +166,6 @@ class WriterLineEndingTests(unittest.TestCase):
         return {
             "setup refresh": self.setup_refresh,
             "workspace config": self.workspace_config,
-            "vault": self.vault,
-            "vault hook": self.vault_hook,
             "project instructions": self.project_instructions,
             "codex projection": self.codex_projection,
         }
@@ -185,34 +182,6 @@ class WriterLineEndingTests(unittest.TestCase):
             "output_language": "English", "terminology_language": "English",
         })
         return [path]
-
-    def vault(self, root: Path) -> list[Path]:
-        note = root / "note.md"
-        note.write_bytes(
-            b"---\ntitle: Note\nstatus: draft\ntags:\n  - status/draft\n---\n"
-            b"\n# Note\n"
-        )
-        vault_check.restamp(note, {"status": "approved"}, "approved")
-        graph = root / ".obsidian" / "graph.json"
-        graph.parent.mkdir()
-        graph.write_bytes(b'{"colorGroups": []}\n')
-        vault_check.standardize_graph_colors(
-            root, vault_check.load_policy(vault_check.DEFAULT_POLICY),
-        )
-        return [note, graph]
-
-    def vault_hook(self, root: Path) -> list[Path]:
-        hook = load(
-            "line_ending_vault_hook",
-            ROOT / "platforms/shared/software-engineering-team/overlay/scripts"
-            / "vault_hook.py",
-        )
-        replaced, created = root / "replaced.json", root / "created.json"
-        exclusive = root / "exclusive.lock"
-        hook.atomic_replace_text(replaced, SAMPLE)
-        hook.atomic_create_text(created, SAMPLE)
-        hook.exclusive_create_text(exclusive, SAMPLE)
-        return [replaced, created, exclusive]
 
     def project_instructions(self, root: Path) -> list[Path]:
         instructions = load(

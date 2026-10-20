@@ -18,7 +18,7 @@
   "interface": {
     "displayName": "Software Engineering Team",
     "shortDescription": "An orchestrated product and engineering team",
-    "longDescription": "Drive product work through analysis, architecture, design, test planning, and an approved project-local Obsidian backlog with Codex-native agents.",
+    "longDescription": "Drive product work through analysis, architecture, design, test planning, and an approved project-local backlog with Codex-native agents.",
     "developerName": "Agentrof",
     "category": "Engineering",
     "capabilities": [

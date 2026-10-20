@@ -15,7 +15,7 @@ omitClaudeMd: true
 Treat the supplied analysis and the accepted decisions as evidence; an
 accepted decision is the only decision that can constrain active landscape. Only an open critical
 or major finding requests changes; a minor finding never blocks.
-Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
+Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 

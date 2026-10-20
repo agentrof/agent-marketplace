@@ -26,7 +26,6 @@ BACKLOG = ROOT / "plugins" / "software-engineering-team" / "scripts" / "backlog_
 SCRIPTS = SETUP.parent
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
-import vault_check as vault_payload
 import setup_project as setup_module
 import setup_check as check_module
 from tools.tests import fixture_cache
@@ -76,24 +75,7 @@ class SetupProjectTests(unittest.TestCase):
                 item["path"]: item
                 for item in json.loads(inspected.stdout)["operations"]
             }
-            self.assertTrue(
-                by_path["workspace/docs/.obsidian/app.json"]["changes"]
-            )
-            self.assertEqual(
-                by_path[
-                    "workspace/docs/.obsidian/community-plugins.json"
-                ]["changes"][0]["key"],
-                "$",
-            )
-            for relative in (
-                "workspace/docs/home.md",
-                "workspace/docs/.obsidian/snippets/brand.css",
-                "workspace/docs/.obsidian/plugins/"
-                "obsidian-front-matter-title-plugin/main.js",
-            ):
-                self.assertTrue(by_path[relative]["after_hash"].startswith(
-                    "sha256:"
-                ))
+            self.assertIn("workspace/config.json", by_path)
             first = self.run_script(SETUP, "--project-root", str(project), "--json")
             self.assertEqual(first.returncode, 0, first.stderr)
             payload = json.loads(first.stdout)
@@ -122,13 +104,6 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(runtime_sentinel.read_text(encoding="utf-8"), "disposable\n")
             checked = self.run_script(CHECK, "check", "--project-root", str(project), "--json")
             self.assertEqual(checked.returncode, 0, checked.stderr)
-            gate = project / ".github" / "agentrof" / "vault-gate.pyz"
-            self.assertTrue(gate.is_file())
-            portable = subprocess.run(
-                [sys.executable, str(gate), "check", "--project-root", str(project), "--json"],
-                capture_output=True, text=True, check=False,
-            )
-            self.assertEqual(portable.returncode, 0, portable.stderr)
 
             config = json.loads(
                 (project / "workspace/config.json").read_text(encoding="utf-8")
@@ -173,43 +148,6 @@ class SetupProjectTests(unittest.TestCase):
             authored.write_text("# Consumer authored\n", encoding="utf-8")
             authored_before = authored.read_bytes()
 
-            obsidian = project / "workspace/docs/.obsidian"
-            graph_path = obsidian / "graph.json"
-            graph = json.loads(graph_path.read_text(encoding="utf-8"))
-            graph["search"] = "stale-filter"
-            graph["colorGroups"][0]["color"]["rgb"] = 7
-            graph["scale"] = 2
-            graph_path.write_text(json.dumps(graph, indent=2) + "\n", encoding="utf-8")
-            types_path = obsidian / "types.json"
-            types = json.loads(types_path.read_text(encoding="utf-8"))
-            types["types"]["owner_role"] = "number"
-            types["types"]["consumer_property"] = "text"
-            types["types"]["locked"] = "checkbox"
-            types["types"]["challenge_status"] = "text"
-            types["types"]["challenge_hash"] = "text"
-            types_path.write_text(json.dumps(types, indent=2) + "\n", encoding="utf-8")
-            app_path = obsidian / "app.json"
-            app = json.loads(app_path.read_text(encoding="utf-8"))
-            app["alwaysUpdateLinks"] = False
-            app["spellcheck"] = False
-            app_path.write_text(json.dumps(app, indent=2) + "\n", encoding="utf-8")
-            community_path = obsidian / "community-plugins.json"
-            community_path.write_text(
-                json.dumps(["unvetted-plugin"], indent=2) + "\n",
-                encoding="utf-8",
-            )
-            plugin_main = (
-                obsidian / "plugins/obsidian-front-matter-title-plugin/main.js"
-            )
-            plugin_main.write_text("stale package projection\n", encoding="utf-8")
-            plugin_orphan = plugin_main.parent / "removed-after-package-n.js"
-            plugin_orphan.write_text("unshipped package asset\n", encoding="utf-8")
-            unrelated_plugin = obsidian / "plugins/user-unrelated/keep.js"
-            unrelated_plugin.parent.mkdir()
-            unrelated_plugin.write_text("consumer plugin\n", encoding="utf-8")
-            gate = project / ".github/agentrof/vault-gate.pyz"
-            gate.write_bytes(b"stale portable gate")
-
             inspected = self.run_script(
                 SETUP, "inspect", "--project-root", str(project), "--json"
             )
@@ -218,32 +156,8 @@ class SetupProjectTests(unittest.TestCase):
             )
             plan = json.loads(inspected.stdout)
             planned = {item["path"] for item in plan["operations"]}
-            self.assertTrue({
-                "workspace/docs/.obsidian/app.json",
-                "workspace/docs/.obsidian/community-plugins.json",
-                "workspace/docs/.obsidian/graph.json",
-                "workspace/docs/.obsidian/types.json",
-                "workspace/docs/.obsidian/plugins/"
-                "obsidian-front-matter-title-plugin/main.js",
-                "workspace/docs/.obsidian/plugins/"
-                "obsidian-front-matter-title-plugin/removed-after-package-n.js",
-                ".github/agentrof/vault-gate.pyz",
-            } <= planned)
-            by_path = {item["path"]: item for item in plan["operations"]}
-            graph_change_keys = {
-                item["key"] for item in by_path[
-                    "workspace/docs/.obsidian/graph.json"
-                ]["changes"]
-            }
-            self.assertIn("search", graph_change_keys)
-            plugin_update = by_path[
-                "workspace/docs/.obsidian/plugins/"
-                "obsidian-front-matter-title-plugin/main.js"
-            ]
-            self.assertTrue(plugin_update["before_hash"].startswith("sha256:"))
-            self.assertTrue(plugin_update["after_hash"].startswith("sha256:"))
+            self.assertIn("workspace/config.json", planned)
             self.assertEqual(authored.read_bytes(), authored_before)
-            self.assertEqual(graph["search"], "stale-filter")
             rejected = self.run_script(
                 SETUP, "check", "--project-root", str(project), "--json"
             )
@@ -259,41 +173,6 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(authored.read_bytes(), authored_before)
             refreshed_config = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertNotIn("custom_project_field", refreshed_config)
-            refreshed_graph = json.loads(graph_path.read_text(encoding="utf-8"))
-            policy = json.loads((
-                ROOT / "plugins/software-engineering-team/skill-content/"
-                "obsidian-vault/data/vault-policy.json"
-            ).read_text(encoding="utf-8"))
-            self.assertEqual(refreshed_graph["search"], policy["graph_search"])
-            self.assertEqual(refreshed_graph["scale"], 2)
-            self.assertNotEqual(
-                refreshed_graph["colorGroups"][0]["color"]["rgb"], 7
-            )
-            refreshed_types = json.loads(types_path.read_text(encoding="utf-8"))
-            self.assertEqual(refreshed_types["types"]["owner_role"], "text")
-            self.assertEqual(refreshed_types["types"]["consumer_property"], "text")
-            self.assertTrue(
-                set(policy["retired_managed_properties"]).isdisjoint(
-                    refreshed_types["types"]
-                )
-            )
-            refreshed_app = json.loads(app_path.read_text(encoding="utf-8"))
-            self.assertTrue(refreshed_app["alwaysUpdateLinks"])
-            self.assertFalse(refreshed_app["spellcheck"])
-            self.assertEqual(
-                json.loads(community_path.read_text(encoding="utf-8")),
-                policy["community_plugins"],
-            )
-            packaged_main = (
-                ROOT / "plugins/software-engineering-team/templates/vault/.obsidian/"
-                "plugins/obsidian-front-matter-title-plugin/main.js"
-            )
-            self.assertEqual(plugin_main.read_bytes(), packaged_main.read_bytes())
-            self.assertFalse(plugin_orphan.exists())
-            self.assertEqual(
-                unrelated_plugin.read_text(encoding="utf-8"), "consumer plugin\n"
-            )
-
             checked = self.run_script(
                 SETUP, "check", "--project-root", str(project), "--json"
             )
@@ -440,43 +319,32 @@ class SetupProjectTests(unittest.TestCase):
             config_path.write_text(
                 json.dumps(config, indent=4) + "\n", encoding="utf-8"
             )
-            graph_path = (
-                project / "workspace/docs/.obsidian/graph.json"
-            ).resolve()
-            graph = json.loads(graph_path.read_text(encoding="utf-8"))
-            graph["search"] = "stale-before-failure"
-            graph_path.write_text(json.dumps(graph, indent=4) + "\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "-f",
-                 "workspace/docs/.obsidian/community-plugins.json"],
-                cwd=project, check=True,
-            )
             config_before = config_path.read_bytes()
-            graph_before = graph_path.read_bytes()
-
-            failed = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
+            args = argparse.Namespace(
+                project_root=str(project), workspace="workspace", origin=None,
+                scale="small", output_language="English",
+                terminology_language="English", command="apply", json=True,
             )
-            self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
-            result = json.loads(failed.stdout)
+            plan = setup_module.build_plan(args)
+            with mock.patch.object(
+                setup_module.setup_check, "closing",
+                return_value=["forced closing failure"],
+            ):
+                code, result = setup_module.apply_plan(args, plan)
+            self.assertEqual(code, 1)
             self.assertTrue(result["rolled_back"])
-            self.assertTrue(any(
-                "plugin files are tracked" in finding
-                for finding in result["findings"]
-            ))
             self.assertEqual(config_path.read_bytes(), config_before)
-            self.assertEqual(graph_path.read_bytes(), graph_before)
 
     @integration
     def test_rollback_preserves_concurrent_authored_markdown(self):
         with self.applied_project() as project:
-            graph_path = project / "workspace/docs/.obsidian/graph.json"
-            graph = json.loads(graph_path.read_text(encoding="utf-8"))
-            graph["search"] = "pre-refresh-drift"
-            graph_path.write_text(
-                json.dumps(graph, indent=2) + "\n", encoding="utf-8"
+            config_path = (project / "workspace/config.json").resolve()
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["custom_project_field"] = "pre-refresh-drift"
+            config_path.write_text(
+                json.dumps(config, indent=2) + "\n", encoding="utf-8"
             )
-            graph_before = graph_path.read_bytes()
+            config_before = config_path.read_bytes()
             authored = project / "workspace/docs/project-notes/concurrent.md"
 
             args = argparse.Namespace(
@@ -500,7 +368,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertTrue(result["rolled_back"])
             self.assertEqual(result["rollback_conflicts"], [])
-            self.assertEqual(graph_path.read_bytes(), graph_before)
+            self.assertEqual(config_path.read_bytes(), config_before)
             self.assertEqual(
                 authored.read_text(encoding="utf-8"),
                 "# Concurrent user-authored note\n",
@@ -509,35 +377,35 @@ class SetupProjectTests(unittest.TestCase):
     @integration
     def test_rollback_preserves_concurrent_edit_to_unchanged_managed_note(self):
         with self.applied_project() as project:
-            graph_path = project / "workspace/docs/.obsidian/graph.json"
-            graph = json.loads(graph_path.read_text(encoding="utf-8"))
-            graph["search"] = "pre-refresh-drift"
-            graph_path.write_text(
-                json.dumps(graph, indent=2) + "\n", encoding="utf-8"
+            config_path = (project / "workspace/config.json").resolve()
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["custom_project_field"] = "pre-refresh-drift"
+            config_path.write_text(
+                json.dumps(config, indent=2) + "\n", encoding="utf-8"
             )
-            graph_before = graph_path.read_bytes()
+            config_before = config_path.read_bytes()
             home = project / "workspace/docs/home.md"
-            concurrent_home = home.read_text(encoding="utf-8") + (
-                "\nConcurrent project note.\n"
-            )
+            home.parent.mkdir(parents=True, exist_ok=True)
+            home.write_text("# Home\n", encoding="utf-8")
+            concurrent_home = "# Home\n\nConcurrent project note.\n"
             args = argparse.Namespace(
                 project_root=str(project), workspace="workspace", origin=None,
                 scale="small", output_language="English",
                 terminology_language="English", command="apply", json=True,
             )
             plan = setup_module.build_plan(args)
-            original_write = setup_module.RefreshSnapshot.write_bytes
+            original_write = setup_module.RefreshSnapshot.write_text
             edited = False
 
-            def write_then_edit(snapshot, path, content, mode=0o644):
+            def write_then_edit(snapshot, path, content):
                 nonlocal edited
-                original_write(snapshot, path, content, mode)
+                original_write(snapshot, path, content)
                 if not edited:
                     home.write_text(concurrent_home, encoding="utf-8")
                     edited = True
 
             with mock.patch.object(
-                setup_module.RefreshSnapshot, "write_bytes",
+                setup_module.RefreshSnapshot, "write_text",
                 new=write_then_edit,
             ), mock.patch.object(
                 setup_module.setup_check, "closing",
@@ -548,18 +416,16 @@ class SetupProjectTests(unittest.TestCase):
             self.assertTrue(result["rolled_back"])
             self.assertEqual(result["rollback_conflicts"], [])
             self.assertEqual(home.read_text(encoding="utf-8"), concurrent_home)
-            self.assertEqual(graph_path.read_bytes(), graph_before)
+            self.assertEqual(config_path.read_bytes(), config_before)
 
     @integration
     def test_rollback_reports_concurrent_edit_to_written_target(self):
         with self.applied_project() as project:
-            graph_path = (
-                project / "workspace/docs/.obsidian/graph.json"
-            ).resolve()
-            graph = json.loads(graph_path.read_text(encoding="utf-8"))
-            graph["search"] = "pre-refresh-drift"
-            graph_path.write_text(
-                json.dumps(graph, indent=2) + "\n", encoding="utf-8"
+            config_path = (project / "workspace/config.json").resolve()
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["custom_project_field"] = "pre-refresh-drift"
+            config_path.write_text(
+                json.dumps(config, indent=2) + "\n", encoding="utf-8"
             )
             args = argparse.Namespace(
                 project_root=str(project), workspace="workspace", origin=None,
@@ -567,11 +433,11 @@ class SetupProjectTests(unittest.TestCase):
                 terminology_language="English", command="apply", json=True,
             )
             plan = setup_module.build_plan(args)
-            original_write = setup_module.RefreshSnapshot.write_bytes
+            original_write = setup_module.RefreshSnapshot.write_text
 
-            def write_then_conflict(snapshot, path, content, mode=0o644):
-                original_write(snapshot, path, content, mode)
-                if path == graph_path:
+            def write_then_conflict(snapshot, path, content):
+                original_write(snapshot, path, content)
+                if path == config_path:
                     concurrent = json.loads(path.read_text(encoding="utf-8"))
                     concurrent["consumer_zoom"] = 1.25
                     path.write_text(
@@ -580,7 +446,7 @@ class SetupProjectTests(unittest.TestCase):
                     )
 
             with mock.patch.object(
-                setup_module.RefreshSnapshot, "write_bytes",
+                setup_module.RefreshSnapshot, "write_text",
                 new=write_then_conflict,
             ), mock.patch.object(
                 setup_module.setup_check, "closing",
@@ -589,10 +455,10 @@ class SetupProjectTests(unittest.TestCase):
                 code, result = setup_module.apply_plan(args, plan)
             self.assertEqual(code, 1)
             self.assertTrue(result["rolled_back"])
-            relative = "workspace/docs/.obsidian/graph.json"
+            relative = "workspace/config.json"
             self.assertIn(relative, result["rollback_conflicts"])
             self.assertEqual(
-                json.loads(graph_path.read_text(encoding="utf-8"))[
+                json.loads(config_path.read_text(encoding="utf-8"))[
                     "consumer_zoom"
                 ],
                 1.25,
@@ -601,13 +467,11 @@ class SetupProjectTests(unittest.TestCase):
     @integration
     def test_pre_replace_recheck_preserves_racing_target_edit(self):
         with self.applied_project() as project:
-            graph_path = (
-                project / "workspace/docs/.obsidian/graph.json"
-            ).resolve()
-            graph = json.loads(graph_path.read_text(encoding="utf-8"))
-            graph["search"] = "pre-refresh-drift"
-            graph_path.write_text(
-                json.dumps(graph, indent=2) + "\n", encoding="utf-8"
+            config_path = (project / "workspace/config.json").resolve()
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config["custom_project_field"] = "pre-refresh-drift"
+            config_path.write_text(
+                json.dumps(config, indent=2) + "\n", encoding="utf-8"
             )
             args = argparse.Namespace(
                 project_root=str(project), workspace="workspace", origin=None,
@@ -615,13 +479,12 @@ class SetupProjectTests(unittest.TestCase):
                 terminology_language="English", command="apply", json=True,
             )
             plan = setup_module.build_plan(args)
-            original_atomic = setup_module.atomic_bytes
+            original_atomic = setup_module.atomic_text
             injected = False
 
-            def atomic_with_race(path, content, mode=0o644,
-                                 before_replace=None):
+            def atomic_with_race(path, content, before_replace=None):
                 nonlocal injected
-                if path == graph_path and not injected:
+                if path == config_path and not injected:
                     concurrent = json.loads(path.read_text(encoding="utf-8"))
                     concurrent["consumer_zoom"] = 1.5
                     path.write_text(
@@ -630,22 +493,22 @@ class SetupProjectTests(unittest.TestCase):
                     )
                     injected = True
                 return original_atomic(
-                    path, content, mode, before_replace=before_replace
+                    path, content, before_replace=before_replace
                 )
 
             with mock.patch.object(
-                setup_module, "atomic_bytes", new=atomic_with_race
+                setup_module, "atomic_text", new=atomic_with_race
             ):
                 code, result = setup_module.apply_plan(args, plan)
             self.assertEqual(code, 1)
             self.assertIn("concurrent edit changed refresh target",
                           result["error"])
             self.assertIn(
-                "workspace/docs/.obsidian/graph.json",
+                "workspace/config.json",
                 result["rollback_conflicts"],
             )
             self.assertEqual(
-                json.loads(graph_path.read_text(encoding="utf-8"))[
+                json.loads(config_path.read_text(encoding="utf-8"))[
                     "consumer_zoom"
                 ],
                 1.5,
@@ -709,17 +572,14 @@ class SetupProjectTests(unittest.TestCase):
 
     @integration
     def test_setup_check_names_tracked_local_files_outside_ascii_exactly(self):
-        """The tracked local and plugin file findings name each file from a
+        """The tracked local file findings name each file from a
         NUL-separated listing; without -z Git quotes a name outside ASCII
         (#276)."""
         with self.applied_project() as project:
             local = ".claude/ayarlar-şğı.json"
-            plugin = ("workspace/docs/.obsidian/plugins/"
-                      "obsidian-front-matter-title-plugin/çeviri-ğı.json")
-            for relative in (local, plugin):
-                (project / relative).parent.mkdir(parents=True, exist_ok=True)
-                (project / relative).write_text("{}\n", encoding="utf-8")
-            subprocess.run(["git", "add", "-f", "--", local, plugin],
+            (project / local).parent.mkdir(parents=True, exist_ok=True)
+            (project / local).write_text("{}\n", encoding="utf-8")
+            subprocess.run(["git", "add", "-f", "--", local],
                            cwd=project, check=True)
             checked = self.run_script(
                 CHECK, "check", "--project-root", str(project), "--json"
@@ -729,107 +589,6 @@ class SetupProjectTests(unittest.TestCase):
             self.assertIn(
                 "local runtime or projection files are force-added: " + local,
                 findings)
-            self.assertIn(
-                "package-projected local Obsidian plugin files are tracked: "
-                + plugin, findings)
-
-    @integration
-    def test_local_obsidian_plugin_projection_is_recreated_but_not_clone_truth(self):
-        with self.applied_project() as project:
-            obsidian = project / "workspace/docs/.obsidian"
-            (obsidian / "community-plugins.json").unlink()
-            shutil.rmtree(obsidian / "plugins")
-
-            portable = project / ".github/agentrof/vault-gate.pyz"
-            clone_gate = subprocess.run([
-                sys.executable, str(portable), "check", "--project-root",
-                str(project), "--json",
-            ], capture_output=True, text=True, check=False)
-            self.assertEqual(
-                clone_gate.returncode, 0, clone_gate.stdout + clone_gate.stderr
-            )
-            local_check = self.run_script(
-                SETUP, "check", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(local_check.returncode, 1)
-            self.assertIn("package-projected local", local_check.stdout)
-            repaired = self.run_script(
-                SETUP, "apply", "--project-root", str(project), "--json"
-            )
-            self.assertEqual(repaired.returncode, 0, repaired.stdout + repaired.stderr)
-            self.assertTrue((obsidian / "community-plugins.json").is_file())
-            self.assertTrue((
-                obsidian / "plugins/obsidian-front-matter-title-plugin/main.js"
-            ).is_file())
-
-    def test_package_projection_converges_both_file_directory_shape_changes(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            fixture = Path(temporary)
-            vault = fixture / "vault"
-            payload = fixture / "payload"
-            source_plugin = payload / "plugins/fixture-plugin"
-            source_plugin.mkdir(parents=True)
-            (source_plugin / "file-now.js").write_text(
-                "package file\n", encoding="utf-8"
-            )
-            (source_plugin / "directory-now").mkdir()
-            (source_plugin / "directory-now/asset.js").write_text(
-                "package nested asset\n", encoding="utf-8"
-            )
-
-            target_plugin = (
-                vault / ".obsidian/plugins/fixture-plugin"
-            )
-            (target_plugin / "file-now.js").mkdir(parents=True)
-            (target_plugin / "file-now.js/unshipped.js").write_text(
-                "old directory shape\n", encoding="utf-8"
-            )
-            (target_plugin / "directory-now").write_text(
-                "old file shape\n", encoding="utf-8"
-            )
-            unrelated = vault / ".obsidian/plugins/user-plugin/keep.js"
-            unrelated.parent.mkdir(parents=True)
-            unrelated.write_text("consumer plugin\n", encoding="utf-8")
-            policy = {"community_plugins": ["fixture-plugin"]}
-
-            planned_deletions = vault_payload.payload_reconcile_deletions(
-                vault, policy, payload
-            )
-            self.assertIn(target_plugin / "file-now.js", planned_deletions)
-            self.assertIn(target_plugin / "directory-now", planned_deletions)
-            planned_updates = vault_payload.payload_reconcile_updates(
-                vault, policy, payload
-            )
-            self.assertIn(target_plugin / "file-now.js", planned_updates)
-
-            reconciled = vault_payload.payload_reconcile(vault, policy, payload)
-            self.assertGreater(reconciled, 0)
-            copied = vault_payload.materialize_payload(vault, policy, payload)
-            self.assertGreater(copied, 0)
-            self.assertEqual(
-                vault_payload.payload_reconcile(vault, policy, payload), 0
-            )
-            self.assertEqual(
-                (target_plugin / "file-now.js").read_text(encoding="utf-8"),
-                "package file\n",
-            )
-            self.assertEqual(
-                (target_plugin / "directory-now/asset.js").read_text(
-                    encoding="utf-8"
-                ),
-                "package nested asset\n",
-            )
-            self.assertEqual(
-                unrelated.read_text(encoding="utf-8"), "consumer plugin\n"
-            )
-            self.assertEqual(
-                vault_payload.payload_reconcile_deletions(vault, policy, payload),
-                [],
-            )
-            self.assertEqual(
-                vault_payload.payload_reconcile_updates(vault, policy, payload),
-                {},
-            )
 
     @integration
     def test_runtime_symlink_is_rejected_without_following_it(self):
@@ -1017,6 +776,9 @@ class SetupProjectTests(unittest.TestCase):
             attributes = project / ".gitattributes"
             local_attributes = project / ".git" / "info" / "attributes"
             own_lines = "* text=auto\n"
+            for relative in ("workspace/docs/home.md", "workspace/docs/data.json"):
+                (project / relative).parent.mkdir(parents=True, exist_ok=True)
+                (project / relative).write_text("x\n", encoding="utf-8")
             cases = (
                 ("missing", own_lines, "",
                  "managed .gitattributes marker is missing or duplicated", True),
@@ -1025,7 +787,7 @@ class SetupProjectTests(unittest.TestCase):
                 ("later line", ATTRIBUTES_BLOCK + "*.md text\n", "",
                  "workspace/docs/home.md (text: set)", False),
                 ("local attributes", ATTRIBUTES_BLOCK, "*.json text\n",
-                 "workspace/docs/.obsidian/app.json (text: set)", False),
+                 "workspace/docs/data.json (text: set)", False),
             )
             for name, text, local, expected, drift in cases:
                 with self.subTest(name):
@@ -1108,18 +870,14 @@ class SetupProjectTests(unittest.TestCase):
                 self.assertEqual(
                     applied.returncode, 0, applied.stdout + applied.stderr
                 )
-                reports = sorted(
-                    (project / "workspace/docs/maps/_generated").glob("*.md")
-                )
-                self.assertTrue(reports)
                 ignore = project / ".gitignore"
                 config = project / "workspace/config.json"
-                for path in (ignore, project / ".gitattributes", config, reports[0]):
+                for path in (ignore, project / ".gitattributes", config):
                     with self.subTest(created=path.name):
                         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
 
                 ignore.write_text(ignore.read_text(encoding="utf-8").replace(
-                    "workspace/docs/.trash/", "workspace/docs/.stale-trash/",
+                    "workspace/junit-*.xml", "workspace/stale-*.xml",
                 ), encoding="utf-8")
                 value = json.loads(config.read_text(encoding="utf-8"))
                 value["custom_project_field"] = True
@@ -1151,10 +909,13 @@ class SetupProjectTests(unittest.TestCase):
         previous = os.umask(0o022)
         try:
             with self.applied_project() as project:
+                for name in ("a.md", "b.md"):
+                    (project / "workspace/docs").mkdir(parents=True, exist_ok=True)
+                    (project / "workspace/docs" / name).write_text("x\n", encoding="utf-8")
                 for command in (["add", "-A"], ["-c", "user.email=test@example.com", "-c", "user.name=Test",
                                                 "commit", "-qm", "setup"]):
                     subprocess.run(["git", "-C", str(project), *command], check=True)
-                reports = sorted((project / "workspace/docs/maps/_generated").glob("*.md"))
+                reports = sorted((project / "workspace/docs").glob("*.md"))
                 owner_only = [project / "workspace/config.json", project / ".gitignore", reports[0]]
                 narrowed = reports[1]
                 for path in owner_only:

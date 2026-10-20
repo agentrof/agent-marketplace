@@ -23,50 +23,6 @@
         "threshold": "No escaped defect a declared proof command covers, with every shared quality guard holding and the owner's approval."
       }
     },
-    "review_scope": {
-      "summary": "What a role reads in full for a change: the whole package its step names, or the change's impact closure over the vault's typed relations, with every approved, unchanged note outside it as a hash-bound summary, compiler structural checks before any reader starts and a delta-only confirmation re-review.",
-      "issue": 441,
-      "flows": ["fast-lane"],
-      "values": [
-        {
-          "id": "full",
-          "tradeoffs": "Every writer and reader reads the complete package its step names, whatever the change touched. Today's behaviour and the baseline the closure read is measured against: in one measured project, a one-story Backlog Planning run spent 31 of its first 68 minutes on readers re-reading approved, unchanged notes, and the confirmation of two small fixes took longer than the fixes."
-        },
-        {
-          "id": "impact_closure",
-          "tradeoffs": "impact_closure.py derives the changed notes from the approval stamps and their closure over the typed relations and shared contracts; a role reads the closure in full and every approved, unchanged note outside it only as its hash-bound summary, reads beyond it when unsure and records why, and a writer fixes each reported relation gap through its owning compiler and recomputes the closure. The owning compiler's structural check runs before any reader starts, and a confirmation re-review reads only the fixed lines, the notes the fix touches and the open findings. A first approval, a shared contract or policy change and a graph gap widen the read. Reading scales with the change, while a defect between two unchanged notes with no relation between them is outside every reader's closure until a reader suspects it."
-        }
-      ],
-      "default": "full",
-      "reference_scope": "owning_flows",
-      "metric": "Per review or writer pass: wall clock and input tokens per reader, closure size against package size, beyond-closure reads with their reasons, relation gaps reported and fixed, widenings with their cause and confirmation re-review minutes, and the verdict and findings against a full read of the same frozen inputs; seeded cross-note defects caught.",
-      "promotion": {
-        "unit": "At least 5 reviewed changes across at least 3 flows, each replayed as a frozen full read.",
-        "threshold": "The same verdict and every critical and major finding of the full replay, a median reader wall clock at most 40% of the replay's, every seeded defect inside a closure reported and every reported relation gap fixed through its owning compiler, with every shared quality guard holding and the owner's approval."
-      }
-    },
-    "context_pack": {
-      "summary": "Whether a task starts by reading every flow, skill and reference file its entry binds, or from a derived, hash-bound digest of the rules its role applies at that step, with every source one read away.",
-      "issue": 441,
-      "flows": ["fast-lane"],
-      "values": [
-        {
-          "id": "off",
-          "tradeoffs": "A task reads every flow, skill and reference file its manifest binds before it acts. Today's behaviour and the baseline the digest is measured against: in one measured project, a writer spent most of a 33-minute pass reading the full flow and rule set before writing a story of a few minutes' content."
-        },
-        {
-          "id": "role_digest",
-          "tradeoffs": "A spawned role receives its pack from context_pack.py build instead of the full required reads: the rules that role applies at that step, required sections, field contracts, refusals and the switch instructions in force, each with the sha256 of its source file. It reads a named source in full only when the pack does not cover its case and records that read and why, and a pack whose source hashes no longer match is refused. Most of the fixed reading time goes, while a rule the digest misses is applied only when the role notices the gap."
-        }
-      ],
-      "default": "off",
-      "reference_scope": "owning_flows",
-      "metric": "Per task: minutes and input tokens before the first write or finding, source files read beyond the digest with their reasons, and findings or refusals traced to a rule the digest left out, against tasks of the same entry and role at off.",
-      "promotion": {
-        "unit": "At least 10 tasks across at least 3 entries, writers and readers both.",
-        "threshold": "A median time to first write or finding at most 50% of the off baseline and zero defects traced to a rule the digest left out, with every shared quality guard holding and the owner's approval."
-      }
-    },
     "step_timing": {
       "measurement_only": true,
       "summary": "Whether the coordinator records the start and end of each flow step and role spawn, with its reading, writing, review and waiting phases, in a durable per-run timing record, or records no step timing.",

@@ -25,7 +25,7 @@ deterministic tools measure what exists, never opinion.
   cannot reproduce from the record bounces back as noise.
 - Risk-ordered coverage: authorization paths, data-changing paths and
   cross-entity effects before cosmetic paths.
-- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Does: criterion and rule coverage, test-design gaps, suite execution, live

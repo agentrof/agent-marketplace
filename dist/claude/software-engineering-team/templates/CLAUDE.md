@@ -3,7 +3,7 @@
 # Agent Marketplace project contract
 
 - The project root is the Git checkout and `workspace/` is the only project
-  workspace for this team. A second managed vault is invalid.
+  workspace for this team. A second managed workspace is invalid.
 - Durable truth is kept in tracked project files. Generated indexes are
   reproducible and disposable; no shared database is required.
 - Before mutation, inspect `workspace/config.json`, the project-local
@@ -28,10 +28,8 @@
 
 - `{{workspace}}/config.json`: project declaration, changed only through the
   configure entry.
-- `{{workspace}}/docs/`: the governed project knowledge vault. Open this
-  directory as the vault root. Its maps, generated views, document-type
-  graph policy, citations, and navigation follow the
-  `obsidian-vault` skill and the owning validation commands.
+- `{{workspace}}/docs/`: the project documents. A role reads the sources its
+  task file lists and greps this tree for anything missing.
 - `{{workspace}}/apps/`: application code, one directory per application.
 - `{{workspace}}/docs/operation/`: verification and environment knowledge.
 - `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime

@@ -1,7 +1,7 @@
 # Agent Marketplace project contract
 
 - The project root is the Git checkout and `workspace/` is the only project
-  workspace for this team. A second managed vault is invalid.
+  workspace for this team. A second managed workspace is invalid.
 - Durable truth is kept in tracked project files. Generated indexes are
   reproducible and disposable; no shared database is required.
 - Before mutation, inspect `workspace/config.json`, the project-local

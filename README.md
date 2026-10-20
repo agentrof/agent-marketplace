@@ -9,7 +9,7 @@ branch and one pull request, verified by the project's CI and one reviewer.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 11 | 7 | 11 |
+| 1 | 11 | 6 | 10 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.
@@ -30,8 +30,7 @@ The hooks run `python3` from PATH and need Python 3.14 (macOS: `brew install pyt
 
 Start `software-engineering-team:setup` in the project. The setup entry uses
 `scripts/setup_project.py inspect|apply|check` to converge the workspace,
-tracked vault contract, ignored local Obsidian plugin projection, closed
-configuration, managed ignore and checkout-attribute blocks and portable gate.
+closed configuration and the managed ignore and checkout-attribute blocks.
 Claude Code and Codex use the same canonical workflows and project-local files.
 
 ## Companions
@@ -135,9 +134,8 @@ standalone plugin.
 
 Marketplace package upgrades inspect one deterministic refresh plan, apply it
 with closing-gate rollback, then prove that no operation remains. Authored
-files, unknown project configuration and user-owned Obsidian knobs are
-preserved. Policy-owned keys and package-local plugin files converge before the
-tracked diff is committed. Release Management is deliberately a later scope.
+files and unknown project configuration are preserved; the package-owned
+surfaces converge before the tracked diff is committed. Release Management is deliberately a later scope.
 
 ## Quality
 

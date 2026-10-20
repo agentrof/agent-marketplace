@@ -33,22 +33,11 @@ flow step that names switch `<id>`, the entry reads its value with
 
 Named project input files remain the authority. A manifest never decides applicability or creates an approval.
 
-Every project task automatically receives `project_reading` from the resolver,
-using the selected source files and the entry, role and task mode. No opt-in flag
-is needed. An explicit `--context-plan <project-relative JSON>` may supply a
-validated plan instead. `project_context.py read --plan <task manifest>` accepts
-the complete manifest or the nested plan; `units` and `expand` supply smaller
-units and continuation. A `needs_split` or `needs_resolution` result is incomplete.
-A `needs_scope` result requires source selection by the owning flow. An
-`unavailable` resolver never licenses omitted reading: recover through targeted
-manual search and reads, report the failure, and preserve the original scope.
-
-Agent-initiated and parent-directed manual discovery remain allowed whenever
-context is insufficient or appears wrong. Record extra sources and reasons and
-rebind added evidence before relying on it. The plan guides reading order and
-granularity; every owning-flow review obligation remains. Its units are a
-ranked starting point, never a reading obligation, as the constitution's
-Vault first section states. Skill selection is unchanged. Return `context_findings` to the parent for observed failures and
+Every role reads the sources its task file lists and greps `workspace/docs/`
+for anything missing; manual discovery stays allowed whenever context is
+insufficient or appears wrong. Record extra sources and reasons and rebind
+added evidence before relying on it. Every owning-flow review obligation
+remains. Skill selection is unchanged. Return `context_findings` to the parent for observed failures and
 recurring friction, including impact, recovery, and a fix and verification case
 when known. The parent uses `issue-report` to offer an anonymous report and
 obtains explicit user approval of its exact payload before any GitHub write.
@@ -85,7 +74,6 @@ impact widens the read set instead of assuming a local fix.
 Independent readers return separate results. Wait for every reader to finish
 or confirm cancellation before the owning role writes canonical sources.
 
-The manifest is stdout-only and disposable. Its resolver reuses the project-local
-disposable index, with an in-memory fallback on read-only filesystems. It creates
-no project document or durable truth. Issue reporting remains external and stateless;
+The manifest is stdout-only and disposable. It creates no project document or
+durable truth. Issue reporting remains external and stateless;
 it uses conversation evidence and never creates a project task manifest.

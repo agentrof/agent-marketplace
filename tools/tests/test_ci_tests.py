@@ -799,8 +799,7 @@ class CITestPlannerTests(unittest.TestCase):
     def test_acceleration_contracts_have_impact_and_native_windows_coverage(self):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _ = ci_tests.inventory(ci_tests.ROOT)
-        modules = {"tools.tests.test_task_inputs", "tools.tests.test_ci_local",
-                   "tools.tests.test_vault_hook_git_sync"}
+        modules = {"tools.tests.test_task_inputs", "tools.tests.test_ci_local"}
         native = ci_tests.group_ids(["windows"], policy, ids)
         # Each keeps its Windows-specific tests on Windows; Linux runs all of them.
         self.assertEqual({ci_tests.module_of(test_id) for test_id in native} & modules, modules)

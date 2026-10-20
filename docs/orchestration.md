@@ -34,14 +34,8 @@ the HEAD commit and a clean-tree flag, and `open-pr` refuses before pushing
 unless that record is green for the clean HEAD; the steps are in
 `deliver/references/switch-pr_proof-local_record.md`.
 
-What a reviewer reads in full for a change is process switch `review_scope`.
-At `full`, the default, it reads the complete change its step names. At
-`impact_closure`, `task_lane.py lint` runs before any reviewer starts, the
-reviewer reads the pull request diff and the change's impact closure in full
-and each approved, unchanged note outside it as its hash-bound summary, and
-reads beyond it when unsure and records why, as
-`deliver/references/switch-review_scope-impact_closure.md` defines.
-
+Every role starts from the sources its task file lists and greps
+`workspace/docs/` for gaps, per the constitution's section 5.
 Whether flow steps are timed is process switch `step_timing`. At `off`, the
 default, nothing is recorded. At `recorded`, the coordinator wraps each step
 and role spawn in `step_timing.py start` and `end` with its phase, reports an
@@ -108,12 +102,7 @@ declares, since a host can skip a declared hook it has not enabled or
 trusted. The guard
 stops an agent that runs the packaged script, not a process that writes the
 runtime files with the user's filesystem authority: the hooks are
-workflow-integrity controls, not an operating-system sandbox. `vault_hook.py`
-narrows the gap. It denies a tool write into the autopilot runtime directory
-and puts back what a shell command adds to the grant or the arming record,
-while a command may still end the grant or delete the files; a process outside
-the host's tool calls, or a command that overlaps a run of `autopilot.py`,
-escapes or undoes that check.
+workflow-integrity controls, not an operating-system sandbox.
 
 Autopilot is an entry, not a process switch. A switch is a project rule; a
 grant is personal and temporary: it turns on at night and off in the morning

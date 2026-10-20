@@ -30,8 +30,7 @@ GOVERNED = (
 )
 KEPT = (
     "task_lane", "process_policy", "task_inputs", "model_class", "session_cost",
-    "step_timing", "context_pack", "impact_closure", "vault_check", "vault_query",
-    "vault_index", "vault_gate", "vault_hook", "autopilot", "setup_project",
+    "step_timing", "vault_markdown", "reader_manifest", "autopilot", "setup_project",
     "setup_check", "hook_launcher",
 )
 # Kept modules that still import a governed one, each with its reason.

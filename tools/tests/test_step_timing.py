@@ -163,7 +163,7 @@ class StepTimingTests(unittest.TestCase):
         self.assertEqual(found["by_phase"], {"review": 540.0, "waiting": 180.0, "writing": 240.0})
         self.assertEqual(found["largest_phase"], "review")
         self.assertEqual(found["largest_contributor"]["span"], reader)
-        self.assertIn("review_scope impact_closure", found["lever"])
+        self.assertEqual(found["lever"], step_timing.LEVERS["review"])
         events = [json.loads(line) for line in self.run_file().read_text().splitlines()]
         self.assertEqual(events[-1]["event"], "overrun")
         self.assertEqual(events[-1]["span"], step)

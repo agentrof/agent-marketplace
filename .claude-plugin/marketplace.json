@@ -12,7 +12,7 @@
     {
       "name": "software-engineering-team",
       "source": "./dist/claude/software-engineering-team",
-      "description": "Software Engineering Team for approved analysis, solution and experience design, and a delivery-ready Obsidian backlog.",
+      "description": "Software Engineering Team for approved analysis, solution and experience design, and a delivery-ready backlog.",
       "version": "2026.10.6",
       "license": "Apache-2.0"
     }

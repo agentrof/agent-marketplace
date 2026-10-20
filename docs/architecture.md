@@ -13,9 +13,8 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
 6. The project-local runtime is
    `<git-root>/.agentrof/agent-marketplace/.runtime/` and contains only ignored,
    disposable scratch and cache files. Deleting it cannot change project truth.
-7. The vault root is `workspace/docs/`. Its policy, graph colors, maps and
-   typed front matter are project-local and versioned with the project.
-   No second workspace path is valid.
+7. The project documents live in `workspace/docs/`, versioned with the
+   project. No second workspace path is valid.
 8. File names are stable slugs; membership is path-derived.
 9. Authored titles are direct, natural phrases in the configured output
    language; IDs stay in aliases, while stable type keys, graph queries and
@@ -106,5 +105,5 @@ Repository issue and release operations are documented separately in
 - `plugins/software-engineering-team/`: canonical workflows, agents, skills,
   compilers and templates.
 - `platforms/`: registered host adapters, native manifests, and overlays.
-- `workspace/docs/`: consuming project's Obsidian vault and task records.
+- `workspace/docs/`: consuming project's documents and task records.
 - `tools/`: build, validation, release and scaffolding contracts.

@@ -1,23 +1,13 @@
 # Fast Lane Flow
 
-Spawn template: paste `{{constitution}}` into every role prompt. Load the
-`obsidian-vault` skill before writing the task; its vault law is
-authoritative.
+Spawn template: paste `{{constitution}}` into every role prompt.
 
-Vault first, per constitution section 5: every role starts from the default `project_reading` plan.
-Batch-read its units, using the frozen context reader for frozen candidates. When context is insufficient, wrong or unavailable, use manual search, reads and relationship discovery
-on the role's initiative or parent direction; record sources and reasons, rebind evidence, preserve gates and return `context_findings` to the parent for user-approved reporting.
-For gaps, use `vault_query.py`, machine indexes and generated views, typed frontmatter, relation blocks and wikilinks, then maps and targeted search.
-Fallback navigation with a shell can use `home.md`, `maps/_generated/relation-status.md`,
-`maps/_generated/cross-subtree-matrix.md` and
-`maps/_generated/stale-relations.md` and the documents the task's
-`## Sources` names. Switch `context_pack`:
-at `role_digest`, a spawned role receives its pack from `context_pack.py
-build --entry <entry> --role <role> --mode <mode> --project-root <root>`
-instead of the full required reads; it reads a named source in full only
-when the pack does not cover a case, and records that read and why, as
-`skill-content/challenge-review/references/switch-context_pack-role_digest.md`
-defines. Switch `step_timing`: at `recorded`, the coordinator runs
+Sources first, per constitution section 5: every role reads the sources the
+task file lists and greps `workspace/docs/` for anything missing; it records
+extra sources and reasons and returns `context_findings` to the parent for
+user-approved reporting.
+
+Switch `step_timing`: at `recorded`, the coordinator runs
 `step_timing.py start --run <run> --step <step> [--budget <id>]` before
 each step and `step_timing.py end --run <run> --span <span>` after it,
 and records each role spawn with `--kind spawn --parent <step span>
@@ -33,13 +23,6 @@ well under it, and only an exceeded maximum is reported, never blocking,
 as
 `skill-content/deliver/references/switch-step_budgets-enforced.md`
 defines.
-Switch `review_scope`: at `impact_closure`, `task_lane.py lint` runs
-before any reviewer is spawned, and the reviewer reads the pull request diff and the change's impact closure, each approved, unchanged note
-outside it only as its hash-bound summary, and reads beyond it when unsure and
-records why, as
-`skill-content/deliver/references/switch-review_scope-impact_closure.md`
-defines.
-
 Switch `process_profile`: the governed Delivery path is removed, so this flow
 runs at either value. At `fast_lane`, follow
 `skill-content/deliver/references/switch-process_profile-fast_lane.md` and
@@ -72,11 +55,8 @@ against its own.
 Knowledge task, the short path: `start --knowledge --size s|m|l`. The request
 is the approval: no criteria, no `approve`, no reviewer. The main session
 edits the documents itself and spawns the owning role only at size `l`;
-after a link change it runs `vault_check.py render-relations`, then the
-vault gate with `--changed-from origin/<base>`, `open-pr` and `merge`.
-Approval stamps are not re-verified at `fast_lane`: the file on the target
-branch is in force, and the gate checks schema, links and structure only for
-the trees the change touched.
+then it runs `open-pr` and `merge`. Approval stamps are not re-verified at
+`fast_lane`: the file on the target branch is in force.
 
 The task's `rigor` sets the verification:
 

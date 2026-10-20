@@ -93,19 +93,6 @@
       },
       "next_transition": "Complete the setup preflight and selected scaffold checks before presenting the configured project."
     },
-    "organize_docs": {
-      "flows": [],
-      "roles": [
-        "business-analyst"
-      ],
-      "scope_kind": "vault",
-      "project_state": true,
-      "write_scope": {
-        "resolver": "unresolved",
-        "roles": []
-      },
-      "next_transition": "The vault checker must validate each authorized write and the final selected vault structure."
-    },
     "issue_report": {
       "flows": [],
       "roles": [],

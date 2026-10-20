@@ -37,7 +37,7 @@ Use the owning compiler's exact scope and source bindings.
 4. For a language change, run `project_config.py set --dry-run --json` and
    present only the config delta. Existing authored titles are not translated
    or rewritten by a config change.
-5. On approval, run the owning writer, `project_config.py check` and the
-   scoped vault gate. On rejection, write nothing.
+5. On approval, run the owning writer and `project_config.py check`. On
+   rejection, write nothing.
 6. Confirm the exact Git diff. Configuration changes update only their
    declared project-local surfaces.

@@ -125,28 +125,7 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         for path, content in user_files.items():
             path.write_text(content, encoding="utf-8")
 
-        app_path = project / "workspace/docs/.obsidian/app.json"
-        app = json.loads(app_path.read_text(encoding="utf-8"))
-        app["consumer_refresh_knob"] = "preserve"
-        app_path.write_text(json.dumps(app, indent=2) + "\n", encoding="utf-8")
-
-        appearance_path = project / "workspace/docs/.obsidian/appearance.json"
-        appearance = json.loads(appearance_path.read_text(encoding="utf-8"))
-        appearance["accentColor"] = "#ABCDEF"
-        appearance["enabledCssSnippets"] = ["project-custom"]
-        appearance_path.write_text(
-            json.dumps(appearance, indent=2) + "\n", encoding="utf-8"
-        )
-
-        unrelated = (
-            project / "workspace/docs/.obsidian/plugins/project-plugin/keep.js"
-        )
-        unrelated.parent.mkdir(parents=True)
-        unrelated.write_text("project-owned plugin\n", encoding="utf-8")
-        protected = [
-            config_path, authored, app_path, appearance_path, unrelated,
-            *user_files,
-        ]
+        protected = [config_path, authored, *user_files]
         return {path: path.read_bytes() for path in protected}
 
     def refresh_host(
@@ -161,12 +140,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
         project = state / f"{host}-project"
         self.initialize_project(package, project, host)
 
-        projected = (
-            project / "workspace/docs/.obsidian/plugins/"
-            "obsidian-front-matter-title-plugin"
-        )
-        self.assertTrue((projected / "LICENSE").is_dir())
-        self.assertTrue((projected / "retired-after-n.js").is_file())
         self.assertTrue((project / RETIRED_AGENT[host]).is_file())
         protected = self.customize_n_project(project)
 
@@ -185,31 +158,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             and "consumer_refresh_data" in item.get("removed_fields", [])
             for item in operations
         ))
-        self.assertTrue(any(
-            item["action"] == "delete"
-            and item["path"].endswith(
-                "/obsidian-front-matter-title-plugin/retired-after-n.js"
-            )
-            for item in operations
-        ))
-        self.assertTrue(any(
-            item["action"] == "update"
-            and item["path"].endswith("/.obsidian/snippets/brand.css")
-            for item in operations
-        ))
-        self.assertTrue(any(
-            item["action"] == "update"
-            and item["path"].endswith("/.obsidian/appearance.json")
-            for item in operations
-        ))
-        self.assertTrue(any(
-            item["action"] == "delete"
-            and item["path"].endswith(
-                "/obsidian-front-matter-title-plugin/LICENSE"
-            )
-            for item in operations
-        ))
-
         applied = self.run_json(
             setup,
             "apply",
@@ -251,27 +199,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
             "terminology_language",
         })
         self.assertNotIn("consumer_refresh_data", config)
-        self.assertTrue((projected / "LICENSE").is_file())
-        self.assertEqual(
-            (projected / "LICENSE").read_bytes(),
-            (
-                package / "templates/vault/.obsidian/plugins/"
-                "obsidian-front-matter-title-plugin/LICENSE"
-            ).read_bytes(),
-        )
-        self.assertFalse((projected / "retired-after-n.js").exists())
-        brand = project / "workspace/docs/.obsidian/snippets/brand.css"
-        self.assertEqual(
-            brand.read_bytes(),
-            (package / "templates/vault/.obsidian/snippets/brand.css").read_bytes(),
-        )
-        appearance = json.loads((
-            project / "workspace/docs/.obsidian/appearance.json"
-        ).read_text(encoding="utf-8"))
-        self.assertEqual(appearance["accentColor"], "#ABCDEF")
-        self.assertEqual(
-            appearance["enabledCssSnippets"], ["project-custom", "brand"]
-        )
         for instructions in (
             project / "AGENTS.override.md", project / "CLAUDE.md",
         ):
@@ -279,26 +206,9 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
                 "N-only managed project instruction",
                 instructions.read_text(encoding="utf-8"),
             )
-        self.assertEqual(
-            (
-                project
-                / "workspace/docs/.obsidian/plugins/project-plugin/keep.js"
-            ).read_text(encoding="utf-8"),
-            "project-owned plugin\n",
-        )
         self.assertFalse((project / RETIRED_AGENT[host]).exists())
         for path, expected in protected.items():
             if path.name == "config.json":
-                continue
-            if path.name == "app.json":
-                self.assertEqual(
-                    json.loads(path.read_text(encoding="utf-8"))[
-                        "consumer_refresh_knob"
-                    ],
-                    "preserve",
-                )
-                continue
-            if path.name == "appearance.json":
                 continue
             self.assertEqual(path.read_bytes(), expected, path)
 

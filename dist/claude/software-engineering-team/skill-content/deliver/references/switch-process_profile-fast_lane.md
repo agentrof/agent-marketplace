@@ -32,9 +32,8 @@ a story (source_story, covers) or stand alone.
   git-ignored `.agentrof/retrospective/board.md`; nothing commits it, so
   parallel tasks never conflict on it.
 - A change to a knowledge document is a knowledge task (`/deliver`, `start
-  --knowledge`); the vault gate checks schema, links and structure of the
-  touched trees, in parallel.
-- Vault, setup, configure, retrospective and autopilot entries are unchanged.
+  --knowledge`).
+- Setup, configure, retrospective and autopilot entries are unchanged.
 
 ## Contracts
 
@@ -44,7 +43,7 @@ a story (source_story, covers) or stand alone.
 ## Task path
 
 - A task lives under `workspace/docs/backlog/tasks/`, type `task`,
-  checked by `scripts/task_lane.py lint` and the vault law only.
+  checked by `scripts/task_lane.py lint` only.
 - A task is one branch and one pull request to the target branch.
   `task_lane.py overlap` warns about open pull requests that touch the same
   files and never refuses.

@@ -95,10 +95,9 @@ TARGET_MINUTES = TARGETS["build"]["average"]
 ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
 PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
 # The project's local proof commands; {base} is the target branch. Without the file
-# the proof runs the test command the flow names and the vault gate setup installs.
+# the proof runs the test command the flow names.
 PROJECT_PROOF = Path(".agentrof") / "local-proof.json"
-PROOF_COMMANDS = ("make test",
-                  "python3 .github/agentrof/vault-gate.pyz check --project-root . --changed-from origin/{base} --json")
+PROOF_COMMANDS = ("make test",)
 PROOFS = Path(".agentrof") / "agent-marketplace" / ".runtime" / "proof"
 ROLE_MODES = ("require", "suggest", "off")
 ROLE_STEPS = ("pre_check", "author")
@@ -147,7 +146,7 @@ QUALITY_KEPT = ("critical", "non_critical", "filed", "ci_first_pass", "red_runs"
 FIRST_PASS_FLOOR = 0.8
 CRITICAL_CEILING = 0.2
 QUALITY_LEVERS = {
-    "ci": "Run the CI's test command for the touched suites and the vault gate before open-pr,"
+    "ci": "Run the CI's test command for the touched suites before open-pr,"
           " and reproduce a red check locally before pushing again.",
     "escaped": "Turn each escaped defect into a criterion and a named test on the fixing task, and"
                " have the reviewer check every criterion against a test in the diff.",
@@ -179,7 +178,7 @@ LEVERS = {
     "write": "Split tasks whose write step runs long, or run backend and frontend"
              " writers side by side on disjoint files.",
     "ci": "Run only the checks the diff touches (skip unit suites for document-only changes,"
-          " scope the vault gate to the changed trees) and cache dependencies in CI.",
+          " scope checks to the changed trees) and cache dependencies in CI.",
     "review": "Give the reviewer the diff and the task only, single pass, with a"
               " time budget; file non-critical findings as issues.",
     "merge_wait": "Remove the slower of CI and review from the merge path, or drop a"

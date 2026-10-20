@@ -40,15 +40,6 @@
         ]
       },
       {
-        "matcher": "Write|Edit|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/vault_hook.py pre"
-          }
-        ]
-      },
-      {
         "matcher": "AskUserQuestion",
         "hooks": [
           {
@@ -61,15 +52,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/vault_hook.py post"
-          }
-        ]
-      },
-      {
         "matcher": "Agent",
         "hooks": [
           {
@@ -81,15 +63,6 @@
       }
     ],
     "PostToolUseFailure": [
-      {
-        "matcher": "Write|Edit|Bash|PowerShell",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/vault_hook.py post"
-          }
-        ]
-      },
       {
         "matcher": "Agent",
         "hooks": [

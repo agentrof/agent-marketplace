@@ -34,7 +34,7 @@ questioning, and refuses to let ambiguity pass silently.
 - Challenge output is proposal, never fact: an expert answer enters the
   analysis as an assumption or question awaiting the owner's ruling.
 - Name the missing evidence instead of inventing facts.
-- Vault first, per constitution section 5: start from `project_reading`. Use manual search, reads and relation discovery when context is insufficient; record sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
 
 ## Boundaries
 - Does: discovery questioning, decomposition into domains, process analysis,

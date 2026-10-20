@@ -81,9 +81,9 @@ KINDS = ("step", "spawn")
 PHASES = ("reading", "writing", "review", "re_review", "waiting", "approval", "compile", "other")
 # The lever each phase points at when it is the largest share of an overrun.
 LEVERS = {
-    "reading": "context pack missing or not used (context_pack role_digest)",
-    "review": "closure too wide or relations missing (review_scope impact_closure)",
-    "re_review": "confirmation re-review not limited to the fixed lines (review_scope impact_closure)",
+    "reading": "role reads more sources than the task needs",
+    "review": "review reads beyond the change and its direct sources",
+    "re_review": "confirmation re-review not limited to the fixed lines",
     "waiting": "review levels run in sequence (review_levels concurrent_when_independent)",
     "writing": "writer transcribes what a compiler stub could write",
     "approval": "owner gate wait",

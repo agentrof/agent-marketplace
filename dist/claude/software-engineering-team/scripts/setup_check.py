@@ -11,7 +11,6 @@ from pathlib import Path
 
 import marketplace_paths
 import project_config
-import vault_check
 
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
@@ -101,25 +100,14 @@ def runtime_findings(root: Path) -> list[str]:
 
 def managed_block(workspace: str) -> str:
     return "\n".join((START, *(f"/{value}/" for value in local_roots()),
-                      f"{workspace}/junit-*.xml",
-                      f"{workspace}/docs/.obsidian/*",
-                      f"!{workspace}/docs/.obsidian/app.json",
-                      f"!{workspace}/docs/.obsidian/appearance.json",
-                      f"!{workspace}/docs/.obsidian/core-plugins.json",
-                      f"!{workspace}/docs/.obsidian/graph.json",
-                      f"!{workspace}/docs/.obsidian/types.json",
-                      f"!{workspace}/docs/.obsidian/snippets/",
-                      f"!{workspace}/docs/.obsidian/snippets/**",
-                      f"{workspace}/docs/.obsidian/workspace.json",
-                      f"{workspace}/docs/.obsidian/workspace-mobile.json",
-                      f"{workspace}/docs/.trash/", END))
+                      f"{workspace}/junit-*.xml", END))
 
 
 def managed_attributes_block(workspace: str) -> str:
-    """Keep every checkout of the governed vault byte-identical to its commits.
+    """Keep every checkout of the docs tree byte-identical to its commits.
 
     Backlog, Experience and stage-package checks compare working bytes with
-    committed blobs, so the vault opts out of end-of-line conversion such as
+    committed blobs, so the docs tree opts out of end-of-line conversion such as
     Git for Windows' default ``core.autocrlf=true``.
     """
     return "\n".join((ATTRIBUTES_START, f"{workspace}/docs/** -text",
@@ -194,45 +182,6 @@ def preflight(root: Path, workspace: str) -> list[str]:
     return findings
 
 
-def payload_findings(work: Path) -> list[str]:
-    """Validate only the Obsidian payload, never active authored notes."""
-    docs = work / "docs"
-    if not docs.is_dir():
-        return []
-    try:
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        policy = vault_check.effective_policy(policy, docs)
-        vault = vault_check.build_vault(docs, policy)
-        findings = []
-        vault_check.check_obsidian_payload(
-            vault, findings, vault_check.DEFAULT_PAYLOAD,
-            require_local_projection=True,
-        )
-        stale = vault_check.payload_reconcile_updates(
-            docs, policy, vault_check.DEFAULT_PAYLOAD
-        )
-        stale_deletions = vault_check.payload_reconcile_deletions(
-            docs, policy, vault_check.DEFAULT_PAYLOAD
-        )
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        return [f"managed vault payload check failed: {exc}"]
-    messages = [
-        f"managed vault payload: {finding.path}: {finding.message}"
-        for finding in findings if finding.severity == "error"
-    ]
-    messages.extend(
-        "managed vault payload is stale: "
-        + path.relative_to(work.parent).as_posix()
-        for path in sorted(stale, key=lambda value: str(value))
-    )
-    messages.extend(
-        "managed vault payload has stale package-local content: "
-        + path.relative_to(work.parent).as_posix()
-        for path in stale_deletions
-    )
-    return list(dict.fromkeys(messages))
-
-
 def legacy_experience_findings(docs: Path) -> list[str]:
     experience = docs / "experience-design"
     if not experience.exists() and not experience.is_symlink():
@@ -293,18 +242,6 @@ def legacy_experience_findings(docs: Path) -> list[str]:
             findings.append(
                 f"legacy Experience metadata exists at {path.relative_to(docs)}"
             )
-    try:
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        for path in entries:
-            if not (path.is_file() or path.is_symlink()):
-                continue
-            violation = vault_check.artifact_hard_cut_violation(
-                policy, path.relative_to(docs).as_posix()
-            )
-            if violation:
-                findings.append(violation)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
-        findings.append(f"Experience artifact policy cannot be checked: {exc}")
     return sorted(set(findings))
 
 
@@ -383,34 +320,8 @@ def closing(root: Path, workspace: str) -> list[str]:
             "local runtime or projection files are force-added: "
             + ", ".join(listed_paths(tracked_local.stdout))
         )
-    tracked_plugins = subprocess.run(
-        [
-            "git", "ls-files", "-z", "--",
-            f"{workspace}/docs/.obsidian/community-plugins.json",
-            f"{workspace}/docs/.obsidian/plugins",
-        ],
-        cwd=root, capture_output=True, check=False,
-    )
-    if tracked_plugins.returncode != 0:
-        findings.append("local Obsidian plugin projection tracking check failed")
-    elif tracked_plugins.stdout:
-        findings.append(
-            "package-projected local Obsidian plugin files are tracked: "
-            + ", ".join(listed_paths(tracked_plugins.stdout))
-        )
-    for relative in (
-        "docs/.obsidian/app.json", "docs/.obsidian/appearance.json",
-        "docs/.obsidian/core-plugins.json", "docs/.obsidian/graph.json",
-        "docs/.obsidian/types.json",
-    ):
-        if not (work / relative).is_file():
-            findings.append(f"missing managed vault payload: {workspace}/{relative}")
     findings.extend(runtime_findings(root))
-    findings.extend(payload_findings(work))
     findings.extend(legacy_experience_findings(work / "docs"))
-    portable_gate = root / ".github" / "agentrof" / "vault-gate.pyz"
-    if not portable_gate.is_file():
-        findings.append("repository-portable vault gate is missing")
     return findings
 
 

@@ -6,9 +6,8 @@ configuration remain the source of truth.
 
 1. Build and validate all registered host distributions from the same source snapshot.
 2. Run `setup_project.py inspect --project-root <root> --json`. This is a
-   read-only, pre-mutation plan over the workspace contract, policy-owned
-   Obsidian keys, package-local Obsidian plugin projection, managed ignore and
-   checkout-attribute blocks and portable gate. JSON changes expose exact
+   read-only, pre-mutation plan over the workspace contract and the managed
+   ignore and checkout-attribute blocks. JSON changes expose exact
    key-level before/after values; byte-owned assets expose hashes. Resolve
    every blocker before applying. On native Windows, inspect also returns the
    `git.core_longpaths` choice request while the repository's local Git
@@ -27,8 +26,7 @@ configuration remain the source of truth.
    rejects any operation still required.
 4. Preserve authored documents and valid retained project configuration fields;
    setup removes unknown or retired configuration keys as part of the closed
-   schema replacement. It refreshes only policy-asserted Obsidian JSON keys
-   and preserves user-owned instruction companions through the separate host
+   schema replacement. It preserves user-owned instruction companions through the separate host
    projection choice gate. A Codex projection keeps its recorded execution
    profile and any model fallback its managed agent files record. A release
    that moves a class slot to a newer pinned model rewrites the role files
@@ -46,18 +44,12 @@ configuration remain the source of truth.
    editing Markdown, aliases or links, and stops on an override the installed
    package no longer takes, naming the slot or role. Taxonomy additions and
    graph-color changes therefore never write `workspace/config.json`.
-6. `workspace/` is the only managed workspace and every second managed vault
+6. `workspace/` is the only managed workspace and every second managed workspace
    is rejected. Requirement Flow determines request applicability. Repeated
    apply with the same package and project must produce an empty inspect plan.
-7. Treat `workspace/docs/.obsidian/community-plugins.json` and each
-   policy-owned `.obsidian/plugins/<id>/` directory as ignored local package
-   projections. Refresh updates shipped files and removes package-retired
-   assets from those owned directories. It leaves unrelated plugin directories
-   alone. These files are validated locally but never committed in the
-   consuming repository.
-8. Run the portable vault gate and every compiler for a subtree that exists,
+7. Run every compiler for a subtree that exists,
    including the approved-integrity check when the backlog is approved.
-9. Review and commit the exact tracked diff, then start a fresh host session so
+8. Review and commit the exact tracked diff, then start a fresh host session so
    the refreshed skills and hooks load. When the refresh first adds the managed
    `.gitattributes` block, a checkout whose governed files Git already converted
    runs the one-time re-checkout in the

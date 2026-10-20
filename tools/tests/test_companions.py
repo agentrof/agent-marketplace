@@ -97,6 +97,31 @@ class CompanionCheckTests(unittest.TestCase):
             self.assertEqual(last.returncode, 1)
             self.assertEqual(len(json.loads(last.stdout)["findings"]), 1)
 
+    def test_apply_without_codex_cli_names_the_app_step(self):
+        with tempfile.TemporaryDirectory() as raw:
+            project, empty = Path(raw) / "project", Path(raw) / "bin"
+            project.mkdir()
+            empty.mkdir()
+            for companion in REGISTRY["companions"]:
+                verify = companion["hosts"]["codex"]["verify"]
+                if verify["kind"] == "path_exists":
+                    (project / verify["path"]).parent.mkdir(parents=True, exist_ok=True)
+                    (project / verify["path"]).write_text("x\n", encoding="utf-8")
+            env = {**os.environ, "PATH": str(empty), "CODEX_HOME": str(Path(raw) / "codex"),
+                   "PYTHONPATH": str(TEAM / "scripts")}
+            script = str(OVERLAY / "scripts" / "setup_companions.py")
+            applied = subprocess.run(
+                [sys.executable, script, "apply", "--host", "codex", "--project-root", str(project)],
+                env=env, capture_output=True, text=True, check=False)
+            self.assertEqual(applied.returncode, 1)
+            self.assertNotIn("RUN", applied.stdout)
+            self.assertIn("APP   Codex CLI not found: install plugin superpowers from marketplace"
+                          " openai-curated in the Codex app via /plugins", applied.stdout)
+            checked = subprocess.run(
+                [sys.executable, script, "check", "--host", "codex", "--project-root", str(project)],
+                env=env, capture_output=True, text=True, check=False)
+            self.assertIn("superpowers | codex | NO", checked.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

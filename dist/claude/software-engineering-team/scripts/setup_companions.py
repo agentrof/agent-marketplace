@@ -162,9 +162,9 @@ def write_files(registry: dict, root: Path) -> None:
             atomic_file.replace_text(path, content)
 
 
-def install(registry: dict, root: Path, hosts: tuple[str, ...]) -> list[str]:
-    """Run missing installs; return the commands the owner must run by hand."""
-    owner = []
+def install(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[str], list[str]]:
+    """Run missing installs; return the commands and app steps the owner must run by hand."""
+    owner, notes = [], []
     for companion in registry["companions"]:
         for host in hosts:
             spec = companion["hosts"][host]
@@ -177,9 +177,17 @@ def install(registry: dict, root: Path, hosts: tuple[str, ...]) -> list[str]:
                 if shutil.which(argv[0]) is not None:
                     subprocess.run(argv, cwd=root, stdin=subprocess.DEVNULL,
                                    capture_output=True, check=False)
-            if not installed(spec["verify"], root):
+            if installed(spec["verify"], root):
+                continue
+            verify = spec["verify"]
+            if (host == "codex" and verify["kind"] == "plugin_list"
+                    and shutil.which(shlex.split(verify["command"])[0]) is None):
+                plugin, _, marketplace = verify["plugin_id"].partition("@")
+                notes.append(f"Codex CLI not found: install plugin {plugin} from marketplace"
+                             f" {marketplace} in the Codex app via /plugins")
+            else:
                 owner.extend(spec["install"])
-    return owner
+    return owner, notes
 
 
 def mark(value) -> str:
@@ -198,20 +206,20 @@ def main(argv=None) -> int:
         parser.error(f"project root is not a directory: {root}")
     hosts = HOSTS if args.host == "all" else (args.host,)
     registry = load_registry()
-    owner = []
+    owner, notes = [], []
     if args.action == "apply":
-        owner = install(registry, root, hosts)
+        owner, notes = install(registry, root, hosts)
         if "claude" in hosts:
             write_claude_settings(registry, root)
         if "codex" in hosts:
             write_codex_config(registry)
         write_files(registry, root)
     rows, findings = status(registry, root, hosts)
-    ok = not findings and not owner and all(
+    ok = not findings and not owner and not notes and all(
         value is not False for row in rows for value in row.values())
     if args.json:
         print(json.dumps({"ok": ok, "rows": rows, "findings": findings,
-                          "owner_commands": owner}, indent=2))
+                          "owner_commands": owner, "owner_app_steps": notes}, indent=2))
     else:
         columns = ("id", "host", "installed", "blocked_rules_present", "env_present", "files_present")
         print(" | ".join(columns))
@@ -221,6 +229,8 @@ def main(argv=None) -> int:
             print(f"ERROR {value}")
         for command in owner:
             print(f"RUN   {command}")
+        for note in notes:
+            print(f"APP   {note}")
     return 0 if ok else 1
 
 

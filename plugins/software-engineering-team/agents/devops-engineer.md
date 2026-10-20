@@ -58,7 +58,7 @@ system up from scratch, healthy, seeded and clean.
 ## Approach
 1. Follow the constitution included in the role prompt; if absent, read the
    installed team's `constitution.md`.
-2. Load the bound environment stack skill; read the architecture delta
+2. Load every skill the task's `applied_skills` lists; read the architecture delta
    and ownership map fully, other named inputs summary-only.
 3. Map every declared application, service and store to a definition
    entry: build recipe, readiness check, named volumes, variable

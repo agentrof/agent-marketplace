@@ -61,13 +61,16 @@ def strings(value) -> set[str]:
 
 def installed(verify: dict, root: Path) -> bool:
     if verify["kind"] == "path_exists":
-        return (root / verify["path"]).is_file()
+        base = Path.home() if verify.get("base") == "home" else root
+        return (base / verify["path"]).is_file()
     argv = shlex.split(verify["command"])
     if shutil.which(argv[0]) is None:
         return False
     result = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         return False
+    if verify["kind"] == "command":
+        return verify.get("contains", "") in result.stdout
     try:
         return verify["plugin_id"] in strings(json.loads(result.stdout))
     except json.JSONDecodeError:
@@ -101,6 +104,10 @@ def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dic
         names = blocked_names(companion)
         files_ok = all(file_present(root / item["path"], item["content"])
                        for item in companion.get("files", []))
+        for step in companion.get("steps", []):
+            rows.append({"id": companion["id"], "host": step["name"],
+                         "installed": installed(step["verify"], root),
+                         "blocked_rules_present": None, "env_present": None, "files_present": None})
         for path in companion.get("forbidden_paths", []):
             if (root / path).exists():
                 findings.append(f"{companion['id']}: {path} must not exist; {companion['forbidden_reason']}")
@@ -166,8 +173,10 @@ def install(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[st
     """Run missing installs; return the commands and app steps the owner must run by hand."""
     owner, notes = [], []
     for companion in registry["companions"]:
-        for host in hosts:
-            spec = companion["hosts"][host]
+        env = {**os.environ, **{item["name"]: item["value"] for item in companion.get("env", [])}}
+        # Host-independent steps (a CLI the host skills need, a git hook) run first.
+        for host, spec in [*((step["name"], step) for step in companion.get("steps", [])),
+                           *((host, companion["hosts"][host]) for host in hosts)]:
             if installed(spec["verify"], root):
                 continue
             # Exit codes are not trusted: a repeated "marketplace add" fails
@@ -175,11 +184,13 @@ def install(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[st
             for command in spec["install"]:
                 argv = shlex.split(command)
                 if shutil.which(argv[0]) is not None:
-                    subprocess.run(argv, cwd=root, stdin=subprocess.DEVNULL,
+                    subprocess.run(argv, cwd=root, env=env, stdin=subprocess.DEVNULL,
                                    capture_output=True, check=False)
             if installed(spec["verify"], root):
                 continue
-            verify = spec["verify"]
+            verify, requires = spec["verify"], spec.get("requires")
+            if requires and shutil.which(requires["command"]) is None:
+                notes.append(requires["hint"])
             if (host == "codex" and verify["kind"] == "plugin_list"
                     and shutil.which(shlex.split(verify["command"])[0]) is None):
                 plugin, _, marketplace = verify["plugin_id"].partition("@")
@@ -215,11 +226,13 @@ def main(argv=None) -> int:
             write_codex_config(registry)
         write_files(registry, root)
     rows, findings = status(registry, root, hosts)
+    info = [spec["note"] for companion in registry["companions"]
+            for host in hosts if (spec := companion["hosts"][host]).get("note")]
     ok = not findings and not owner and not notes and all(
         value is not False for row in rows for value in row.values())
     if args.json:
         print(json.dumps({"ok": ok, "rows": rows, "findings": findings,
-                          "owner_commands": owner, "owner_app_steps": notes}, indent=2))
+                          "owner_commands": owner, "owner_app_steps": notes, "notes": info}, indent=2))
     else:
         columns = ("id", "host", "installed", "blocked_rules_present", "env_present", "files_present")
         print(" | ".join(columns))
@@ -231,6 +244,8 @@ def main(argv=None) -> int:
             print(f"RUN   {command}")
         for note in notes:
             print(f"APP   {note}")
+        for note in info:
+            print(f"NOTE  {note}")
     return 0 if ok else 1
 
 

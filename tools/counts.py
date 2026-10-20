@@ -85,7 +85,10 @@ def render_block(counts: dict[str, int]) -> str:
 
 def verify_text(verify: dict) -> str:
     if verify["kind"] == "path_exists":
-        return f"`{verify['path']}` exists"
+        return f"`{verify['path']}` exists" + (" in the home directory" if verify.get("base") == "home" else "")
+    if verify["kind"] == "command":
+        return f"`{verify['command']}` succeeds" + (
+            f" and prints `{verify['contains']}`" if verify.get("contains") else "")
     return f"`{verify['command']}` lists `{verify['plugin_id']}`"
 
 
@@ -100,9 +103,13 @@ def render_companions(root: Path) -> str:
             f"({companion['repo']}), {companion['license']}.", "",
             "| Host | Scope | Install | Verify |", "|---|---|---|---|",
         ]
-        for host, spec in companion["hosts"].items():
+        for host, spec in [*((step["name"], step) for step in companion.get("steps", [])),
+                           *companion["hosts"].items()]:
             install = "<br>".join(f"`{command}`" for command in spec["install"])
             lines.append(f"| {host} | {spec['scope']} | {install} | {verify_text(spec['verify'])} |")
+        for spec in [*companion.get("steps", []), *companion["hosts"].values()]:
+            for text in (spec.get("requires", {}).get("hint"), spec.get("note")):
+                lines += ["", text] if text else []
         if companion.get("blocked_skills"):
             names = ", ".join(f"`{name}`" for name in companion["blocked_skills"])
             lines += ["", f"Blocked: {names}. {companion['blocked_reason']}"]

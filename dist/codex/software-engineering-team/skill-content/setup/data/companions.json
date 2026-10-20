@@ -1,6 +1,9 @@
 {
   "schema_version": 1,
   "precedence": "The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.",
+  "notes": [
+    "Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph is `--graph .agentrof/graphify/docs/graph.json`); otherwise read the task file's sources and grep."
+  ],
   "companions": [
     {
       "id": "superpowers",
@@ -168,6 +171,88 @@
       "routing": [
         {"step": "Write UI", "role": "frontend-developer", "skill": "impeccable (craft, polish, harden, adapt)", "when": "the task touches UI"},
         {"step": "Review, UI", "role": "code-reviewer", "skill": "impeccable detect and critique, read-only", "when": "the change touches UI"}
+      ]
+    },
+    {
+      "id": "graphify",
+      "repo": "https://github.com/Graphify-Labs/graphify",
+      "license": "Apache-2.0",
+      "purpose": "Knowledge graph of the project's code and documents.",
+      "why": "Roles find context with a graph query instead of reading many files; the code graph refreshes through git hooks on commit, checkout and merge, the docs graph in the background after deliver merges a task.",
+      "steps": [
+        {
+          "name": "cli",
+          "scope": "user",
+          "install": ["uv tool install graphifyy"],
+          "requires": {"command": "uv", "hint": "uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply."},
+          "verify": {"kind": "command", "command": "graphify --version"}
+        },
+        {
+          "name": "git-hook",
+          "scope": "project",
+          "install": ["graphify hook install"],
+          "verify": {"kind": "command", "command": "graphify hook status", "contains": "post-commit: installed"}
+        }
+      ],
+      "env": [
+        {"name": "GRAPHIFY_OUT", "value": ".agentrof/graphify"}
+      ],
+      "files": [
+        {"path": ".agentrof/graphify/.gitignore", "content": "*\n"}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "user",
+          "install": [
+            "graphify install --platform claude"
+          ],
+          "verify": {"kind": "path_exists", "path": ".claude/skills/graphify/SKILL.md", "base": "home"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "graphify install --platform codex"
+          ],
+          "verify": {"kind": "path_exists", "path": ".codex/skills/graphify/SKILL.md", "base": "home"}
+        }
+      },
+      "routing": [
+        {"step": "Find context", "role": "all roles", "skill": "graphify query, path, explain", "when": "`.agentrof/graphify` holds a graph"},
+        {"step": "Docs graph refresh", "role": "deliver", "skill": "graphify_refresh.py in the background", "when": "a merged task changed Markdown under workspace/docs"}
+      ]
+    },
+    {
+      "id": "ponytail",
+      "repo": "https://github.com/DietrichGebert/ponytail",
+      "license": "MIT",
+      "purpose": "Smallest complete change, plain-language review and a shortcut debt ledger.",
+      "why": "Developer roles write less code without dropping callers, tests or safety; review and retrospective get its review and debt reports.",
+      "env": [
+        {"name": "PONYTAIL_DEFAULT_MODE", "value": "full"}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add DietrichGebert/ponytail",
+            "claude plugin install ponytail@ponytail --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "ponytail@ponytail"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "codex plugin marketplace add DietrichGebert/ponytail",
+            "codex plugin add ponytail@ponytail"
+          ],
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "ponytail@ponytail"},
+          "note": "Codex runs the ponytail hooks only after the owner trusts them once in /hooks."
+        }
+      },
+      "routing": [
+        {"step": "Write code", "role": "developer roles", "skill": "ponytail, level full", "when": "always"},
+        {"step": "Review", "role": "code-reviewer", "skill": "/ponytail-review", "when": "inside its single review pass"},
+        {"step": "Retrospective", "role": "retrospective", "skill": "/ponytail-debt", "when": "report the shortcut debt ledger"}
       ]
     }
   ]

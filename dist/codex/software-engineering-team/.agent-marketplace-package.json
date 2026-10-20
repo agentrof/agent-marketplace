@@ -85,6 +85,9 @@
     "scripts/generate_codex_project.py":
       "18e3511f531893c5551e8564102ac9931ba8d1a1c1b2f21a3676c0d9df1a44a8"
     ,
+    "scripts/graphify_refresh.py":
+      "72506ee8d873243e89684341e57f12f949e38de73289f70e2b01d0878ff689d1"
+    ,
     "scripts/hook_launcher.py":
       "f5dfa03e324467e05754048c0edac9751f1f8e76844b026fce151668cbf761fc"
     ,
@@ -131,7 +134,7 @@
       "94fd9da90f46c45052e3cc2e45c2aca8bc61c022f0dfb7d31392b11b074db7bc"
     ,
     "scripts/setup_companions.py":
-      "90a99648460071f38b037d8a55819ecbf0b1acc373e360c2d305fde7a19a7c56"
+      "1377feb9dd6679bdf0cd2deafd2c7a2b6f2c8a9b576f628be14b91699147f8a4"
     ,
     "scripts/setup_project.py":
       "7b741b38d79ff6f507565809d7316bf4dd9d3c335294feff082377ad8576436a"
@@ -335,7 +338,7 @@
       "26166f8cd72a7feae124fe4ddbd001c2057cff95c1ab899f67d28831511d21cc"
     ,
     "skill-content/setup/data/companions.json":
-      "9a51eff45f55b8f1f094d7cf294930b57d4048dc4b835d86d9963e6faafe2d37"
+      "1d2b422022d3d84f7a6398a4c382911273012615dde032b8b7301ff106af6dd7"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "e1f9fa41e0138d9ab22c5fdf8d6670cb027d232e89a16c06ae8e18f2b929018c"
@@ -452,10 +455,10 @@
       "7c533d07a527237a4ac3e25af85734213f458daa1c3f9eda901d5b37846ad62f"
     ,
     "templates/AGENTS.override.md":
-      "8c4bf00b6fbe24d6350cbae37806015b19115bee9e148d4ca7c729f8fdf448c5"
+      "1945699a3cdc7065bca254bef1788b5e52dfc1dd39e75f712ab65972f9ed04a8"
     ,
     "templates/CLAUDE.md":
-      "34b240b4eabadfbc5d1f9fa148cb6e05dd4d12a7c817e70650b7b121648bd9e1"
+      "59d80e7107d5fc028b1eca7119d9ad08e6baf46eecf0f3280da75de92e634d0a"
     ,
     "templates/ci-tests.yml":
       "e7f87688646b979dbfbce486edda8ca5489e684b1fb08cf8d7f6b4495777c411"

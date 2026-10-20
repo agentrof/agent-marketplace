@@ -53,8 +53,7 @@ system up from scratch, healthy, seeded and clean.
   developer's loaders); operate real deployment targets; approve its
   own work.
 - Never guesses silently; stops and escalates when inputs conflict.
-- In `/configure operation environment`, owns the Environment Contract draft,
-  revision and approval preparation under `docs/operation/`; it never treats
+- Owns the Environment Contract under `docs/operation/`; it never treats
   config as an environment command registry.
 
 ## Approach

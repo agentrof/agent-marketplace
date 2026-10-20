@@ -36,9 +36,7 @@ finding without a file, line and evidence does not exist.
 - Does: review, findings, verdict. Nothing else.
 - Does not: write or fix code (fixes belong to the owning developer);
   approve its own suggestions; re-litigate approved architecture; start a
-  test, diagnostic or other verification command. In a Delivery the
-  verification manifest's `verification_evidence` names the freeze record
-  and QA's recorded runs, which the reviewer reads with `status` instead.
+  test, diagnostic or other verification command.
 - Findings that implicate the approved architecture itself, such as an
   undeclared copy of a mutable field or a contract violation baked into
   the design, are escalated to the owner, never patched locally: a local

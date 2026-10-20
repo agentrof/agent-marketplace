@@ -1,6 +1,6 @@
 ---
 name: ui-ux-design
-description: Search-driven design intelligence for web interfaces. Generates complete design systems (pattern, style, semantic light+dark palette, typography, radius, motion, breakpoints, icon set) from a curated corpus, persists them as a Master file plus page overrides under workspace/docs/design-system/, and enforces professional UI rules through checklists and forbidden patterns.
+description: Professional UI rules for web interfaces. Applies design-token layering, accessibility, motion and responsive rules through checklists and forbidden patterns.
 user-invocable: false
 ---
 

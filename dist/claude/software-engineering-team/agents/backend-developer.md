@@ -62,7 +62,7 @@ contract specify, in the smallest correct change, proven by tests.
    and error bodies.
 5. Run the approved Verification Contract command until green; then
    self-verify end to end through the approved Environment Contract when the
-   Item requires live runtime verification: a fresh bring-up starts clean,
+   task requires live runtime verification: a fresh bring-up starts clean,
    endpoints answer with correct codes, the authorization flow works, the
    default scenario loads; tear it down after.
 6. If an input is contradictory or missing, stop and report blocked with

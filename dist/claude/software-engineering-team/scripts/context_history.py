@@ -69,25 +69,8 @@ def git_source(project: Path, path: str, revision: str) -> bytes:
 
 
 def matches(path: Path, raw: bytes, expected: str) -> bool:
-    text = raw.decode("utf-8")
-    props, start, error = vault_markdown.parse_frontmatter(text)
-    if error:
-        return False
-    body = "\n".join(text.splitlines()[start - 1:])
-    kind = props.get("type")
-    if kind in {"verification-contract", "environment-contract"}:
-        import operation_compile
-        props, body = operation_compile.parse_text(text, path)
-        actual = operation_compile.receipt_hash(props, body)
-    elif kind in {"story", "test-plan", "backlog", "epic", "epic-review", "backlog-review"}:
-        import backlog_compile
-        actual = backlog_compile.digest_text(text)
-    elif kind == "requirement":
-        import requirement_compile
-        actual = requirement_compile.semantic_hash(props, body.lstrip("\n"))
-    else:
-        return False
-    return actual == expected and props.get("source_hash") == expected
+    """No packaged compiler stamps a source digest, so no stamp matches."""
+    return False
 
 
 def bound_source(project: Path, path: str, expected: str) -> dict | None:

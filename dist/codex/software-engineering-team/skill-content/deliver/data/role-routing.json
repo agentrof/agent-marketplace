@@ -31,16 +31,6 @@
       "ask": "Check the acceptance criteria against the approved analysis: business rules, process steps and edge cases. Return go, or changes with a reason for each."
     },
     {
-      "role": "ux-designer",
-      "mode": "suggest",
-      "step": "pre_check",
-      "kinds": ["build"],
-      "path_globs": ["*.tsx", "*.jsx", "*.vue", "*.svelte", "*.css", "*.scss"],
-      "keywords": ["screen", "page", "form", "layout", "dialog", "ui", "ux", "navigation"],
-      "time_budget_minutes": 3,
-      "ask": "Check the planned screen change against the design system and the approved Experience package. Return go, or changes with a reason for each."
-    },
-    {
       "role": "qa-engineer",
       "mode": "suggest",
       "step": "pre_check",

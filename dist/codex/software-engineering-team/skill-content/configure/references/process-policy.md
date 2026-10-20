@@ -40,29 +40,7 @@ parameter the table leaves unset. A switch that only reports, such as
    write nothing and stop.
 4. Present the planned delta, each switch's value in force and the chosen
    value, each parameter set, changed or unset, each undeclared row the
-   revision removes, and name every Delivery whose pinned value of a switch
-   it still reads the delta changes. A scope-approved Delivery reads every
-   switch a Delivery flow owns; an execution-approved one reads only those its
-   `delivery-execution` flow owns: `code_review_panel`, `context_pack`, `execution_planning`,
-   `finding_disposition`, `implementation_schedule`, `item_live_gate`, `item_qa_tier`,
-   `item_review_scale`, `item_verification`, `lane_isolation`, `level_change_map`,
-   `live_case_reuse`, `live_verification`, `own_target_reuse`, `owner_gates`,
-   `pass_carry_over`, `pre_handoff_regression`, `provisional_claims`, `qa_gate_order`,
-   `qa_preflight`, `regression_plan_revision`, `repair_pass`, `repair_review`,
-   `review_loop`, `review_scope`, `runtime_lifecycle`, `test_engines` and
-   `test_group_report`.
-   A switch no Delivery flow owns, and a `measurement_only` switch of the
-   registry, which only records time or cost, is read from the current policy
-   and stops no Delivery and invalidates no review round.
-   Such a Delivery runs under the values it pinned, so after the new
-   revision is approved its checks refuse it until its execution plan is
-   revised and approved again, which pins the new revision. Name that path in
-   order: `begin-plan-revision`, the execution-plan tasks, which bind the new
-   revision while that barrier is held, and the Item revisions they make,
-   `approve-execution`, `publish-execution-plan` and `finish-plan-revision`;
-   a scope-approved Delivery needs only its first `approve-execution`. The
-   other way out is a later revision that sets those values back. A Delivery
-   in review or later keeps its pin and reads its pinned revision's values.
+   revision removes.
    Ask the approval choice gate. On rejection write nothing.
 5. On approval run `init` when the document is absent or `begin-revision`
    when it is approved, then `set --switch <id> --value <value>` for each
@@ -73,11 +51,8 @@ parameter the table leaves unset. A switch that only reports, such as
    parameter row, `check` and `approve`. Choosing the default removes the switch's row, so a later
    promoted default also reaches it; a value that takes no parameters also
    removes the switch's parameter rows, which `set` reports as
-   `removed_parameters`. `approve` renders the Delivery map. `init` and
-   `begin-revision` first record the state they replace, revision 0 for no
-   policy, in each draft backlog review round that records no policy yet, and
-   list those rounds in `pinned_reviews`, so a review keeps the values it ran
-   under. Then run the scoped vault gate and show the exact Git diff.
+   `removed_parameters`. Then run the scoped vault gate and show the exact Git
+   diff.
 
 ## Rules
 
@@ -86,8 +61,5 @@ parameter the table leaves unset. A switch that only reports, such as
   table or the lifecycle fields, nor the Parameters table.
 - A default changes only in a package release, on the switch's promotion
   rule and the owner's approval; a project row is never a promotion.
-- Flows read a value with `process_policy.py value --switch <id>`, inside a
-  Delivery with `--delivery DLV-###`, which refuses a drifted pin until the
-  Delivery Review and reads the pinned revision's value from then on; a
-  switch no Delivery flow owns is read from the current policy. A draft or
-  invalid policy is refused, never read.
+- Flows read a value with `process_policy.py value --switch <id>` from the
+  current policy. A draft or invalid policy is refused, never read.

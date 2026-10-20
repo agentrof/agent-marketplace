@@ -17,23 +17,11 @@ PACKAGE = Path(__file__).resolve().parents[1]
 POLICY = "templates/task-input-policy.json"
 # process_policy.REGISTRY; the catalog reads it without importing the compiler.
 SWITCH_REGISTRY = "skill-content/configure/data/process-switches.json"
-CLASS_MAP = "templates/model-classes.json"
-# Entries whose tasks author what an execution approval then pins: the scope,
-# the Item topology and the Operation contracts a plan revises.
-PLANNING_ENTRIES = frozenset({"delivery-plan", "execution-plan", "configure"})
 # A switch whose instructions every task of its owning flows follows declares
 # this reference_scope; its references bind whichever skill holds them.
 OWNING_FLOWS_SCOPE = "owning_flows"
-# How a declared pass kind runs: as the owning writer's generated variant, or
-# as a command of the entry itself with no role pass.
-PASS_KIND_RUNS = {"writer_variant", "entry_command"}
-PROVISIONAL_CONSTRAINT = ("provisional: not freezable or pushable before the approved plan publishes it;"
-                          " a provisional path stays the Item's only once its writer converges on that plan")
-# The switch value whose cross-epic backlog writer writes only its given inputs.
-WRITERS_SWITCH, WRITERS_VALUE = "remediation_writers", "per_epic"
 REFERENCE = re.compile(r"\[[^\]]+\]\((references/[^)#]+)(?:#[^)]*)?\)")
 SWITCH_REFERENCE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
-DELIVERY_PACKAGE = re.compile(r"^workspace/docs/delivery/deliveries/([^/]+)/")
 CATALOG_NAME_MAPS = ("role_skills", "required_role_skills", "entries",
                      "required_references", "stack_reference_by_role", "read_only_entry_roles")
 CANONICAL_SUFFIXES = {".md", ".json"}
@@ -464,35 +452,6 @@ def identity(root: Path, paths) -> list[dict]:
     return records
 
 
-def agent_variants(package: Path) -> dict[str, str]:
-    """Return each generated agent variant the switch registry or class map declares, with its base.
-
-    A build writes the variants beside their base agents, but a task always
-    runs as the base role, so the role catalog leaves the variants out.
-    """
-    variants = {}
-    path = package / SWITCH_REGISTRY
-    if path.is_file():
-        try:
-            switches = json.loads(path.read_text(encoding="utf-8"))["switches"]
-            variants = {f"{agent}-{variant['suffix']}": agent
-                        for _switch, spec in sorted(switches.items())
-                        for _value, variant in sorted((spec.get("agent_variants") or {}).items())
-                        for agent in variant["agents"]}
-        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
-            raise ValueError(f"process switch registry cannot be read: {exc}") from exc
-    # A host that cannot set a model at spawn time ships escalated and purpose variants.
-    path = package / CLASS_MAP
-    if path.is_file():
-        try:
-            hosts = json.loads(path.read_text(encoding="utf-8"))["hosts"]
-            variants.update({name: variant["agent"] for host in hosts.values()
-                             for name, variant in host["variants"].items()})
-        except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as exc:
-            raise ValueError(f"class map cannot be read: {exc}") from exc
-    return variants
-
-
 def catalog(package: Path = PACKAGE) -> dict:
     policy = json.loads(regular(package, POLICY).read_text(encoding="utf-8"))
     if policy.get("schema_version") != 1:
@@ -503,7 +462,7 @@ def catalog(package: Path = PACKAGE) -> dict:
         if any(not re.fullmatch(r"[a-z][a-z0-9_]*", key) for key in policy[name]):
             raise ValueError(f"{name} keys must use snake_case")
         policy[name] = {key.replace("_", "-"): value for key, value in policy[name].items()}
-    agents = {path.stem for path in (package / "agents").glob("*.md")} - set(agent_variants(package))
+    agents = {path.stem for path in (package / "agents").glob("*.md")}
     skills = {path.parent.name for path in (package / "skill-content").glob("*/SKILL.md")}
     entries = {path.parent.name for path in (package / "skill-content").glob("*/SKILL.md")
                if re.search(r"^exposure: entry$", path.read_text(encoding="utf-8"), re.M)}
@@ -551,7 +510,7 @@ def catalog(package: Path = PACKAGE) -> dict:
         if type(entry.get("allow_unborn_head", False)) is not bool:
             raise ValueError("task input unborn HEAD policy must be boolean")
         scope = entry.get("write_scope", {})
-        if (scope.get("resolver") not in {"unresolved", "ba_documents", "backlog_documents", "item_claims"}
+        if (scope.get("resolver") not in {"unresolved"}
                 or not isinstance(scope.get("roles"), list)
                 or set(scope["roles"]) - set(entry["roles"])
                 or not isinstance(entry.get("next_transition"), str) or not entry["next_transition"].strip()):
@@ -561,102 +520,7 @@ def catalog(package: Path = PACKAGE) -> dict:
             raise ValueError("task input policy names an unknown skill")
         for reference in references:
             regular(package, f"skill-content/{skill}/{reference}")
-    policy["pass_kinds"] = pass_kind_catalog(policy, agents, package)
     return policy
-
-
-def pass_kind_catalog(policy: dict, agents: set[str], package: Path) -> dict:
-    """Validate the declared mechanical pass kinds, with each writer's documents by role."""
-    kinds = policy.get("pass_kinds", {})
-    if not isinstance(kinds, dict):
-        raise ValueError("task input pass kinds must map a kind to its declaration")
-    registry = registry_switches(package)
-    for kind, spec in kinds.items():
-        if (not re.fullmatch(r"[a-z][a-z0-9_]*", kind) or not isinstance(spec, dict)
-                or spec.get("runs_as") not in PASS_KIND_RUNS
-                or not all(isinstance(spec.get(key), str) for key in ("switch", "value"))):
-            raise ValueError("a task input pass kind needs runs_as, switch and value")
-        if spec["runs_as"] != "writer_variant":
-            continue
-        documents = spec.get("documents")
-        if (not isinstance(spec.get("modes"), list) or not spec["modes"]
-                or set(spec["modes"]) - set(policy["modes"]) or not isinstance(documents, dict)
-                or any(not isinstance(patterns, list) or not patterns
-                       or not all(isinstance(item, str) and item and not item.startswith("/")
-                                  and ".." not in item.split("/") for item in patterns)
-                       for patterns in documents.values())):
-            raise ValueError(f"pass kind {kind} needs its modes and each writer's documents")
-        spec["documents"] = {role.replace("_", "-"): patterns for role, patterns in documents.items()}
-        variants = (registry.get(spec["switch"], {}).get("agent_variants") or {}).get(spec["value"])
-        if set(spec["documents"]) - agents or (registry and (
-                not isinstance(variants, dict)
-                or set(spec["documents"]) != set(variants.get("agents") or []))):
-            raise ValueError(f"pass kind {kind} must name exactly the writers whose variants"
-                             f" switch {spec['switch']} declares at {spec['value']}")
-    return kinds
-
-
-def document_pattern(pattern: str) -> re.Pattern:
-    return re.compile("workspace/docs/" + re.escape(pattern).replace(r"\*", "[^/]+"))
-
-
-def mechanical_pass(policy: dict, registry: dict[str, dict], kind: str, *, entry: str,
-                    role: str | None, mode: str, route: dict, read_only: bool, chosen: set,
-                    findings: str | None, inputs: list[str], project: Path | None) -> list[str]:
-    """Check that a task may run as mechanical pass *kind*; return the documents it writes.
-
-    A mechanical pass decides nothing, so a review, re-check, calibration,
-    triage or repair task, and every role without a writer variant, keeps its
-    role's class.
-    """
-    kinds = policy["pass_kinds"]
-    spec = kinds.get(kind)
-    if spec is None:
-        raise ValueError(f"unknown pass kind {kind!r}; the task input policy declares {sorted(kinds)}")
-    if spec["runs_as"] == "entry_command":
-        if role is not None:
-            raise ValueError(f"pass kind {kind} runs as a direct entry command; derive no role"
-                             " task for it")
-        return []
-    owners = set(registry.get(spec["switch"], {}).get("flows") or [])
-    if not owners & set(route["flows"]):
-        raise ValueError(f"pass kind {kind} belongs to the flows switch {spec['switch']} owns;"
-                         f" a {entry} task, a code repair included, keeps its role's class")
-    if read_only:
-        raise ValueError(f"pass kind {kind} never serves a review, re-check or calibration: this"
-                         f" {mode} task of {role} keeps its role's class")
-    if mode not in spec["modes"]:
-        raise ValueError(f"pass kind {kind} runs in mode {' or '.join(spec['modes'])}; a {mode}"
-                         " task, authoring or repair, keeps its role's class")
-    if role not in spec["documents"]:
-        raise ValueError(f"pass kind {kind} runs only as a writer whose variant switch"
-                         f" {spec['switch']} declares ({', '.join(sorted(spec['documents']))});"
-                         f" {role} keeps its class")
-    if (spec["switch"], spec["value"]) not in chosen:
-        raise ValueError(f"pass kind {kind} runs only at switch {spec['switch']} {spec['value']}")
-    if findings is None or project is None:
-        raise ValueError(f"pass kind {kind} binds the verdict's findings; pass --findings <record>")
-    try:
-        record = json.loads(regular(project, findings).read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ValueError(f"pass kind {kind} reads its findings as JSON: {exc}") from exc
-    listed = record.get("findings") if isinstance(record, dict) else record
-    if not isinstance(listed, list) or not listed:
-        raise ValueError(f"pass kind {kind} needs at least one returned finding")
-    for finding in listed:
-        name = finding.get("id") if isinstance(finding, dict) else None
-        if not isinstance(name, str) or not name.strip():
-            raise ValueError(f"pass kind {kind} needs a stable id on every finding")
-        repair = finding.get("repair")
-        if not isinstance(repair, str) or not repair.strip():
-            raise ValueError(f"pass kind {kind}: finding {name} names no exact repair; the base"
-                             " writer triages it")
-    patterns = [document_pattern(pattern) for pattern in spec["documents"][role]]
-    documents = sorted(path for path in set(inputs)
-                       if any(pattern.fullmatch(path) for pattern in patterns))
-    if not documents:
-        raise ValueError(f"pass kind {kind} needs the {role} document it changes as an --input")
-    return documents
 
 
 def closure_reads(project: Path, project_files: set[str], inputs: set[str], base: str | None,
@@ -743,25 +607,6 @@ def switch_data(package: Path) -> dict[tuple[str, str], list[str]]:
         raise ValueError(f"process switch registry cannot be read: {exc}") from exc
 
 
-def task_deliveries(project: Path, delivery: str | None, inputs: list[str]) -> list[str]:
-    """Return the Deliveries a task runs inside: the one it names and every one
-    whose package holds a selected input."""
-    found = {delivery} if delivery else set()
-    for relative in inputs:
-        match = DELIVERY_PACKAGE.match(relative)
-        if match is None or match.group(1) in {".", ".."}:
-            continue
-        record = project / "workspace/docs/delivery/deliveries" / match.group(1) / "delivery.md"
-        if not record.is_file():
-            continue
-        from vault_markdown import parse_frontmatter
-        props, _line, error = parse_frontmatter(record.read_text(encoding="utf-8"))
-        if error or not isinstance(props.get("id"), str) or not props["id"]:
-            raise ValueError(f"Delivery record cannot be read: {record.relative_to(project).as_posix()}")
-        found.add(props["id"])
-    return sorted(found)
-
-
 def registry_switches(package: Path) -> dict[str, dict]:
     """Return the switch registry's declarations, or none when the package has no registry."""
     path = package / SWITCH_REGISTRY
@@ -782,62 +627,20 @@ def owned_switches(registry: dict[str, dict], route: dict) -> set[str]:
             if set(route["flows"]) & set(spec.get("flows") or [])}
 
 
-def plan_revision_held(project: Path, delivery: str, remote: str) -> bool:
-    """Whether the remote Fence holds a plan-revision barrier that this Delivery began."""
-    import delivery_git
-
-    try:
-        return delivery_git.held_plan_revision_epoch(project, remote, delivery) is not None
-    except (RuntimeError, OSError, ValueError):
-        return False
-
-
-def switch_choices(project: Path | None, route: dict, package: Path,
-                   deliveries: list[str] | None = None, entry: str | None = None,
-                   remote: str = "origin") -> tuple[set, list[str]]:
+def switch_choices(project: Path | None, route: dict, package: Path) -> tuple[set, list[str]]:
     """Return the non-default switch values a task runs under and its policy input.
 
-    Without a Process Policy both are empty, so the manifest is unchanged. A
-    task inside a Delivery runs under the switch values that Delivery pinned:
-    while the pin is enforced, a policy that changed a value of a switch the
-    task's flows own and the Delivery still reads refuses the derivation, as a
-    switch read of that Delivery does, and from the Delivery Review on the
-    pinned revision's values are bound. A switch no Delivery flow owns is
-    bound from the current policy. A planning task binds the approved policy
-    instead where the next execution approval pins it: before the first one,
-    and while a plan-revision barrier is held.
+    Without a Process Policy both are empty, so the manifest is unchanged.
     """
     if project is None or not route["project_state"]:
         return set(), []
     import process_policy
     docs = project / "workspace" / "docs"
-    policy_input = (["workspace/docs/" + process_policy.RELATIVE]
-                    if process_policy.path_for(docs).exists() else [])
-    if deliveries:
-        owned = owned_switches(registry_switches(package), route)
-        chosen = None
-        for delivery in deliveries:
-            try:
-                values = process_policy.delivery_values(docs, delivery, package, owned)["values"]
-            except process_policy.PinDrift as drift:
-                if not (entry in PLANNING_ENTRIES and (drift.status == "scope_approved" or (
-                        drift.status == "execution_approved"
-                        and plan_revision_held(project, delivery, remote)))):
-                    raise ValueError(f"{delivery}: {drift}") from drift
-                values = process_policy.effective_values(docs, package)[0]
-            except ValueError as exc:
-                raise ValueError(f"{delivery}: {exc}") from exc
-            pairs = {(switch, value["value"]) for switch, value in values.items()
-                     if value["value"] != value["default"]}
-            if chosen is not None and pairs != chosen:
-                raise ValueError("the task's inputs span Deliveries that run different switch values")
-            chosen = pairs
-        return chosen, policy_input
-    if not policy_input:
+    if not process_policy.path_for(docs).exists():
         return set(), []
     values, _snapshot = process_policy.effective_values(docs, package)
     return ({(switch, value["value"]) for switch, value in values.items()
-             if value["value"] != value["default"]}, policy_input)
+             if value["value"] != value["default"]}, ["workspace/docs/" + process_policy.RELATIVE])
 
 
 def git_bytes(command: list[str], *args: str) -> bytes:
@@ -876,299 +679,27 @@ def working_inventory(root: Path, command: list[str], *, unborn: bool = False,
     return records
 
 
-def published_item(project: Path, item: str, remote: str) -> tuple[dict | None, str | None, str | None]:
-    """The selected Item record as the Delivery's Integration publishes it, with the Delivery id and,
-    when a local commit stood in for the remote, the constraint that names it.
-
-    A checkout's record can be a draft of a plan revision not yet approved, so
-    a published record grants the claims, never the draft. The Delivery's
-    remote is the source of truth: the record is read from its Integration tip,
-    fetched only when this checkout lacks that commit. Only when the remote
-    cannot be asked does the newest published Integration commit this checkout
-    holds stand in, the remote's tracking ref of the Integration or the
-    integration_base_commit the Item worktree last converged on, each taken
-    only as a record commit of the Delivery's Integration line and only while
-    the two agree by ancestry. That offline check is structural: a forged
-    commit that carries the record trailers on the Delivery's line passes it,
-    and the offline record can be stale, so push-item, which checks the Item
-    against the remote, remains the gate. A checkout with no remote that holds
-    no published commit of the Delivery keeps its own record: (None, None,
-    None). A checkout whose remotes lack *remote*, or where no published record
-    can be read, raises ValueError naming why.
-    """
-    import delivery_git
-    # Without its own repository, git would answer for an enclosing one and its remote.
-    if not (project / ".git").exists():
-        return None, None, None
-    remotes = subprocess.run(["git", "-C", str(project), "remote"], capture_output=True, encoding="utf-8")
-    if remotes.returncode:
-        raise ValueError("the checkout's remotes cannot be read")
-    from delivery_compile import split_note
-    names = remotes.stdout.split()
-    try:
-        delivery = item_delivery(project, item)
-    except ValueError:
-        if not names:
-            return None, None, None
-        raise
-    if not names:
-        if not local_integration_commits(project, item, delivery, remote):
-            return None, None, None
-        oid = newest_local_integration_commit(project, item, delivery, remote)
-        if oid is None:
-            raise ValueError(f"this checkout has no remote and no commit it holds for {delivery} is a published"
-                             f" Integration record of {delivery}; add the Delivery's remote")
-        return (local_record(project, oid, item, split_note), delivery,
-                offline_constraint(oid, "this checkout has no remote"))
-    if remote not in names:
-        raise ValueError(f"the checkout has no remote {remote}; name the Delivery's remote with --remote")
-    ref = delivery_git.canonical_refs(delivery)["integration"]
-    try:
-        tip = delivery_git.remote_ref_oids(project, remote, [ref])[ref]
-    except RuntimeError as exc:
-        offline = exc
-    else:
-        if not tip:
-            raise ValueError(f"{delivery} has no Integration on {remote}")
-        try:
-            oid = delivery_git.require_commit(project, remote, ref, tip)
-            return local_record(project, oid, item, split_note), delivery, None
-        except RuntimeError as exc:
-            raise ValueError(f"the published record of the selected Item cannot be read: {exc}") from exc
-    oid = newest_local_integration_commit(project, item, delivery, remote)
-    if oid is not None:
-        return local_record(project, oid, item, split_note), delivery, offline_constraint(oid, f"{remote}: {offline}")
-    raise ValueError(f"the published record of the selected Item cannot be read: no published Integration"
-                     f" commit of {delivery} is in this checkout and {remote} cannot provide one: {offline}")
-
-
-def offline_constraint(oid: str, cause: str) -> str:
-    """The scope constraint naming the local commit whose record stood in for the remote, and why."""
-    return " ".join(f"offline: claims read from {oid}; {cause}".split())
-
-
-def item_delivery(project: Path, item: str) -> str:
-    """The id of the Delivery whose package holds the selected Item record."""
-    import delivery_git
-    from vault_markdown import parse_frontmatter
-    record = project / PurePosixPath(item).parent.parent.parent / "delivery.md"
-    props, _line, error = (parse_frontmatter(record.read_text(encoding="utf-8")) if record.is_file()
-                           else ({}, 0, "missing"))
-    delivery = props.get("id") if not error else None
-    if not isinstance(delivery, str) or not delivery_git.DELIVERY_ID_RE.fullmatch(delivery):
-        raise ValueError("the selected Item's Delivery record cannot be read")
-    return delivery
-
-
-def local_record(project: Path, oid: str, item: str, split_note) -> dict:
-    import delivery_git
-    try:
-        props = delivery_git.split_remote_note(project, oid, item, split_note)[0]
-        if props.get("path_claim_amendments"):
-            props["path_claims"] = delivery_git.amended_path_claims(project, oid, item, props)
-        return props
-    except RuntimeError as exc:
-        raise ValueError(f"the published Integration commit {oid} in this checkout holds no record of the"
-                         f" selected Item: {exc}") from exc
-
-
-def newest_local_integration_commit(project: Path, item: str, delivery: str, remote: str) -> str | None:
-    """The newest, by ancestry, of the published Integration commits of *delivery* this checkout holds,
-    or None. The tracking ref and the Item worktree's base must agree by ancestry wherever both name a
-    commit this checkout holds, since two that diverge leave the checkout unable to tell which line is
-    published. A commit that is no record commit of the Delivery's Integration line is left out."""
-    import delivery_git
-    named = [oid for oid in local_integration_commits(project, item, delivery, remote)
-             if not subprocess.run(["git", "-C", str(project), "cat-file", "-e", oid + "^{commit}"],
-                                   capture_output=True).returncode]
-    for first, second in zip(named, named[1:]):
-        if not (delivery_git.descends(project, first, second) or delivery_git.descends(project, second, first)):
-            raise ValueError(f"the published Integration commits of {delivery} in this checkout diverge:"
-                             f" {first} and {second}; reach the Delivery's remote {remote}")
-    newest = None
-    for oid in named:
-        if delivery_git.delivery_integration_commit(project, oid, delivery) and (
-                newest is None or delivery_git.descends(project, newest, oid)):
-            newest = oid
-    return newest
-
-
-def local_integration_commits(project: Path, item: str, delivery: str, remote: str) -> list[str]:
-    """The commits this checkout names as published Integration commits of *delivery*, unverified:
-    the remote's tracking ref of the Integration and the Item worktree record's integration_base_commit."""
-    import delivery_git
-    from vault_markdown import parse_frontmatter
-    found = []
-    tracking = "refs/remotes/{}/{}".format(
-        remote, delivery_git.canonical_refs(delivery)["integration"].removeprefix("refs/heads/"))
-    resolved = subprocess.run(["git", "-C", str(project), "rev-parse", "--verify", "-q", tracking + "^{commit}"],
-                              capture_output=True, encoding="utf-8")
-    if not resolved.returncode:
-        found.append(resolved.stdout.strip())
-    try:
-        story = PurePosixPath(item).parent.name.upper()
-        worktree = delivery_git.worktree_paths(delivery_git.main_worktree(project), delivery, story)["item"]
-    except (RuntimeError, ValueError):
-        return found
-    converged = worktree / item
-    if converged.is_file():
-        props, _line, error = parse_frontmatter(converged.read_text(encoding="utf-8"))
-        base = props.get("integration_base_commit") if not error else None
-        if isinstance(base, str) and delivery_git.OID_RE.fullmatch(base) and base not in found:
-            found.append(base)
-    return found
-
-
-def write_scope(project: Path | None, paths: set[str], role: str | None, route: dict,
-                read_only: bool, closure: dict | None, package: Path,
-                cross_epic: bool = False, chosen: set | frozenset = frozenset(),
-                remote: str = "origin") -> dict:
+def write_scope(read_only: bool) -> dict:
     """Describe selected authoring bounds without minting writer authority.
 
-    Read dependencies are not write targets. Unknown compiler selections and
-    new documents stay unresolved rather than granting a whole stage directory.
-    A cross-epic remediation writer, at remediation_writers per_epic, writes
-    only the backlog documents it was given as inputs. An implementation scope
-    comes from the Item record the Delivery's Integration publishes and, at
-    provisional_claims during_plan_revision, also takes the paths of the
-    Item's live provisional claims.
+    Read dependencies are not write targets; an owning compiler resolves any
+    target before writing.
     """
-    result = {"status": "read_only" if read_only else "unresolved", "allowed_write_area": [],
-              "source_records": [], "writer_authority": False,
-              "constraints": ["existing owner/compiler approval remains required",
-                              "compiler-owned fields and generated projections are excluded"],
-              "reason": "role or task mode is read-only" if read_only else "owning compiler has not resolved a supported write scope"}
-    spec = route["write_scope"]
-    if read_only or project is None or role not in spec["roles"]:
-        return result
-    from vault_markdown import parse_frontmatter
+    return {"status": "read_only" if read_only else "unresolved", "allowed_write_area": [],
+            "source_records": [], "writer_authority": False,
+            "constraints": ["existing owner/compiler approval remains required",
+                            "compiler-owned fields and generated projections are excluded"],
+            "reason": "role or task mode is read-only" if read_only else "owning compiler has not resolved a supported write scope"}
 
-    def properties(relative: str) -> dict:
-        props, _line, error = parse_frontmatter(regular(project, relative).read_text(encoding="utf-8"))
-        if error:
-            raise ValueError(f"cannot derive write scope from {relative}: {error}")
-        return props
 
-    selected = {path for path in paths if path.endswith(".md")
-                and not {"_generated", "artifacts", ".obsidian", ".trash"} & set(PurePosixPath(path).parts)}
-    targets = []
-    sources = []
-    if spec["resolver"] == "ba_documents":
-        selected = {path for path in selected
-                    if re.fullmatch(r"workspace/docs/business-analysis/[^/]+/.+\.md", path)}
-        if len({PurePosixPath(path).parts[3] for path in selected}) > 1:
-            result["reason"] = "selected BA inputs span multiple spaces; resolve one owning space"
-            return result
-        schema = json.loads(regular(package, "skill-content/business-analysis/data/space-schema.json").read_text(encoding="utf-8"))
-        for path in sorted(selected):
-            props = properties(path)
-            if props.get("type") in schema["doc_types"] and props.get("owner_role") == "business_analyst":
-                targets.append({"path": path, "coverage": "exact_file", "source": path})
-                sources.append(path)
-    elif spec["resolver"] == "backlog_documents":
-        if closure is None and not cross_epic:
-            result["reason"] = "backlog write scope needs the existing --epic closure to separate primary sources from dependencies"
-            return result
-        if closure is None:
-            # The notes that cross-epic findings name, given one --input each.
-            bounded = {path.removeprefix("workspace/docs/") for path in selected}
-        else:
-            bounded = set(closure["primary_paths"]) | {closure["review"]["path"]}
-            if closure["scope"] != "backlog":
-                bounded.discard("backlog/backlog.md")
-        selected &= {"workspace/docs/" + path for path in bounded}
-        patterns = {
-            "backlog": r"backlog/backlog\.md",
-            "backlog-review": r"backlog/reviews/[^/]+\.md",
-            "epic": r"backlog/epics/[^/]+/epic\.md",
-            "epic-review": r"backlog/epics/[^/]+/reviews/[^/]+\.md",
-            "story": r"backlog/epics/[^/]+/stories/[^/]+/story\.md",
-            "test-plan": r"backlog/epics/[^/]+/stories/[^/]+/test-plan\.md",
-        }
-        for path in sorted(selected):
-            if not path.startswith("workspace/docs/backlog/"):
-                continue
-            props = properties(path)
-            kind = props.get("type")
-            if kind not in patterns or not re.fullmatch(patterns[kind], path.removeprefix("workspace/docs/")):
-                continue
-            # Story implementation ownership and QA content ownership do not
-            # transfer the Product Owner's canonical backlog writing boundary.
-            if kind not in {"story", "test-plan"} and props.get("owner_role") != "product_owner":
-                continue
-            targets.append({"path": path, "coverage": "exact_file", "source": path})
-            sources.append(path)
-    elif spec["resolver"] == "item_claims":
-        from delivery_compile import _is_normalized_claim, implementation_schedule, lane_roles, lane_scope_map
-        items = sorted(path for path in selected if re.fullmatch(
-            r"workspace/docs/delivery/deliveries/[^/]+/items/[^/]+/item\.md", path))
-        if len(items) != 1:
-            result["reason"] = "implementation scope needs exactly one selected Item record"
-            return result
-        item = items[0]
-        props = properties(item)
-        try:
-            published, delivery, offline = published_item(project, item, remote)
-        except ValueError as exc:
-            result["reason"] = str(exc)
-            return result
-        if published is not None:
-            props = published
-        claims = props.get("path_claims")
-        roles = props.get("role_sequence")
-        if (props.get("type") != "delivery-item" or not isinstance(roles, list)
-                or role.replace("-", "_") not in roles
-                or not isinstance(claims, list) or not claims
-                or any(not isinstance(path, str) or not _is_normalized_claim(path) for path in claims)
-                or len(claims) != len(set(claims))):
-            result["reason"] = "selected Item has no valid product path claims for this implementation role"
-            return result
-        try:
-            lane = (implementation_schedule(props) == "parallel_lanes_v1"
-                    and role.replace("-", "_") in lane_roles(props))
-        except ValueError:
-            result["reason"] = "selected Item declares an unsupported implementation_schedule"
-            return result
-        owned = claims
-        if lane:
-            # A lane writes only its approved lane scope; the other lanes of the
-            # Item write theirs in the same worktree at the same time.
-            scopes, unreadable = lane_scope_map(props)
-            owned = scopes.get(role.replace("-", "_"), [])
-            if unreadable or not owned or not set(owned) <= set(claims):
-                result["reason"] = "selected Item has no valid lane scope for this implementation role"
-                return result
-        targets = [{"path": path, "coverage": "path_and_descendants", "source": item}
-                   for path in sorted(owned)
-                   # A file system that folds case writes Workspace/docs into workspace/docs.
-                   if not any(path.casefold() == root or path.casefold().startswith(root + "/")
-                              for root in ("workspace/docs", ".git", ".agentrof"))]
-        sources = [item]
-        result["excluded_subtrees"] = ["workspace/docs", ".git", ".agentrof"]
-        result["constraints"].append("approved Item plan, current writer receipt, and completed/cancelled readers remain mandatory")
-        if offline:
-            result["constraints"].append(offline)
-        import delivery_git
-        provisional_on = (delivery_git.PROVISIONAL_SWITCH, delivery_git.PROVISIONAL_VALUE) in chosen
-        if delivery is not None and provisional_on and not lane:
-            try:
-                live = [claim for claim in delivery_git.delivery_provisional_claims(project, remote, delivery)
-                        if claim["story"] == props.get("story_id") and claim["state"] == "live"]
-            except RuntimeError as exc:
-                result["reason"] = f"the Item's provisional claims cannot be read: {exc}"
-                return result
-            provisional = sorted({path for claim in live for path in claim["paths"]} - {
-                target["path"] for target in targets})
-            if provisional:
-                targets.extend({"path": path, "coverage": "path_and_descendants", "source": item}
-                               for path in provisional)
-                result["constraints"].append(PROVISIONAL_CONSTRAINT)
-        if lane:
-            result["constraints"].append("parallel lane: write only this lane scope; the other lanes of the Item write theirs concurrently and the coordinator alone commits")
-    if targets:
-        result.update(status="resolved", allowed_write_area=targets, source_records=sources,
-                      reason="derived only from selected bound owner records; no new writer authority")
-    return result
+def committed(project: Path, relative: str) -> bool:
+    """Whether a tracked path matches HEAD in the index and byte for byte in the worktree."""
+    command = ["git", "-C", str(project)]
+    staged = subprocess.run([*command, "diff", "--quiet", "--cached", "HEAD", "--", relative], capture_output=True)
+    # Git's clean filter (autocrlf) hides worktree bytes that differ from HEAD, so compare the bytes.
+    blob = subprocess.run([*command, "cat-file", "blob", f"HEAD:{relative}"], capture_output=True)
+    return (staged.returncode == 0 and blob.returncode == 0
+            and blob.stdout == (project / relative).read_bytes())
 
 
 def task_skills(policy: dict, entry: str, role: str | None, skills: list[str] | None,
@@ -1257,10 +788,8 @@ def instruction_reads(policy: dict, package: Path, route: dict, role: str | None
 
 def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = None,
              inputs: list[str] | None = None, skills: list[str] | None = None,
-             findings: str | None = None, base: str | None = None, epic: str | None = None,
+             findings: str | None = None, base: str | None = None,
              expected_hash: str | None = None, package: Path = PACKAGE,
-             delivery: str | None = None, remote: str = "origin",
-             pass_kind: str | None = None, full_root_reason: str | None = None,
              changed: list[str] | None = None, context_plan: str | None = None) -> dict:
     policy = catalog(package)
     package = package.resolve()
@@ -1268,13 +797,9 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if entry not in policy["entries"] or mode not in policy["modes"]:
         raise ValueError("unknown entry or task mode")
     route = policy["entries"][entry]
-    variants = agent_variants(package)
-    if role in variants:
-        raise ValueError(f"{role} is a generated variant of {variants[role]}; derive its task as"
-                         f" {variants[role]}")
     if role is not None and role not in route["roles"]:
         raise ValueError("role does not belong to the selected entry")
-    if not route["project_state"] and (project is not None or inputs or findings or base or epic):
+    if not route["project_state"] and (project is not None or inputs or findings or base):
         raise ValueError("external entry uses conversation inputs only; it creates no project manifest")
     internal = {skill for bound in policy["role_skills"].values() for skill in bound}
     if set(skills or []) - internal:
@@ -1282,12 +807,8 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if not route["project_state"] and skills:
         raise ValueError("external entry does not select project method skills")
     selected_skills = task_skills(policy, entry, role, skills, route)
-    if delivery is not None and (project is None or not route["project_state"]):
-        raise ValueError("a Delivery belongs to a project task")
     try:
-        deliveries = task_deliveries(project, delivery, list(inputs or [])) \
-            if project is not None and route["project_state"] else []
-        chosen, policy_inputs = switch_choices(project, route, package, deliveries, entry, remote)
+        chosen, policy_inputs = switch_choices(project, route, package)
     except ValueError as exc:
         raise ValueError(f"process policy cannot bind switch instructions: {exc}") from exc
     registry, chosen, required, references, instruction_inputs = instruction_reads(
@@ -1313,44 +834,25 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     if findings:
         project_files.add(findings)
     read_only = read_only_task(policy, entry, role, mode)
-    documents = None if pass_kind is None else mechanical_pass(
-        policy, registry, pass_kind, entry=entry, role=role, mode=mode, route=route,
-        read_only=read_only, chosen=chosen, findings=findings, inputs=list(inputs or []),
-        project=project)
-    closure = None
-    if epic is not None:
-        if entry != "backlog-plan" or project is None:
-            raise ValueError("epic scope belongs to a project backlog task")
-        import backlog_review_inputs
-        closure = backlog_review_inputs.manifest(project / "workspace/docs", epic=epic or None,
-                                                 writer=not read_only,
-                                                 full_root_reason=full_root_reason)
-        project_files.update("workspace/docs/" + path for path in closure["paths"])
-    elif full_root_reason is not None:
-        raise ValueError("a full root read request belongs to a root review task (--epic with no id)")
     if project is None and project_files:
         raise ValueError("project root is required for project inputs")
     scoped = None
-    if impact and read_only and not epic:
+    if impact and read_only:
         project_files, scoped = closure_reads(
             project, project_files, set(inputs or []), base, findings, changed or [],
             approval_base(project, route.get("scope_kind"), package, inputs or []))
     if project is not None and route["project_state"] and project_reading is None:
         import project_context
-        seeds = set(project_files) if closure is not None or scoped is not None else set(inputs or []) or set(project_files)
+        seeds = set(project_files) if scoped is not None else set(inputs or []) or set(project_files)
         project_reading = project_context.task_context(project, entry=entry, role=role,
                                                        mode=mode, paths=seeds, change_base=base)
-    # An exact epic's closure is derived again on every run, so a source that
-    # reaches it, an incoming dependency edge included, joins its paths. Like
-    # the epic's review manifest, the task binds those and none of the other
-    # canonical sources, which another epic's writer changes in parallel.
-    read_set = frozenset(project_files) if epic else None
-    # A task given explicit inputs, outside an epic and a code review base,
+    read_set = None
+    # A task given explicit inputs, outside a code review base,
     # binds those inputs and the notes they cite by content, and the rest of
     # the canonical inventory by membership only, so a new or removed source
     # still invalidates it while a write to an unrelated note or a commit
     # leaves it fresh.
-    input_scoped = bool(inputs) and not epic and base is None and project is not None
+    input_scoped = bool(inputs) and base is None and project is not None
     if input_scoped:
         read_set = frozenset(project_files | cited_sources(project, project_files))
     records = identity(project, project_files) if project is not None else []
@@ -1360,7 +862,6 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     technology = set(skills or []) & set(policy["technology_method_skills"])
     if project is not None and technology:
         from vault_markdown import parse_frontmatter
-        from stage_package import paths_are_committed
         for relative in sorted(project_files):
             if not relative.startswith("workspace/docs/solution-design/decisions/") or not relative.endswith(".md"):
                 continue
@@ -1369,26 +870,12 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
             bound = props.get("method_skills", [])
             if not error and props.get("status") == "accepted" and isinstance(bound, list):
                 selected = technology & {value for value in bound if isinstance(value, str)}
-                if selected and paths_are_committed([path]):
+                if selected and committed(project, relative):
                     for skill in selected:
                         method_bindings.setdefault(skill, []).append(relative)
         if technology - set(method_bindings):
             raise ValueError("technology methods require selected committed accepted Solution decision inputs")
-    # At remediation_writers per_epic, a writer without --epic that applies
-    # findings is the cross-epic writer.
-    cross_epic = (epic is None and findings is not None and not read_only
-                  and (WRITERS_SWITCH, WRITERS_VALUE) in chosen)
-    scope = write_scope(project, set(inputs or []) | ({"workspace/docs/" + path for path in closure["paths"]}
-                                                    if closure else set()),
-                        role, route, read_only, closure, package, cross_epic, chosen, remote)
-    if documents:
-        scope.update(status="resolved", source_records=documents,
-                     allowed_write_area=[{"path": path, "coverage": "exact_file", "source": path}
-                                         for path in documents],
-                     reason=f"{pass_kind} writes only the owning writer's documents that the bound"
-                            " findings change; no new writer authority",
-                     constraints=[*scope["constraints"],
-                                  f"{pass_kind}: apply exactly the repairs the bound findings name"])
+    scope = write_scope(read_only)
     transitions = [
         {"condition": "source_identity", "status": "required",
          "detail": "Rerun this invocation with --expected-hash before returning or persisting the result."},
@@ -1464,7 +951,7 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
               "instructions": instruction_files, "project_inputs": records, "head": head, "base": base,
               "canonical_source_inventory": inventory, "method_bindings": method_bindings,
               "working_inputs": working,
-              "changed_paths": changes, "backlog_scope": closure, "open_findings": findings,
+              "changed_paths": changes, "open_findings": findings,
               "write_boundary": "read_only" if read_only else "named_owner_only",
               "write_scope": scope, "next_transition_conditions": transitions,
               "barrier": policy["barrier"], "repair_policy": policy["repair_policy"],
@@ -1476,8 +963,6 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
         result["context_inventory"] = {"count": len(inventory), "source_hash": digest(inventory)}
         result["canonical_source_inventory"] = [row for row in inventory
                                                 if row["path"] in project_files | set(read_set or [])]
-    if pass_kind is not None:
-        result["pass_kind"] = pass_kind
     if pack is not None:
         # The digest replaces the other required reads; the constitution, the
         # role's own file and every switch reference stay full reads, so no
@@ -1500,10 +985,6 @@ def manifest(*, entry: str, role: str | None, mode: str, project: Path | None = 
     hashed = result
     if input_scoped:
         hashed = {key: value for key, value in result.items() if key != "head"}
-    if epic:
-        # The closure is bound as its own source_hash binds it: the stubs it
-        # lists from notes outside its paths are information, never an input.
-        hashed = dict(result, backlog_scope=backlog_review_inputs.bound_view(closure))
     result["source_hash"] = digest(hashed)
     if expected_hash is not None and result["source_hash"] != expected_hash:
         raise ValueError("task inputs are stale; regenerate before persisting a result")
@@ -1521,29 +1002,17 @@ def main(argv=None) -> int:
     parser.add_argument("--skill", action="append", default=[])
     parser.add_argument("--findings")
     parser.add_argument("--base")
-    parser.add_argument("--epic", nargs="?", const="")
     parser.add_argument("--expected-hash")
-    parser.add_argument("--delivery")
-    parser.add_argument("--remote", default="origin",
-                        help="the Delivery remote whose Fence shows a held plan-revision barrier")
-    parser.add_argument("--full-root-reason",
-                        help="a root reader's reason to read the whole package (root_review_scope"
-                             " revision_delta)")
     parser.add_argument("--changed", action="append", default=[],
                         help="a workspace/docs note the change made (review_scope impact_closure);"
                              " the closure starts from these and the notes Git sees changed")
-    parser.add_argument("--pass-kind",
-                        help="a mechanical pass kind that templates/task-input-policy.json declares")
     parser.add_argument("--context-plan", help="project-relative path to a source-bound project reading plan")
     args = parser.parse_args(argv)
     try:
         result = ({"ok": True, "entries": sorted(catalog()["entries"])} if args.check_catalog else
                   manifest(entry=args.entry, role=args.role, mode=args.mode, project=args.project_root,
                            inputs=args.input, skills=args.skill, findings=args.findings, base=args.base,
-                           epic=args.epic, expected_hash=args.expected_hash,
-                           delivery=args.delivery, remote=args.remote,
-                           pass_kind=args.pass_kind, full_root_reason=args.full_root_reason,
-                           changed=args.changed, context_plan=args.context_plan))
+                           expected_hash=args.expected_hash, changed=args.changed, context_plan=args.context_plan))
         if args.project_root and result.get("write_boundary") == "read_only":
             from reader_manifest import compact
             result = compact(args.project_root, result)

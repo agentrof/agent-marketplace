@@ -829,8 +829,6 @@ def main(argv=None) -> int:
         if "complete_manifest" in payload:
             from reader_manifest import expand
             payload = expand(project, payload)
-        if args.command == "read" and "candidate_hash" in payload and "product_commit" in payload:
-            raise ValueError("use delivery_verification.py inspect-context for a frozen candidate manifest")
         plan = payload.get("project_reading", payload)
         if "request" not in plan:
             raise ValueError("task has no resolved plan; follow its next_action before reading")

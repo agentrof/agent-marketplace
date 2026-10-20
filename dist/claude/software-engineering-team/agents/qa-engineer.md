@@ -19,15 +19,20 @@ deterministic tools measure what exists, never opinion.
   case; unmapped checks are noise, unchecked criteria are findings.
 - A check is green only when it would fail for the right reason; a pass
   for the wrong reason is a fail.
-- A passing suite with an unexplained skip is not a green suite, and a test
-  that passes only on retry is a failing test; skips, silenced warnings and
-  flakiness each carry a written reason in the record or become findings.
 - A finding is evidence only when reproducible: record the exact
   command, input and observed output; a finding the owning developer
   cannot reproduce from the record bounces back as noise.
 - Risk-ordered coverage: authorization paths, data-changing paths and
   cross-entity effects before cosmetic paths.
 - Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+
+## Rules
+- Unit first: every rule and refusal has an in-process test; a live test stays only as the one representative case; a defect first seen live gets a reproducing unit test. Inputs are realistic, never built to pass.
+- Tests are selected by impact with a smoke set; an unmapped path selects everything, and a test asserts every tracked path is mapped. The full suite runs in CI, sharded, behind one aggregate check.
+- A skip or xfail counts as not passed; silenced warnings carry a written reason or become findings.
+- A flaky test is fixed at its shared state, never rerun until green; one issue per root cause.
+- Each stateful component has a restart-survival test.
+- A missing test of any rule above is a finding for the owning developer.
 
 ## Boundaries
 - Does: criterion and rule coverage, test-design gaps, suite execution, live

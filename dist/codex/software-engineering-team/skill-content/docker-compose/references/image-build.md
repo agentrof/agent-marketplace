@@ -32,7 +32,7 @@ Rules the shape encodes:
 
 ## Configuration and Secrets
 
-- The final image is environment-free: no mode flags, hostnames or credentials baked via build arguments into runtime behavior. Everything enters as environment variables at start.
+- The final image is environment-free: no mode flags, hostnames or credentials baked via build arguments into runtime behavior. Configuration enters as environment variables and secrets as mounted files at start.
 - Secrets never enter any layer, including intermediate ones: no secret build arguments, no credential files copied then deleted (deletion does not remove the layer). A secret needed at build time is a design smell to escalate.
 
 ## Ignore File

@@ -1,13 +1,13 @@
 ---
 name: docker-compose
-description: Containerized environment expertise loaded by software-engineering-team agents for environment work. Use when defining or changing the project's containerized environment, authoring image build recipes, wiring healthchecks and service dependencies, designing deterministic seed scenarios, isolating parallel environment instances, or verifying a one-command full-stack bring-up with clean logs.
+description: Containerized environment expertise (Docker Compose, Kubernetes with Helm, kind) loaded by software-engineering-team agents for environment work. Use when defining or changing the project's containerized environment or local cluster, writing Helm charts, authoring image build recipes, wiring healthchecks and service dependencies, designing deterministic seed scenarios, isolating parallel environment instances, or verifying a one-command full-stack bring-up with clean logs.
 exposure: internal
 ---
 
-# Docker Compose Environment
+# Container Environment (Compose, Helm, kind)
 
 **Given:** an architecture delta declaring applications, services and stores, and an ownership map granting the environment prefix.
-**Produces:** a compose-defined environment that rises from scratch with one command, healthchecked, seeded and clean, plus the entry point the whole team consumes.
+**Produces:** a compose- or chart-defined environment that rises from scratch with one command, healthchecked, seeded and clean, plus the entry point the whole team consumes.
 
 ## When to Use
 
@@ -21,7 +21,7 @@ exposure: internal
 
 1. **One command, fully up:** the `up` verb builds what changed, starts every service, waits on healthchecks and seeds the default scenario; it exits nonzero unless everything is healthy. Partial bring-up is failure.
 2. **Health probes real capability:** a healthcheck asserts the service can do its job (query answered, dependency reachable), not that a process exists. Dependents declare `depends_on` with the healthy condition.
-3. **Config only via environment variables:** images are identical across environments; no baked hosts, modes or secrets. Local secrets live in an env file that stays untracked; committed defaults are secretless.
+3. **Config via environment variables, secrets via mounted files:** images are identical across environments; no baked hosts, modes or secrets. Local secrets live in untracked files mounted read-only; committed defaults are secretless.
 4. **Exact image tags, non-root, multi-stage:** never a floating tag; final stages run as a non-root user on minimal bases; dependency manifests are copied before source so the build cache survives source edits.
 5. **Teardown means everything:** the `down` verb removes containers, networks and data volumes. From-scratch verification starts with it.
 6. **Isolation by naming:** namespacing comes from the entry point (below), never from caller discipline.
@@ -93,6 +93,7 @@ A defect in environment-owned files cannot be reproduced by the hermetic suite. 
 
 - [compose-patterns](references/compose-patterns.md): service anatomy, healthcheck design, dependency conditions, project-name derivation, port strategy, volumes. Read when writing or changing the compose definition or the entry point.
 - [image-build](references/image-build.md): multi-stage recipes, non-root users, cache ordering, ignore files, tag policy. Read when authoring or reviewing a build recipe.
+- [cluster-patterns](references/cluster-patterns.md): rollout, kept state, store-owned roles, minimal images and the converging dev environment on Kubernetes, Helm and kind. Read when the environment runs on a cluster.
 - [seed-scenarios](references/seed-scenarios.md): registry shape, determinism rules, the runner-loader boundary. Read when designing or changing seed data.
 
 ## Checklists

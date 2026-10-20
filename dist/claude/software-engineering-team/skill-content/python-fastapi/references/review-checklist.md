@@ -58,7 +58,7 @@ Checkbox assertions for reviewing server-side code. Every unchecked box is a fin
 - [ ] Token validation checks expiry, signature, and claims
 - [ ] All request bodies validated through models; no raw dict access
 - [ ] No injection paths: parameterized queries only
-- [ ] Secrets loaded from environment via the settings object, never hardcoded
+- [ ] Secrets loaded from mounted files via the settings object, never from environment variables, arguments or code
 - [ ] No sensitive data in logs (passwords, tokens, personal data)
 - [ ] CORS restrictive: explicit origins from configuration, never a wildcard in production
 - [ ] Rate limiting on authentication endpoints
@@ -71,7 +71,7 @@ Checkbox assertions for reviewing server-side code. Every unchecked box is a fin
 
 ## Authentication and Authorization
 
-- [ ] Signing secret loaded from environment and sufficiently long
+- [ ] Signing secret loaded from a mounted file and sufficiently long
 - [ ] Access tokens short-lived, paired with a refresh flow
 - [ ] Refresh mechanism rejects expired or revoked tokens
 - [ ] Role and permission checks enforced on every protected endpoint, not just at the route group
@@ -82,7 +82,8 @@ Checkbox assertions for reviewing server-side code. Every unchecked box is a fin
 
 ## Configuration and Operations
 
-- [ ] Typed settings object used for all configuration, not direct environment reads
+- [ ] Typed settings object used for all configuration, not direct environment reads; validated once at startup
+- [ ] Multi-tenant: the tenant context is set transaction-local by the one helper that opens the transaction
 - [ ] Example environment file lists every required variable with a description
 - [ ] Health endpoint exists and verifies critical dependencies
 - [ ] Structured JSON logging with correlation ids

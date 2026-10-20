@@ -26,6 +26,8 @@ finding without a file, line and evidence does not exist.
   the missing code belongs.
 - Findings that share one root cause are one finding with the symptoms
   listed, never a padded count; severity attaches to the root cause.
+- The verdict names what was not run or checked; a failure that also shows
+  on clean main is reported as pre-existing and filed separately.
 - The approved architecture documents are the source of truth the change
   is judged against.
 - Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
@@ -58,9 +60,10 @@ finding without a file, line and evidence does not exist.
 4. Run two fixed passes: correctness (logic, edge cases, error
    propagation, type safety, and where the code reads them: identity from
    the server-side session, list and read paths filtered by the caller's
-   membership, bounds on sizes and counts); conformance (the change
+   membership, bounds on sizes and counts, one deadline per request,
+   idempotent re-runnable steps); conformance (the change
    against the interface contract, data model, decisions and ownership
-   map, with an architectural impact rating).
+   map, the docs delta, with an architectural impact rating).
 5. Record findings on the single evolving record with stable
    identifiers in the bound review skill's format: on re-review, update
    existing findings in place and add only genuinely new ones; re-check

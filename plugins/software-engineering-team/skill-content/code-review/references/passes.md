@@ -51,6 +51,10 @@ The change does what it claims, for all inputs, on all paths.
       membership or role, not only by the tenant boundary
 - [ ] Bounds: page sizes, upload sizes, counts and loops over input have
       an upper limit
+- [ ] Deadline: one deadline, set at request arrival, bounds every
+      outbound call the request makes
+- [ ] Idempotency: every re-runnable step is idempotent; a create takes a
+      client idempotency key (same body replays, different body is 409)
 
 ### Error Propagation
 
@@ -103,6 +107,12 @@ ad hoc structural terms cannot.
       storage)
 - [ ] Recorded decisions honored; a change that contradicts a decision is
       a finding even when the code works
+
+### Docs Delta
+
+- [ ] The README and the interface and architecture records the change
+      makes stale are updated in the same pull request
+- [ ] No new helper duplicates an existing one the change could have used
 
 ### Ownership Map
 

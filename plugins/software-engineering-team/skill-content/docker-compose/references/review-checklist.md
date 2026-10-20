@@ -1,4 +1,4 @@
-# Docker Compose Review Checklist
+# Container Environment Review Checklist
 
 Checkbox assertions for reviewing environment-owned diffs (the workspace/environment/ prefix). Every unchecked box is a finding; report it with file, line, and the failing assertion.
 
@@ -13,6 +13,10 @@ Checkbox assertions for reviewing environment-owned diffs (the workspace/environ
 - [ ] Data lives in named volumes; teardown with volumes removes all of it
 - [ ] Optional tooling sits behind a profile; plain `up` is exactly the system the user gets
 
+## Cluster
+
+- [ ] When the environment runs on a cluster, every box of the [cluster-patterns](cluster-patterns.md) reference holds
+
 ## Images
 
 - [ ] Base images pinned to exact tags; zero floating tags anywhere
@@ -24,7 +28,7 @@ Checkbox assertions for reviewing environment-owned diffs (the workspace/environ
 
 ## Config and Secrets
 
-- [ ] All runtime configuration enters via environment variables; nothing environment-specific baked into any image
+- [ ] Runtime configuration enters via environment variables and secrets via mounted files; nothing environment-specific baked into any image
 - [ ] No secret in any layer, build argument, committed file or default env value
 - [ ] Committed env defaults are secretless and sufficient for a clean-machine bring-up
 - [ ] Log output contains no credentials or secrets

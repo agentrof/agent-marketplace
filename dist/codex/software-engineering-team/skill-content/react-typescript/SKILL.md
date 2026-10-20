@@ -42,6 +42,7 @@ exposure: internal
 - Split code by route, parallelize independent fetches, preload heavy modules on user intent
 - Reach for semantic elements and labeled controls first; add ARIA only where semantics fall short
 - Query by role and label in tests; assert behavior the user can observe
+- Keep tokens in the browser-facing backend; the browser holds only a `__Host-` session cookie (BFF checks in the review checklist)
 
 ## DON'T
 

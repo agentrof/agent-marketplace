@@ -58,6 +58,10 @@ Load when designing or reviewing a relational schema: entities, fields, keys, co
 - Exclusion constraints prevent overlapping ranges (no double-booking).
 - Enforce invariants in the database, not only in application code.
 
+## Multi-Tenant Isolation
+
+When the system is multi-tenant, the database enforces it: `tenant_id NOT NULL` from a transaction-local setting, row level security enabled and forced, requests as a non-owner role without BYPASSRLS, a schema-wide test, append-only audit. Walk the multi-tenancy reference below.
+
 ## Zero-Downtime DDL
 
 | Operation | Safe? | Strategy |
@@ -95,5 +99,6 @@ Expand-contract: (1) Expand: add the new column alongside the old. (2) Migrate: 
 - [advanced-patterns](references/advanced-patterns.md): materialized views, generated columns, temporal and audit patterns. Read when a read path wants precomputation or history tracking.
 - [performance](references/performance.md): query plans, selectivity, write-heavy design, batch sizing. Read when validating the index strategy or sizing a backfill.
 - [examples](references/examples.md): worked entity examples. Read when starting a schema and wanting a reference shape.
+- [multi-tenancy](references/multi-tenancy.md): tenant tables, roles, the schema-wide test, audit, invariants and migration numbering. Read when the system is multi-tenant or a migration touches a tenant table.
 - [review-checklist](references/review-checklist.md): design-time review checks. Read when reviewing a relational schema deliverable.
 - [qa-checklist](references/qa-checklist.md): QA gate checks with PASS/FAIL criteria. Read when running the QA gate on a schema deliverable.

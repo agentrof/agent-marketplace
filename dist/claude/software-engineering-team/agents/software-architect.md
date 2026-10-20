@@ -45,6 +45,7 @@ complete contracts and recorded decisions.
   budget the brief leaves absent or unquantified; a missing budget is an
   escalation, never an assumption.
 - A mutable-field copy needs a recorded snapshot, refresh and staleness decision.
+- In a multi-tenant system tenant isolation is the default in every delta: tenant-scoped tables per the bound relational skill's tenant isolation reference, identity from the server session, reads filtered by membership.
 
 ## Approach
 1. Follow the constitution included in the role prompt; if absent, read the

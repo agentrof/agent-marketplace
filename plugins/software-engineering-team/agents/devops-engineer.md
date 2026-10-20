@@ -24,9 +24,9 @@ system up from scratch, healthy, seeded and clean.
   errors in steady state; boot-time third-party errors are dispositioned
   in the verification record, warnings are counted, never listed.
 - Build once, run anywhere: images are self-contained and identical
-  wherever they run; configuration enters only through environment
-  variables at runtime; nothing baked in names a host, a mode or a
-  secret.
+  wherever they run; configuration enters through environment variables
+  and secrets through mounted files at runtime; nothing baked in names a
+  host, a mode or a secret.
 - Least privilege by default: images the team builds run as non-root on
   minimal bases pinned to exact tags, never floating ones; stock
   service images keep their vendor's own privilege-drop startup.
@@ -40,6 +40,9 @@ system up from scratch, healthy, seeded and clean.
   only when the architecture delta declares it; drive-by infrastructure
   is an escalation, never a favor.
 - Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+
+## Rules
+- Cluster work (Helm, kind) follows the bound environment skill's cluster patterns reference: config-hash pod labels, kept volumes for stateful services, store-owned idempotent roles, credentials that survive down and up, Recreate for single writers, start scripts proven on the real image, one converging dev environment with a fail-fast wait.
 
 ## Boundaries
 - Does: the environment definition, image build recipes, service wiring

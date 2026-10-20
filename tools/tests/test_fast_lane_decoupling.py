@@ -1,13 +1,14 @@
 """The fast lane, vault tooling, autopilot and setup import no governed compiler.
 
-Each kept module is imported in a fresh interpreter whose import system refuses
-every governed module, so the governed path can be removed without breaking them.
+Each kept module is imported anew while the import system refuses every governed
+module, so the governed path can be removed without breaking them.
 """
 
 from __future__ import annotations
 
-import json
-import subprocess
+import importlib
+import importlib.abc
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -35,34 +36,38 @@ KEPT = (
 )
 # Kept modules that still import a governed one, each with its reason.
 KNOWN_EXCEPTIONS: dict[str, str] = {}
-PROBE = """
-import importlib, importlib.abc, json, re, sys
-governed = re.compile(sys.argv[1])
-class Refuse(importlib.abc.MetaPathFinder):
+
+
+class RefuseGoverned(importlib.abc.MetaPathFinder):
     def find_spec(self, name, path, target=None):
-        if governed.match(name):
+        if re.match(GOVERNED, name):
             raise ImportError("governed module imported: " + name)
-sys.meta_path.insert(0, Refuse())
-sys.path[:0] = json.loads(sys.argv[2])
-failed = {}
-for name in json.loads(sys.argv[3]):
-    try:
-        importlib.import_module(name)
-    except Exception as exc:
-        failed[name] = f"{type(exc).__name__}: {exc}"
-print(json.dumps(failed))
-"""
 
 
 class FastLaneDecouplingTests(unittest.TestCase):
     def test_kept_modules_import_without_any_governed_module(self):
-        names = [name for name in KEPT if name not in KNOWN_EXCEPTIONS]
-        result = subprocess.run(
-            [sys.executable, "-I", "-c", PROBE, GOVERNED,
-             json.dumps([str(path) for path in SEARCH_PATH]), json.dumps(names)],
-            capture_output=True, text=True, check=False, timeout=120)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {})
+        roots = tuple(str(path) for path in SEARCH_PATH)
+        saved_modules, saved_path, saved_meta = dict(sys.modules), list(sys.path), list(sys.meta_path)
+        # Drop every module loaded from the package, so each one is imported anew here.
+        for name, module in saved_modules.items():
+            if str(getattr(module, "__file__", "") or "").startswith(roots):
+                del sys.modules[name]
+        sys.meta_path.insert(0, RefuseGoverned())
+        sys.path[:0] = roots
+        failed = {}
+        try:
+            for name in KEPT:
+                if name in KNOWN_EXCEPTIONS:
+                    continue
+                try:
+                    importlib.import_module(name)
+                except Exception as exc:  # noqa: BLE001 - every failure is reported
+                    failed[name] = f"{type(exc).__name__}: {exc}"
+        finally:
+            sys.modules.clear()
+            sys.modules.update(saved_modules)
+            sys.path[:], sys.meta_path[:] = saved_path, saved_meta
+        self.assertEqual(failed, {})
 
 
 if __name__ == "__main__":

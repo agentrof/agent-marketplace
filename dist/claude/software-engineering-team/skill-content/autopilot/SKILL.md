@@ -44,8 +44,9 @@ names, followed by one verb:
 - `off`: revokes the grant and prints the report. `report`: the report alone.
 
 A grant authorizes running the flows as prescribed and never waives what a
-flow requires: no grant, broad delegation or time pressure waives evidence,
-integration or the PR record. The `merge` class takes only the flow's own
+flow or the owner's agreed completion bar requires: no grant, broad delegation
+or time pressure waives reviews, isolation and live proof, integration or the
+PR record. An exception holds only when the owner named it. The `merge` class takes only the flow's own
 merge step on its recorded PR head, never a provider or Git merge of another
 head.
 
@@ -107,6 +108,9 @@ run `autopilot.py --project-root <root> waiting`. It submits one desktop
 notification per unchanged queue; a failed submission is reported, not treated
 as delivered. With independent work left, keep working and do not call it.
 `report --json` includes each queued question's age in seconds.
+
+During a long run, never go dark: report one consolidated inventory (done, in
+flight, waiting) anchored in the current plan with dated next milestones.
 
 ## Transport recovery
 

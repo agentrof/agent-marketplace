@@ -33,16 +33,9 @@ flow step that names switch `<id>`, the entry reads its value with
 
 Named project input files remain the authority. A manifest never decides applicability or creates an approval.
 
-Every role reads the sources its task file lists and greps `workspace/docs/`
-for anything missing; manual discovery stays allowed whenever context is
-insufficient or appears wrong. Record extra sources and reasons and rebind
-added evidence before relying on it. Every owning-flow review obligation
-remains. Skill selection is unchanged. Return `context_findings` to the parent for observed failures and
-recurring friction, including impact, recovery, and a fix and verification case
-when known. The parent uses `issue-report` to offer an anonymous report and
-obtains explicit user approval of its exact payload before any GitHub write.
-Project-only authoring gaps remain with their owner. Declining a report never
-blocks ordinary work. Never copy source content or transcripts into an issue.
+Sources first per constitution section 5. Rebind added evidence before relying
+on it; every owning-flow review obligation remains. Never copy source content or
+transcripts into an issue.
 
 The manifest lists full required reads, conditional references with their
 original read conditions, source identities, write boundaries and the output

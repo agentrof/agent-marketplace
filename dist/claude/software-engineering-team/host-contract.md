@@ -10,17 +10,8 @@
   every other hook passes. When the session context reports
   `AGENT_MARKETPLACE_PYTHON: unsupported`, stop the entry and tell the user the
   reason and the fix that context gives.
-- One Software Engineering Team owns a project. There is no shared project
-  state service or cross-project work key.
-- Resolve every canonical "packaged script" reference beneath
-  `${CLAUDE_PLUGIN_ROOT}`. No shared dispatcher or second
-  plugin is involved.
-- Bring an approved source handoff into the local checkout with Git itself,
-  never a pull or a wrapped script: fetch it first, then run one direct Bash
-  call from the checkout root with Git's absolute path, `<git> merge --no-edit
-  <source>`, or, when `HEAD` already holds that source, `<git>
-  restore --source=<source> --worktree -- workspace/docs/experience-design`.
-  `<source>` is a committed source holding the current remote target.
+- One Software Engineering Team owns a project. Resolve every "packaged
+  script" reference beneath `${CLAUDE_PLUGIN_ROOT}`.
 - A canonical entry with `project_scope: external` does not require project
   setup, workspace configuration or a Git repository.
 - Present canonical choice gates through `AskUserQuestion`, preserving options,
@@ -236,12 +227,9 @@
   a grant it still stops there. Under a grant, running that next entry is a
   question of class `phase_start`: `autopilot.py record` refuses it and
   `queue` keeps it queued, so stop there as before.
-- A grant, broad delegation or time pressure authorizes running the
-  prescribed flow and never waives its evidence, integration, PR record or
-  closure. The `merge` class takes only the flow's own `merge-pr` on the
-  recorded PR head, never a provider or Git merge of another head. A quality
-  exception is taken only at its explicit flow gate, never under a grant
-  alone.
+- A grant never waives a flow's evidence, integration or PR record. The
+  `merge` class takes only the flow's own `merge` step on the recorded PR
+  head, never a provider or Git merge of another head.
 - When `check` reports the grant inactive, expired or completed, ask through
   `AskUserQuestion` again, queued questions first. Roles never ask the user
   and never read the grant.

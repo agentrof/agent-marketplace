@@ -1,3 +1,4 @@
 # Project profile
 
-This file is user-owned after setup. The team seeds it only when absent.
+User-owned after setup; the team seeds it only when absent. Record the owner's
+learned working profile here.

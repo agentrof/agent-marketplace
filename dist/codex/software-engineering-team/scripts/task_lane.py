@@ -26,7 +26,7 @@ Every implementation request runs through this script:
   one's exit code and time; at switch ``pr_proof`` ``local_record`` ``open-pr``
   refuses without a green record of a clean HEAD and adds it to the PR body.
 - ``merge`` posts the reviewers' pass on the PR and, at rigor ``normal``,
-  turns on auto-merge; at rigor ``high`` the owner merges.
+  turns on auto-merge; at rigor ``high`` the owner merges unless ``--delegated``.
 - ``criteria`` lists a backlog story's numbered criteria, its open linked tasks
   and a warning when the story changed after an open task was requested;
   ``board`` groups tasks by epic and story and marks a story delivered once
@@ -2199,10 +2199,13 @@ def cmd_merge(args, root: Path) -> dict:
     counts = [getattr(args, key, None) for key in ("critical", "non_critical", "filed")]
     if any(count is not None for count in counts):
         note += "\n\nfindings: critical {}, non-critical {}, filed {}".format(*(count or 0 for count in counts))
-    if rigor == "high":
+    owner_merges = rigor == "high" and not getattr(args, "delegated", False)
+    if owner_merges:
         note += "\n\nRigor high: the owner merges this pull request."
+    elif rigor == "high":
+        note += "\n\nRigor high: auto-merged under the owner's delegation."
     run("gh", "pr", "comment", args.pr, "--body", note, cwd=root)
-    if rigor == "high":
+    if owner_merges:
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False,
                 "next": "rigor high: the owner reviews and merges"}
     try:
@@ -2353,6 +2356,8 @@ def main(argv: list[str] | None = None) -> int:
     merge.add_argument("--pr", required=True)
     merge.add_argument("--style", choices=("merge", "squash", "rebase"), default="merge")
     merge.add_argument("--detail")
+    merge.add_argument("--delegated", action="store_true",
+                       help="rigor high under a delegation that allows merge: auto-merge too")
     for key in ("critical", "non-critical", "filed"):
         merge.add_argument(f"--{key}", type=int, help=f"the review's {key} finding count"
                            if key != "filed" else "the non-critical findings filed as issues")

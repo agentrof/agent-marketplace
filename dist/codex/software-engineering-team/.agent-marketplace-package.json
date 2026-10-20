@@ -50,16 +50,16 @@
       "6cece58a92d7562c16f5a95c2efa0d0b7a1021d10e8281f1cbb31b140a493a6f"
     ,
     "constitution.md":
-      "061af378328b144f2bd558b73ba735fce82987ee6037cfb5110d5a64112e7fa7"
+      "47309ba22d3c4cfff3af59799dc8406c306954bdf344c28827a866950fe3029a"
     ,
     "flows/fast-lane.md":
-      "f0c79eec8169fafdb67a262edd19e6cabc54916f4756cdf0033c0f62d4d88922"
+      "0d7e92977dda4601df1926add67bf7ffaf6991548256c102247e3b43c16b76d5"
     ,
     "hooks/hooks.json":
       "e30483a24936acd1e67ad83bcb4e34a282c3c72243e5d581abf52e2fbbe04bce"
     ,
     "host-contract.md":
-      "df885dcada34caae7ecc6f91c579a9c5d9f88285c4f7e272f397d9a9959bea44"
+      "7ed1ccf7f082a8a5f918e7d5020816ab139b2ee6a0f94f5ff092a9838c6abfeb"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -146,7 +146,7 @@
       "d19af55eec08738727d088cf154111d97e0621cdd96022973071b720cc332ae3"
     ,
     "scripts/task_lane.py":
-      "dd53286c4dc8d243420b1de15936d6e00707ad40a01aad52f918f9f291ed5e9e"
+      "43f2257dbc5021e70b849323d7563a2a41378183a48e7a35e82825fee513490d"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -158,7 +158,7 @@
       "07268df9dcc524f8f242e54d1d70c04ed9ff0dcf166be8407b7cd790044c5625"
     ,
     "skill-content/autopilot/SKILL.md":
-      "b628e18c0612511956dcb3fdb91f2e8b82bf27d79918feca9551130291aac6f1"
+      "01700d64d165f5f92af009cb6c59e922d2bcf3a431df0620c27c0f5bc119748e"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
       "cde9d72c1ae4a029e2afce76fc4cdfd4939582537e38a36d8e05c91e11f66a18"
@@ -215,7 +215,7 @@
       "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
     ,
     "skill-content/deliver/SKILL.md":
-      "7268475852abb660e326c244b822e88b0cc32b96be655f001cc964879b0856bb"
+      "a20b5e59b5e3f201effe0e27f6bbff04acd9c402294fa0f6f784d1294cf584a1"
     ,
     "skill-content/deliver/data/role-routing.json":
       "e4df0dfeeb7cae08e398b1a0d64d441657b31b2dc557ab316e463677bf3f94f8"
@@ -227,7 +227,7 @@
       "08fb884a5c9544c068cb0c8ac0853f39860eb93107c3689b3e35ac6e5a9abe3d"
     ,
     "skill-content/deliver/references/fast-lane.md":
-      "b03d48eb837816f5f86855ca9911b1fe61d25655f60fee926e0698e63687bb3d"
+      "b3f0a7ad40925c7060162f5e60fa9395b71e11c2a564bc48c97c3423991560e2"
     ,
     "skill-content/deliver/references/switch-pr_proof-local_record.md":
       "7d58d116f06aa2722b75f8b67bc444987c8a2d7d88cd0a86d491c96332e57047"
@@ -461,10 +461,10 @@
       "7c533d07a527237a4ac3e25af85734213f458daa1c3f9eda901d5b37846ad62f"
     ,
     "templates/AGENTS.override.md":
-      "c900e54785451bb3c07e6b4921d5a0a93fc728aa263a47134c399cb51f0e5953"
+      "373cd02759b4a35be2460215f5e8b3526f8ef1f9916bb57581c7dab03b069dba"
     ,
     "templates/CLAUDE.md":
-      "a8ffc94edcd429e3d840a421da9eda1dbfdadd4c90219b8c2dda7fe280349afd"
+      "77a6a426cc67b6182f230329745970968e5f60f99069594e40a6f9f0d88a23c7"
     ,
     "templates/ci-tests.yml":
       "1e6c663045ba2a1fdd79cbc1e3efa47bba670a42bcb527cd2d57f2078465bfaf"
@@ -482,16 +482,16 @@
       "682fdb71b913a3eed47868304164ad1c7fc086e497a4e78e064cd59d111d5702"
     ,
     "templates/memory/current-plan.md":
-      "193db6f556c8ed7a2cb2a98e58687ed59781d30666ee7a7ed5641398fae5a4c1"
+      "de6ca3265cfca0cdd929c9cfa4832e58a214047775fd5ac65d8801d38a2c2ecb"
     ,
     "templates/memory/me.md":
-      "707506fcae21f5bbcc3f14544cfda8369965dcfc40e808a48e94ab362658fa41"
+      "c1b1e79b6ced071bab76cde3a98f557e4c08c15969136f14b3fbadc726905125"
     ,
     "templates/memory/product-decisions.md":
       "3eaaa34a5b38431c81614902bbd8297f19da374a41da88468667904d3335a887"
     ,
     "templates/memory/profile.md":
-      "ed33c361fecb9a22e3a221caffea95d20e2c1a67f6f169c72416d01a014ddde5"
+      "b830be1df67cf93730e457cd3bf683923ed60aa2e78a098fa8de0d94cd334bd0"
     ,
     "templates/model-classes.json":
       "4bce7e1222a9673ba95875e86e144a368a5de289e780eca4ccc925d71552054c"
@@ -503,19 +503,19 @@
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
     ,
     "templates/project-instructions/common.md":
-      "ac1ff9524fe42658d7c7eaf90156d69a9db1bc194f26fd9fbe82a3525cb95107"
+      "5dbdb11d8145574e8781f5db9b7a1c26ec20335b78217ae3faa1a48e27318d97"
     ,
     "templates/project-instructions/host.md":
-      "0ceaf50730dcd8ed779a9deb32dda64b3b24f2ec808985ce1286c473dd1c631d"
+      "d55ce54edd57f3d01df2dd9c130a19bd40cc21846c8e07e3a7c6235dc740a170"
     ,
     "templates/project-instructions/team.md":
-      "2784f0e3ecf5a78599b95a0853d0f9e7ef3ffe81c5561e9398653be5f884dd1f"
+      "4278176e43946065277ef36f7436a40039a16dc3a57fc3d4f2ff0e27d1c39995"
     ,
     "templates/project-instructions/user-context.json":
       "1948e5b9c4992a9bce42ce83b41d99488d07ee990ffe5413f5ab5f2e191d6212"
     ,
     "templates/task-input-contract.md":
-      "26f8fbdedc23ac816ec9b5b38c72566c7921ddb502295e9c4ac3c51d6d40de92"
+      "2df577ed4a9169aecb376ca5d88d72beec84b744abf1bab9ec1aa16e12551f13"
     ,
     "templates/task-input-policy.json":
       "7d014489540fb0ad3476d68c411ed8b57a6bfa32b071aa5f4b701db488dee5dc"

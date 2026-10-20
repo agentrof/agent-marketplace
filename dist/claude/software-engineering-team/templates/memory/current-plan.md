@@ -1,7 +1,7 @@
 # Current plan
 
-User-owned after setup; the team seeds it only when absent. Keep it current at
-every step so a new session starts here without re-explaining.
+User-owned after setup; the team seeds it only when absent. A new session reads
+it first; keep it current at every step and archive finished history out of it.
 
 ## Done
 

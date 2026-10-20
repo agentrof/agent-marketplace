@@ -3,14 +3,11 @@
 # Agent Marketplace project contract
 
 - The project root is the Git checkout and `workspace/` is the only project
-  workspace for this team. A second managed workspace is invalid.
-- Durable truth is kept in tracked project files. Generated indexes are
-  reproducible and disposable; no shared database is required.
-- Before mutation, inspect `workspace/config.json`, the project-local
-  `.agentrof/agent-marketplace/.runtime/` scratch directory if present, and
-  `workspace/docs/`. Keep durable state inside the selected Git checkout.
-- User decisions are explicit. A workflow pauses at its named gate instead of
-  silently changing an approved document.
+  workspace for this team. Durable truth is kept in tracked project files;
+  `.agentrof/agent-marketplace/.runtime/` is disposable local scratch.
+- User decisions are explicit: a workflow pauses at its named gate, recommended
+  option first. Do exactly what was asked; a need found on the way is named and
+  asked, never built silently.
 - Authored Markdown body prose follows `output_language`; project terminology
   follows `terminology_language`. Machine keys, ids, paths and CLI output stay
   English. User-facing conversation may use the user's language.
@@ -20,7 +17,7 @@
   link or issue reference, commit id, local or home path, story, Delivery,
   scenario or requirement id, measured data presented as this project's,
   domain, client or person. Retell evidence as an anonymous case, such as
-  "in one measured project".
+  "in one measured project", and scan the text before every write.
 
 # Software Engineering Team
 
@@ -30,26 +27,24 @@
   configure entry.
 - `{{workspace}}/docs/`: the project documents. A role reads the sources its
   task file lists and greps this tree for anything missing.
-- `{{workspace}}/apps/`: application code, one directory per application.
-- `{{workspace}}/tests/`: the project's tests, or the folder `tests_root` in
-  the config names.
+- `{{workspace}}/apps/`: one folder per application with its own Dockerfile,
+  lock file, a README stating its contract, and its tests and migrations.
+- `{{workspace}}/tests/`, or the folder `tests_root` names: shared environment
+  and harness suites.
 - `{{workspace}}/experience-design/`: `DESIGN.md` and one
   `<feature-slug>/design.md` with `exports/` per designed feature.
 - `{{workspace}}/project/<name>/`: project-specific data. A hook refuses any
   top-level folder under `{{workspace}}/` or `{{workspace}}/docs/` that
   `workspace_layout` in the config does not allow.
-- `{{workspace}}/memory/`: `current-plan.md` (done, next step, open
-  decisions; kept current at every step), `product-decisions.md`, `me.md`
-  and `profile.md`, all loaded below.
-- `{{workspace}}/docs/operation/`: verification and environment knowledge and
-  the Process Policy.
-- `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime
-  scratch and generated caches. It is never a shared or global database.
+- `{{workspace}}/memory/`, all loaded below: `current-plan.md` is read first
+  and updated at every step (done, next step, open decisions; history is
+  archived out of it); `product-decisions.md` holds the owner's binding
+  decisions, read before product work, and overrides the docs; `me.md` and
+  `profile.md` hold the owner's own working rules.
 - `{{workspace}}/docs/backlog/tasks/`: tracked fast-lane task records.
 
-Work runs through the `deliver` entry on the fast lane: task, branch, pull
-request, review and merge. Release Management remains out of scope for this
-package.
+Work runs through the `deliver` entry: task, branch, pull request, review and
+merge. Release Management is out of scope for this package.
 
 ## Companion skills
 

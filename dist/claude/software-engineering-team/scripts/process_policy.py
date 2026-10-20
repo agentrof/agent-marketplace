@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import atomic_file
-from ba_compile import (
+from vault_markdown import (
     frontmatter_item, frontmatter_scalar, parse_frontmatter, without_generated_relations,
 )
 
@@ -745,8 +745,10 @@ def emit(value: dict, code: int = 0) -> int:
 
 
 def render_delivery_map(docs: Path) -> None:
-    import delivery_compile
-
+    try:
+        import delivery_compile
+    except ImportError:  # a package without the governed Delivery path has no Delivery map
+        return
     delivery_compile.render_map(docs)
 
 
@@ -759,7 +761,10 @@ def pin_backlog_rounds(docs: Path) -> list[str]:
     """
     if not (docs / "backlog").is_dir():
         return []
-    import backlog_compile
+    try:
+        import backlog_compile
+    except ImportError:  # a package without the governed backlog path pins no review rounds
+        return []
 
     return backlog_compile.pin_rounds_before_policy_change(docs)
 

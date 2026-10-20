@@ -32,7 +32,7 @@
         ]
       },
       {
-        "matcher": "Write|Edit|apply_patch",
+        "matcher": "Write|Edit|apply_patch|Bash",
         "hooks": [
           {
             "type": "command",

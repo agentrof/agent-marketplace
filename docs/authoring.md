@@ -696,8 +696,6 @@ integration with a median cycle time at most half that of stories over budget.
 a story's optional `operation_impact: required|not_applicable` classification
 with its `operation_reason`. The vault policy declares it under
 `backlog_contract.optional_story_classifications`, `backlog_compile.py check`
-validates it whenever a story carries it, and the `vault_policy_shape`
-validator check requires each declared classification and its reason to be
-vault-wide text properties. A story without it is unknown for it and counts no
+validates it whenever a story carries it. A story without it is unknown for it and counts no
 Operation delta. Switch `delivery_path` at `light_when_eligible` reads
 `required` as the failed condition `no_operation_impact`.

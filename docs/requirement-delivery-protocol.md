@@ -19,7 +19,6 @@ invocation and choice gates.
 /retrospective
 /demo
 /sketch
-/organize-docs
 /issue-report
 /autopilot
 ```
@@ -73,7 +72,7 @@ defines its classes, goals and limits.
 
 ## Durable project truth
 
-The only managed workspace is `workspace/`; its vault root is
+The only managed workspace is `workspace/`; its documents live in
 `workspace/docs/`. Authored Markdown, project configuration and Git refs are
 durable. The project-local `.agentrof/agent-marketplace/.runtime/` tree holds
 only ignored receipts, locks, temporary indexes and worktrees. Deleting that
@@ -256,7 +255,7 @@ them to another value, one with every switch at its default included, agrees
 with the pin. A `scope_approved` Delivery reads every switch a Delivery flow
 owns. An `execution_approved` one runs only its `delivery-execution` flow
 until a plan revision, whose approval pins the policy anew, so it reads only
-the switches that flow owns: `code_review_panel`, `context_pack`, `execution_planning`,
+the switches that flow owns: `code_review_panel`, `execution_planning`,
 `finding_disposition`, `implementation_schedule`, `item_live_gate`, `item_qa_tier`,
 `item_review_scale`, `item_verification`, `lane_isolation`, `level_change_map`,
 `live_case_reuse`, `live_verification`, `own_target_reuse`, `owner_gates`,
@@ -1175,8 +1174,7 @@ merge dropped the Integration ref, when the target records the cancellation.
 ## Setup and package upgrade
 
 Setup uses one convergent `inspect`, `apply`, `check` planner. It preserves
-authored Markdown, retained closed-schema configuration values and user-owned Obsidian
-settings while converging package-owned files and policy keys. Open Deliveries
+authored Markdown and retained closed-schema configuration values while converging package-owned files and policy keys. Open Deliveries
 are quiesced behind the Fence before a package upgrade changes Delivery
 contracts. The detailed sequence is defined in
 [upgrade-protocol.md](upgrade-protocol.md).

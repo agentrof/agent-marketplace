@@ -17,9 +17,8 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
 7. The project-local runtime is
    `<git-root>/.agentrof/agent-marketplace/.runtime/` and contains only ignored,
    disposable scratch and cache files. Deleting it cannot change project truth.
-8. The vault root is `workspace/docs/`. Its policy, graph colors, maps and
-   typed front matter are project-local and versioned with the project.
-   No second workspace path is valid.
+8. The project documents live in `workspace/docs/`, versioned with the
+   project. No second workspace path is valid.
 9. The backlog source is `workspace/docs/backlog/`. Its nested epic, story,
    review and test-plan Markdown files are canonical.
 10. `backlog_compile.py` is a deterministic compiler. It produces disposable
@@ -274,5 +273,5 @@ Repository issue and release operations are documented separately in
 - `plugins/software-engineering-team/`: canonical workflows, agents, skills,
   compilers and templates.
 - `platforms/`: registered host adapters, native manifests, and overlays.
-- `workspace/docs/`: consuming project's Obsidian vault and backlog.
+- `workspace/docs/`: consuming project's documents and backlog.
 - `tools/`: build, validation, release and scaffolding contracts.

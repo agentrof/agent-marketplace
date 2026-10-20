@@ -339,20 +339,8 @@ readers running at once, as
 Each host contract states how: Codex counts every open spawned thread against
 its cap, while a finished Claude Code subagent holds none.
 
-What every role reads in full for a change is process switch `review_scope`.
-At `full`, the default, it reads the complete package its step names. At
-`impact_closure`, the owning compiler's structural check runs before any
-reader starts, `impact_closure.py` derives the changed notes from the approval
-stamps and their closure over the vault's typed relations and shared
-contracts, every role reads that closure in full and each approved, unchanged
-note outside it as its hash-bound summary, reads beyond it when unsure and
-records why, a writer fixes a reported graph gap through its owning compiler
-and recomputes the closure, and a confirmation re-review reads only the fix's
-delta. A first approval, a shared contract or policy change and a graph gap
-widen the read, as
-`challenge-review/references/switch-review_scope-impact_closure.md` defines.
-Whatever the value, every role navigates the vault first, in the tier order of
-the constitution's section 5.
+Every role starts from the sources its task file lists and greps
+`workspace/docs/` for gaps, per the constitution's section 5.
 
 How many readers share one review's changed units is process switch
 `review_fanout`. At `single_reader`, the default, the step's reader reads
@@ -372,13 +360,6 @@ level and a blocking fix re-runs every level whose manifest hash it changes,
 as
 `challenge-review/references/switch-review_levels-concurrent_when_independent.md`
 defines.
-
-What a spawned role reads first is process switch `context_pack`. At `off`,
-the default, it reads every flow, skill and reference file its task binds. At
-`role_digest`, it receives the pack `context_pack.py build` derives for its
-entry, role and mode, reads a named source in full only when the pack does not
-cover its case and records that read and why, as
-`challenge-review/references/switch-context_pack-role_digest.md` defines.
 
 Whether flow steps are timed is process switch `step_timing`. At `off`, the
 default, nothing is recorded. At `recorded`, the coordinator wraps each step
@@ -739,12 +720,7 @@ declares, since a host can skip a declared hook it has not enabled or
 trusted. The guard
 stops an agent that runs the packaged script, not a process that writes the
 runtime files with the user's filesystem authority: the hooks are
-workflow-integrity controls, not an operating-system sandbox. `vault_hook.py`
-narrows the gap. It denies a tool write into the autopilot runtime directory
-and puts back what a shell command adds to the grant or the arming record,
-while a command may still end the grant or delete the files; a process outside
-the host's tool calls, or a command that overlaps a run of `autopilot.py`,
-escapes or undoes that check.
+workflow-integrity controls, not an operating-system sandbox.
 
 Autopilot is an entry, not a process switch. A switch is a project rule that a
 Delivery pins at scope approval, and changing it inside a pinned Delivery is

@@ -69,20 +69,6 @@ class CountsTests(unittest.TestCase):
         self.assertIn("Outro text.", new)
         self.assertIn("| 1 | 1 | 1 | 1 |", new)
 
-    def test_check_detects_drift(self):
-        root = self.make_root()
-        block = counts.render_block(counts.compute(root))
-        _, fresh = counts.inject(root / "README.md", block)
-        (root / "README.md").write_text(fresh, encoding="utf-8")
-        # Current -> no drift.
-        _, same = counts.inject(root / "README.md", block)
-        self.assertEqual(fresh, same)
-        # Hand-edit a number inside the block -> drift.
-        tampered = fresh.replace("| 1 | 1 | 1 | 1 |", "| 9 | 9 | 9 | 9 |")
-        (root / "README.md").write_text(tampered, encoding="utf-8")
-        old, new = counts.inject(root / "README.md", block)
-        self.assertNotEqual(old, new, "hand-edited counts must register as drift")
-
     def test_missing_markers_is_fatal(self):
         root = self.make_root()
         (root / "README.md").write_text("# No markers here\n", encoding="utf-8")

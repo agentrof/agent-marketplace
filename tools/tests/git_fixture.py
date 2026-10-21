@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import shutil
-import stat
 import subprocess
 import tempfile
 import time
@@ -74,10 +72,3 @@ def temporary_directory() -> Iterator[str]:
         yield temporary.name
     finally:
         remove_temporary(temporary)
-
-
-def make_writable(path: Path) -> Path:
-    """Give an existing file its owner write bit back, as a writer that bypasses the readers' read-only modes would."""
-    if path.exists():
-        os.chmod(path, path.stat().st_mode | stat.S_IWUSR)
-    return path

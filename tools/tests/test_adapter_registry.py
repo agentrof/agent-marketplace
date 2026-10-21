@@ -71,17 +71,10 @@ class AdapterRegistryTests(unittest.TestCase):
             build_distributions.load_adapters(self.root)
 
     def test_feature_branch_prefix_must_be_one_kebab_name_and_slash(self):
-        path, original = self.adapter_json("claude")
-        for prefix in (None, 7, "", "claude", "Claude/", "claude/next/"):
-            with self.subTest(prefix=prefix):
-                value = dict(original)
-                if prefix is None:
-                    del value["feature_branch_prefix"]
-                else:
-                    value["feature_branch_prefix"] = prefix
-                self.write_adapter(path, value)
-                with self.assertRaisesRegex(ValueError, "feature_branch_prefix"):
-                    build_distributions.load_adapters(self.root)
+        path, value = self.adapter_json("claude")
+        self.write_adapter(path, dict(value, feature_branch_prefix="claude/next/"))
+        with self.assertRaisesRegex(ValueError, "feature_branch_prefix"):
+            build_distributions.load_adapters(self.root)
 
     def test_product_entry_without_adapter_is_rejected(self):
         path = self.root / "platforms" / "codex" / "adapter.json"

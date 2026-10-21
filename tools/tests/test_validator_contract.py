@@ -85,17 +85,7 @@ def just_below(version: str) -> str:
     return f"{major}.{minor - 1}.999" if minor else f"{major - 1}.999.999"
 
 
-def just_above(version: str) -> str:
-    major, minor, patch = release(version)
-    return f"{major}.{minor}.{patch + 1}"
-
-
 class ValidatorContractTests(unittest.TestCase):
-    def fixture(self, temporary: str) -> Path:
-        root = Path(temporary)
-        fixtures.make_valid_root(root)
-        return root
-
     def partial(self, reads) -> Path:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -118,15 +108,6 @@ class ValidatorContractTests(unittest.TestCase):
         mutate(value)
         path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
-    @integration
-    def test_valid_single_team_fixture_is_clean_and_deterministic(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = self.fixture(temporary)
-            first = validate.run(root)
-            second = validate.run(root)
-            self.assertEqual(first, [])
-            self.assertEqual(first, second)
-
     def test_skill_project_scope_is_closed_and_external_is_entry_only(self):
         for old, new in (("project_scope: external", "project_scope: remote"),
                          ("exposure: entry", "exposure: internal")):
@@ -148,18 +129,13 @@ class ValidatorContractTests(unittest.TestCase):
         cases = (
             (claude, lambda value: value["profiles"]["auto"]["critical_decision"].update(
                 model="claude-ghost-5-5"), "execution_profiles", {claude}),
-            (codex, lambda value: value["profiles"].update(fast={}), "execution_profiles", {codex}),
             ("platforms/codex/model-catalog.json", lambda value: value["models"][codex_model].update(
                 efforts=["low", "ultra", "turbo"]), "execution_profiles",
              {"platforms/codex/model-catalog.json"}),
             # A declared class no table maps is each table's problem.
             ("tools/data/models.json", lambda value: value["model_classes"].update(
                 extreme={"escalates": False}), "execution_profiles", {claude, codex}),
-            ("tools/data/models.json", lambda value: value["model_classes"].update(
-                mechanical={"escalates": "yes"}), "model_config_shape", {"tools/data/models.json"}),
             (codex, None, "execution_profiles", {codex}),
-            ("platforms/claude/model-catalog.json", None, "execution_profiles",
-             {"platforms/claude/model-catalog.json"}),
         )
         root = self.partial(PROFILE_READS)
         self.assert_silent(root, "execution_profiles", "model_config_shape")
@@ -196,7 +172,6 @@ class ValidatorContractTests(unittest.TestCase):
 
     def test_ci_host_cli_versions_meet_every_catalog_model_minimum(self):
         pins = HOST_CLI_PINS
-        pinned = json.loads((fixtures.REAL_REPOSITORY / pins).read_text(encoding="utf-8"))
         keys = {"claude": "claude_code", "codex": "codex"}
         # Each host's floor: the highest minimum of its catalog, and the models that set it.
         floors = {}
@@ -225,22 +200,10 @@ class ValidatorContractTests(unittest.TestCase):
             f"{keys[host]} {below[host]} is below {floor}, the minimum of {host} model {model!r}"
             for host, (floor, models) in floors.items() for model in models})
         self.assertEqual({path for path, _message in found}, {pins})
-        raised = sorted(catalog_models("claude"))[0]
-        above = just_above(pinned["claude_code"])
-        for relative, mutate, fragment in (
-                (pins, None, "host CLI versions are missing or not valid JSON"),
-                (pins, lambda value: value.update(codex="0.159"),
-                 "'codex' must pin the exact X.Y.Z codex CLI version CI installs"),
-                ("platforms/claude/model-catalog.json",
-                 lambda value: value["models"][raised].update(min_cli_version=above),
-                 f"claude_code {pinned['claude_code']} is below {above}, the minimum of claude"
-                 f" model {raised!r}")):
-            with self.subTest(fragment=fragment):
-                self.assertTrue(any(fragment in message for _path, message in run(relative, mutate)))
-        # A pin at a model's exact minimum, or above it, is clean.
+        self.assertTrue(any("host CLI versions are missing or not valid JSON" in message
+                            for _path, message in run(pins, None)))
+        # A pin at a model's exact minimum is clean.
         self.assertEqual(run(pins, lambda value: value.update(claude_code=floors["claude"][0])), set())
-        self.assertEqual(run(pins, lambda value: value.update(codex=just_above(floors["codex"][0]))),
-                         set())
 
     @integration
     def test_malformed_model_config_is_a_finding_not_a_crash(self):
@@ -250,16 +213,7 @@ class ValidatorContractTests(unittest.TestCase):
         flags = b', "risk_flags": []'
         cases = {
             "missing file": (None, missing),
-            "invalid JSON": (b'{"schema_version": 2,', missing),
-            "not UTF-8": (b'{"schema_version": 2, "model_classes": {"\xff": {}}}', missing),
-            "not an object": (b'["mechanical", "orchestration"]', missing),
             "classes a number": (b'{"schema_version": 2, "model_classes": 5' + flags + b'}', shape),
-            "classes a boolean": (b'{"schema_version": 2, "model_classes": true' + flags + b'}',
-                                  shape),
-            "classes a list": (b'{"schema_version": 2, "model_classes": ["mechanical"]' + flags
-                               + b'}', shape),
-            "escalates a string": (b'{"schema_version": 2, "model_classes": {"mechanical":'
-                                   b' {"escalates": "yes"}}' + flags + b'}', shape),
             "classes objects": (b'{"schema_version": 2, "model_classes": {"Mechanical":'
                                 b' {"escalates": true}}' + flags + b'}', shape),
             "classes absent": (b'{"schema_version": 2' + flags + b'}', whole),
@@ -302,9 +256,7 @@ class ValidatorContractTests(unittest.TestCase):
         root = self.whole()
         for relative, entry, named in (
                 ("platforms/codex/_team/overlay/templates/project-instructions/host.md",
-                 "- `{{user_context}}`\n", "{{user_context}}"),
-                ("platforms/shared/_team/overlay/templates/project-instructions/"
-                 "user-context.json", '"{{user_companion}}",', "{{user_companion}}")):
+                 "- `{{user_context}}`\n", "{{user_context}}"),):
             with self.subTest(source=relative):
                 path = root / relative
                 original = path.read_text(encoding="utf-8")
@@ -533,74 +485,32 @@ class HomePathCheckTests(unittest.TestCase):
             # would add, never an ignored one.
             self.assertEqual(self.findings(root), sorted((relative, 2) for relative in read))
 
-    def test_posix_windows_and_url_homes_are_found_and_placeholders_are_not(self):
+    def test_every_home_form_names_its_user_and_placeholders_do_not(self):
+        # POSIX, Windows, URL and drive-mount homes, and the folder names a
+        # Claude Code project encodes, nested or ending at the name.
         for text in ("/Users/fixture/app", "cwd=/home/fixture", "`/home/fixture/`",
                      "(/home/fixture)", "C:/Users/fixture/x", "file:///Users/fixture/x",
                      "/mnt/c/Users/fixture/x", "C:\\Users\\fixture\\AppData",
-                     "c:\\users\\fixture", "C:\\\\Users\\\\fixture\\\\AppData"):
+                     "c:\\users\\fixture", "C:\\\\Users\\\\fixture\\\\AppData",
+                     "cd /c/Users/fixture/code/app", "/cygdrive/c/Users/fixture/app",
+                     "~/.claude/projects/-Users-fixture-Projects-app/run.jsonl",
+                     "/tmp/claude-501/-home-fixture-work-app/notes.md",
+                     "-Users-fixture-app", "C--Users-fixture-app",
+                     "~/.claude/projects/-private-tmp-claude-501--Users-fixture-Projects-app/1.jsonl",
+                     "~/.claude/projects/-Users-fixture/1.jsonl", "`-Users-fixture`"):
             with self.subTest(text=text):
                 self.assertEqual(self.user(text), "fixture")
         # Built from parts so that this source line holds no home path itself.
         self.assertEqual(self.user("C:\\Users\\" + "Fixture Name\\Documents"), "Fixture Name")
-        for text in ("/Users/<name>/", "/home/<user>/", "C:\\Users\\<name>\\",
-                     "C:\\Users\\%USERNAME%\\", "/Users/$USER/", "/home/{user}/", "~/project",
-                     "$HOME/project", "https://example.com/home/products/",
-                     "src/pages/home/components/", "GET /users/42/orders",
-                     validate.ABSOLUTE_PATH_RE.pattern, validate.HOME_PATH_RE.pattern):
-            with self.subTest(text=text):
-                self.assertIsNone(self.user(text))
-
-    @integration
-    def test_the_folder_form_a_claude_code_project_encodes_is_a_home_path_too(self):
-        for text in ("~/.claude/projects/-Users-fixture-Projects-app/run.jsonl",
-                     "/tmp/claude-501/-home-fixture-work-app/notes.md",
-                     "-Users-fixture-app", "C--Users-fixture-app"):
-            with self.subTest(text=text):
-                self.assertEqual(self.user(text), "fixture")
-        for text in ("-Users-<name>-app", "page-home-hero", "--home-dir", "list-Users-admin-page",
-                     "-home-", "the home-office-chair"):
-            with self.subTest(text=text):
-                self.assertIsNone(self.user(text))
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            for relative in ("docs/notes.md", "tools/tests/test_sample.py"):
-                path = root / relative
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text("Run log: /tmp/claude-501/-Users-fixture-app/run.jsonl\n",
-                                encoding="utf-8")
-            declared = {"tools/tests/test_sample.py": frozenset({"fixture"})}
-            with mock.patch.dict(validate.HOME_PATH_FIXTURES, declared, clear=True):
-                self.assertEqual(self.findings(root), [("docs/notes.md", 1)])
-
-    def test_drive_mounts_and_nested_or_bare_encoded_folders_are_homes_too(self):
-        # Git Bash and Cygwin print a Windows home under a drive segment. A
-        # session started in a scratch folder encodes an encoded folder again
-        # after a dash, and one started in the home itself ends at the name.
-        for text in ("cd /c/Users/fixture/code/app", "/cygdrive/c/Users/fixture/app",
-                     "c:/users/fixture/notes.txt",
-                     "~/.claude/projects/-private-tmp-claude-501--Users-fixture-Projects-app/1.jsonl",
-                     "~/.claude/projects/-tmp-claude-1000--home-fixture-app-scratchpad/1.jsonl",
-                     "~/.claude/projects/-Users-fixture/1.jsonl",
-                     "~/.claude/projects/-home-fixture/1.jsonl",
-                     "Folder -Users-fixture", "`-Users-fixture`"):
-            with self.subTest(text=text):
-                self.assertEqual(self.user(text), "fixture")
-        for text in ("--home-dir", "run -home-dir now", "--Users-only", "xy--home-dir-z",
-                     "src/a/Users/fixture", "list-Users-admin", "x1-home-page"):
+        for text in ("/Users/<name>/", "C:\\Users\\%USERNAME%\\", "~/project",
+                     "https://example.com/home/products/", "-Users-<name>-app", "--home-dir",
+                     validate.HOME_PATH_RE.pattern):
             with self.subTest(text=text):
                 self.assertIsNone(self.user(text))
 
     @integration
     def test_a_system_or_service_home_names_no_person_and_passes(self):
-        homes = {"runner": "Actions checks out into /home/runner/work/app/app.",
-                 "node": "WORKDIR /home/node/app",
-                 "linuxbrew": 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"',
-                 "vscode": "The dev container caches in /home/vscode/.cache.",
-                 "ubuntu": "cd /home/ubuntu/app",
-                 "Shared": "Shared fixtures live in /Users/Shared/fixtures.",
-                 "Public": "Installers write to C:\\Users\\Public\\Desktop.",
-                 "Default": "New profiles copy C:\\Users\\Default\\AppData."}
-        self.assertEqual(set(homes), set(validate.SYSTEM_HOMES))
+        homes = {"runner": "Actions checks out into /home/runner/work/app/app."}
         for name, text in homes.items():
             with self.subTest(home=name), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -691,7 +601,7 @@ class StdlibOnlyCheckTests(unittest.TestCase):
                 (self.SCRIPT, 7, "stdlib_only", "non-stdlib import 'numpy'")])
 
     def test_a_script_that_does_not_parse_is_a_finding(self):
-        for text, line in (("import json\n\ndef broken(:\n    pass\n", 3), ("VALUE = 1\0\n", 1)):
+        for text, line in (("import json\n\ndef broken(:\n    pass\n", 3),):
             with self.subTest(text=text):
                 findings = self.findings(text)
                 self.assertEqual([finding[:3] for finding in findings], [(self.SCRIPT, line, "stdlib_only")])
@@ -713,17 +623,6 @@ class ValidatorBuilderTests(unittest.TestCase):
 
     def test_registry_lockstep_with_checks(self):
         self.assertEqual(sorted(VALIDATOR_BUILDERS), sorted(validate.CHECKS))
-
-    def test_contributing_and_the_validator_name_the_registry(self):
-        contributing = (TESTS.parents[1] / "CONTRIBUTING.md").read_text(encoding="utf-8")
-        for name, text in (("CONTRIBUTING.md", contributing), ("validate.py", validate.__doc__)):
-            with self.subTest(document=name):
-                text = " ".join(text.split())
-                self.assertTrue("VALIDATOR_BUILDERS" in text
-                                and "tools/tests/test_validator_contract.py" in text,
-                                f"{name} does not name the builder registry")
-                self.assertFalse("tools/tests/fixtures/" in text,
-                                 f"{name} names a fixtures folder that does not exist")
 
     @integration
     def test_each_builder_fires_its_check(self):

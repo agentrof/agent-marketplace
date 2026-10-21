@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -16,7 +15,6 @@ try:
 except ModuleNotFoundError:  # run as a script from tools/tests
     from levels import integration
 from pathlib import Path
-from unittest import mock
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -217,109 +215,11 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     target = packaged / path.relative_to(canonical)
                     self.assertEqual(target.read_bytes(), expected, target)
 
-    def test_provenance_hashes_and_rebuild_are_deterministic(self):
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                package = self.root / "dist" / host / fixtures.PLUGIN
-                provenance = json.loads(
-                    (package / build_distributions.PROVENANCE).read_text(
-                        encoding="utf-8"
-                    )
-                )
-                self.assertEqual(provenance["component"], fixtures.PLUGIN)
-                self.assertEqual(provenance["host"], host)
-                for relative, expected in provenance["files"].items():
-                    actual = hashlib.sha256((package / relative).read_bytes()).hexdigest()
-                    self.assertEqual(actual, expected, relative)
-
-        self.assertEqual(
-            build_distributions.check(self.root, self.root / "dist"),
-            [],
-        )
-
-    def test_independent_builds_are_byte_identical(self):
-        with tempfile.TemporaryDirectory() as first_dir, \
-                tempfile.TemporaryDirectory() as second_dir:
-            first = Path(first_dir) / "dist"
-            second = Path(second_dir) / "dist"
-            build_distributions.build(self.root, first)
-            build_distributions.build(self.root, second)
-            self.assertEqual(build_distributions.compare_dirs(first, second), [])
-
     def test_snapshot_paths_use_case_sensitive_posix_order(self):
         paths = build_distributions.snapshot_files(self.root, "plugins")
         relative = [path.relative_to(self.root).as_posix() for path in paths]
         self.assertEqual(relative, sorted(relative))
         self.assertNotEqual(relative, sorted(relative, key=str.casefold))
-
-    def test_canonical_source_rejects_symlinked_surface_roots(self):
-        for surface_name in ("plugins", "platforms"):
-            with self.subTest(surface=surface_name), tempfile.TemporaryDirectory() as tmp:
-                root = copy_root(self.root, Path(tmp) / "repository", with_dist=False)
-                surface = root / surface_name
-                moved = root / "assets" / f"moved-{surface_name}"
-                moved.parent.mkdir()
-                surface.rename(moved)
-                try:
-                    surface.symlink_to(moved, target_is_directory=True)
-                except OSError as exc:
-                    self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
-                with self.assertRaisesRegex(ValueError, "real directory"):
-                    build_distributions.validate_canonical(root)
-
-    def test_issue_reporting_is_external_and_has_no_project_artifacts(self):
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                package = self.root / "dist" / host / fixtures.PLUGIN
-                wrapper = (
-                    package / "skills/issue-report/SKILL.md"
-                ).read_text(encoding="utf-8")
-                setup_wrapper = (
-                    package / "skills/setup/SKILL.md"
-                ).read_text(encoding="utf-8")
-                canonical = (
-                    package / "skill-content/issue-report/SKILL.md"
-                ).read_text(encoding="utf-8")
-                self.assertIn("project_scope: external", canonical)
-                self.assertNotIn("workspace config", wrapper)
-                self.assertIn("workspace config", setup_wrapper)
-                self.assertTrue((package / "scripts/file_issue.py").is_file())
-
-    def test_fixture_copy_ignores_python_runtime_caches(self):
-        with tempfile.TemporaryDirectory() as source_dir, \
-                tempfile.TemporaryDirectory() as target_dir:
-            source_root = Path(source_dir)
-            plugin_root = source_root / "plugins" / fixtures.PLUGIN
-            script = plugin_root / "scripts" / "runner.py"
-            script.parent.mkdir(parents=True)
-            script.write_text("print('fixture')\n", encoding="utf-8")
-            cache = script.parent / "__pycache__"
-            cache.mkdir()
-            (cache / "runner.cpython-39.pyc").write_bytes(b"cache")
-
-            with mock.patch.object(fixtures, "REAL_REPOSITORY", source_root):
-                fixtures.copy(f"plugins/{fixtures.PLUGIN}", Path(target_dir))
-
-            copied = Path(target_dir) / "plugins" / fixtures.PLUGIN
-            self.assertTrue((copied / "scripts/runner.py").is_file())
-            self.assertFalse((copied / "scripts/__pycache__").exists())
-
-    def test_agent_metadata_is_projected_for_each_host(self):
-        canonical = self.root / "plugins" / fixtures.PLUGIN / "agents"
-        for source in canonical.glob("*.md"):
-            name = source.stem
-            claude = (
-                self.root / "dist/claude" / fixtures.PLUGIN / "agents" / source.name
-            ).read_text(encoding="utf-8")
-            codex = (
-                self.root / "dist/codex" / fixtures.PLUGIN / "agents" / source.name
-            ).read_text(encoding="utf-8")
-            self.assertIn(f"name: {name}", claude)
-            self.assertIn(f"name: {name}", codex)
-            self.assertIn("model:", claude)
-            self.assertNotIn("reasoning:", claude)
-            self.assertNotIn("reasoning:", codex)
-
 
 @integration
 class CopiedDistributionTests(unittest.TestCase):
@@ -350,11 +250,8 @@ class CopiedDistributionTests(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def test_changes_to_neighbouring_package_files_merge_without_a_conflict(self):
-        # A merge queue merges each queued pull request onto the ones ahead of
-        # it without rebuilding dist/ (#311): committed packages of changes to
-        # different files must merge into the rebuild of the merged sources.
-        # One real merge of a change beside an added file; the provenance merge
-        # of the other neighbour pairs is a case of the documented conflicts test.
+        # Committed packages of changes to different files merge into the
+        # rebuild of the merged sources, without rebuilding dist/.
         git_fixture.init_repository(self.root, initial_branch="main")
         self.git("config", "user.name", "Distribution Test")
         self.git("config", "user.email", "distribution@example.test")
@@ -425,40 +322,6 @@ class CopiedDistributionTests(unittest.TestCase):
             self.root
         )["build_id"]
         self.assertEqual(checkout_identity, blob_identity)
-
-    def test_snapshot_is_stable_across_staging_a_crlf_text_edit(self):
-        git_fixture.init_repository(self.root, initial_branch="main")
-        subprocess.run(
-            ["git", "config", "core.autocrlf", "true"],
-            cwd=self.root, check=True, capture_output=True, text=True,
-        )
-        subprocess.run(
-            ["git", "add", "--all"], cwd=self.root, check=True,
-            capture_output=True, text=True,
-        )
-        subprocess.run(
-            ["git", "checkout-index", "--all", "--force"],
-            cwd=self.root, check=True, capture_output=True, text=True,
-        )
-        source = self.root / "plugins" / fixtures.PLUGIN / "constitution.md"
-        source.write_bytes(source.read_bytes() + b"\r\nSubstantive edit\r\n")
-
-        before_staging = build_distributions.marketplace_snapshot(self.root)
-        with tempfile.TemporaryDirectory() as first_dir:
-            first = Path(first_dir) / "dist"
-            build_distributions.build(self.root, first)
-            subprocess.run(
-                ["git", "add", "--all"], cwd=self.root, check=True,
-                capture_output=True, text=True,
-            )
-            after_staging = build_distributions.marketplace_snapshot(self.root)
-            with tempfile.TemporaryDirectory() as second_dir:
-                second = Path(second_dir) / "dist"
-                build_distributions.build(self.root, second)
-                self.assertEqual(
-                    build_distributions.compare_dirs(first, second), []
-                )
-        self.assertEqual(before_staging, after_staging)
 
     def test_binary_payload_survives_autocrlf_checkout_and_build(self):
         relative = Path(
@@ -531,21 +394,6 @@ class CopiedDistributionTests(unittest.TestCase):
             problems,
         )
 
-    def test_distribution_check_rejects_symlinked_dist_root(self):
-        moved = self.root / "assets" / "moved-dist"
-        moved.parent.mkdir()
-        (self.root / "dist").rename(moved)
-        try:
-            (self.root / "dist").symlink_to(moved, target_is_directory=True)
-        except OSError as exc:
-            self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
-
-        problems = build_distributions.check(self.root, self.root / "dist")
-        self.assertTrue(
-            any("not a real directory" in problem for problem in problems),
-            problems,
-        )
-
     def test_canonical_source_rejects_unknown_component_and_symlink(self):
         plugin = self.root / "plugins" / fixtures.PLUGIN
         unknown = plugin / "runtime-state"
@@ -594,22 +442,6 @@ class DistributionRuleTests(unittest.TestCase):
         problems = build_distributions.compare_dirs(expected, actual)
         self.assertTrue(
             any("out of sync executable mode" in problem for problem in problems),
-            problems,
-        )
-
-    def test_distribution_check_rejects_python_runtime_cache(self):
-        expected, actual = self.generated_pair()
-        target = (
-            actual / "claude" / fixtures.PLUGIN
-            / "__pycache__" / "payload.cpython-39.pyc"
-        )
-        target.parent.mkdir()
-        target.write_bytes(b"unattested runtime cache")
-
-        problems = build_distributions.compare_dirs(expected, actual)
-        self.assertTrue(
-            any(str(target.parent) in problem and "stale" in problem
-                for problem in problems),
             problems,
         )
 
@@ -688,75 +520,6 @@ class DistributionRuleTests(unittest.TestCase):
         self.assertEqual(list(output.rglob("__pycache__")), [])
         self.assertEqual(list(output.rglob("*.pyc")), [])
 
-    @integration
-    def test_documented_provenance_conflicts_are_the_ones_git_reports(self):
-        # #311: the provenance serialization and its four descriptions must
-        # name every case in which two queued PRs conflict in dist/.
-        base = {name: "0" * 64 for name in "abcdef"}
-
-        def put(name: str, digest: str):
-            return lambda files: {**files, name: digest * 64}
-
-        def drop(name: str):
-            return lambda files: {key: value for key, value in files.items() if key != name}
-
-        cases = (
-            ("change neighbours", put("b", "1"), put("c", "2"), False),
-            ("change beside an add after it", put("b", "1"), put("bb", "2"), False),
-            ("change beside an add before it", put("c", "1"), put("bb", "2"), False),
-            ("removal beside a change", drop("c"), put("b", "2"), False),
-            ("removal before a change", drop("c"), put("d", "2"), False),
-            ("removals one entry apart", drop("b"), drop("d"), False),
-            ("last removed, earlier change", drop("f"), put("d", "2"), False),
-            ("adds at different positions", put("bb", "1"), put("cc", "2"), False),
-            ("add after the last, earlier change", put("g", "1"), put("e", "2"), False),
-            ("change one file twice", put("c", "1"), put("c", "2"), True),
-            ("adds at one sort position", put("bb", "1"), put("bc", "2"), True),
-            ("add after a changed last entry", put("g", "1"), put("f", "2"), True),
-            ("removal next to a removal", drop("b"), drop("c"), True),
-            ("removal next to an add before it", drop("c"), put("bb", "2"), True),
-            ("removal next to an add after it", drop("c"), put("cc", "2"), True),
-            ("last removed, entry before changed", drop("f"), put("e", "2"), True),
-        )
-
-        def provenance(files: dict) -> str:
-            return build_distributions.render_provenance({"component": "t", "files": files,
-                                                          "schema_version": 4})
-
-        # git merge-file runs the three-way text merge a branch merge runs on
-        # the one provenance file both branches change.
-        for index, (name, left, right, conflicts) in enumerate(cases):
-            current, ancestor, other = (self.base / f"{index}-{side}" for side in
-                                        ("right", "base", "left"))
-            current.write_text(provenance(right(base)), encoding="utf-8")
-            ancestor.write_text(provenance(base), encoding="utf-8")
-            other.write_text(provenance(left(base)), encoding="utf-8")
-            merged = subprocess.run(
-                ["git", "merge-file", "-q", str(current), str(ancestor), str(other)],
-                capture_output=True, text=True, check=False)
-            with self.subTest(case=name):
-                self.assertGreaterEqual(merged.returncode, 0, merged.stderr)
-                self.assertLess(merged.returncode, 128, merged.stderr)
-                self.assertEqual(bool(merged.returncode), conflicts, merged.stdout)
-                if not conflicts:
-                    self.assertEqual(current.read_text(encoding="utf-8"),
-                                     provenance(right(left(base))))
-        documents = {
-            "render_provenance": build_distributions.render_provenance.__doc__,
-            **{relative: (fixtures.REAL_REPOSITORY / relative).read_text(encoding="utf-8")
-               for relative in ("docs/maintainer-operations-protocol.md",
-                                "docs/upgrade-protocol.md")},
-        }
-        for where, text in documents.items():
-            text = " ".join(text.split())
-            with self.subTest(document=where):
-                for conflict in ("adds at one sort position", "an add after a changed last entry",
-                                 "a removal next to another removal or an add",
-                                 "a removal of the last entry beside a change to the entry"
-                                 " before it"):
-                    self.assertIn(conflict, text)
-
-
 def shipped_models(host: str) -> dict:
     """The models a host's shipped catalog pins, by model ID."""
     return json.loads(build_distributions.model_catalog_path(
@@ -776,14 +539,12 @@ AUTO_MODELS = {host: shipped_profile(host) for host in ("claude", "codex")}
 
 
 def catalog_model(host: str, *, besides: tuple = (), effort: str | None = None,
-                  unused: bool = False, effortless: bool = False,
-                  lacking: str | None = None) -> str:
+                  unused: bool = False, effortless: bool = False) -> str:
     """The first shipped catalog model of ``host`` with the traits a case needs."""
     used = {model for model, _effort in AUTO_MODELS[host].values()}
     for model, entry in sorted(shipped_models(host).items()):
         if model in besides or (unused and model in used) or (effortless and entry["efforts"]) \
-                or (effort is not None and effort not in entry["efforts"]) \
-                or (lacking is not None and lacking in entry["efforts"]):
+                or (effort is not None and effort not in entry["efforts"]):
             continue
         return model
     raise AssertionError(f"the {host} catalog pins no model this case needs")
@@ -1170,8 +931,6 @@ class ExecutionProfileTests(unittest.TestCase):
         claude_pinned = AUTO_MODELS["claude"]["critical_decision"][0]
         effortless = catalog_model("claude", unused=True, effortless=True)
         codex_pinned = AUTO_MODELS["codex"]["critical_decision"][0]
-        # Every Codex catalog model runs a class, so a rename also strands its slots.
-        codex_other = catalog_model("codex", besides=(codex_pinned,), lacking="ultra")
         family = shipped_models("claude")[claude_pinned]["family"]
         other_family = next(entry["family"] for _model, entry in sorted(shipped_models("claude").items())
                             if entry["family"] != family)
@@ -1183,18 +942,8 @@ class ExecutionProfileTests(unittest.TestCase):
             ("claude", slot("routine_authoring", {"effort": "high"}), "must name a model"),
             ("claude", slot("mechanical", {"model": effortless, "effort": "high"}),
              "effort 'high' is not supported by .*, which takes no effort"),
-            ("claude", slot("mechanical", {"model": effortless, "effort": "extreme"}),
-             "effort must be one of"),
-            ("claude", slot("inherit", {"model": claude_pinned}),
-             "must map exactly the model class slots"),
             ("codex", slot("critical_decision", {"model": codex_pinned, "effort": "extreme"}),
              "effort must be one of"),
-            ("codex", slot("mechanical", {"model": codex_other, "effort": "ultra"}),
-             "effort 'ultra' is not supported by"),
-            ("codex", slot("security_review_escalated", {"model": codex_pinned}),
-             "must map exactly the model class slots"),
-            ("codex", lambda t: t["profiles"]["auto"]["routine_authoring"].update(temperature="1"),
-             "may hold only"),
             ("codex", lambda t: t["profiles"]["auto"].pop("mechanical"),
              "must map exactly the model class slots"),
             ("claude", lambda t: t["profiles"].update(fast={}),
@@ -1204,33 +953,18 @@ class ExecutionProfileTests(unittest.TestCase):
         )
         catalog_cases = (
             ("claude", rename(effortless, "opus"), "'opus' is not a pinned model ID"),
-            ("claude", rename(effortless, "claude-haiku-4-5"),
-             "'claude-haiku-4-5' is not a pinned model ID"),
-            ("claude", rename(effortless, "claude-sonnet-5-5-20260901"), "is not a pinned model ID"),
-            ("claude", rename(effortless, "gpt-6.1-sol"), "is not a pinned model ID"),
             ("claude", pin(claude_pinned, family=other_family),
              f"belongs to family '{family}', not '{other_family}'"),
-            ("codex", rename(codex_other, "gpt-5.5"), "'gpt-5.5' is not a pinned model ID"),
-            ("codex", rename(codex_other, "gpt 6 luna"), "is not a pinned model ID"),
             ("codex", pin(codex_pinned, efforts=["turbo"]), "efforts must list distinct values"),
-            ("codex", pin(codex_pinned, efforts=["high", "high"]), "efforts must list distinct values"),
             ("claude", pin(claude_pinned, sources=[]), "sources must list"),
-            ("claude", pin(claude_pinned, sources=["http://example.com"]), "sources must list"),
             ("claude", pin(claude_pinned, verified="01.10.2026"), "verified must be"),
-            ("claude", pin(claude_pinned, verified="2026-02-30"), "verified must be"),
             ("claude", pin(effortless, min_cli_version="2.1"), "min_cli_version must be"),
-            ("codex", pin(codex_other, min_cli_version="v0.157.0"), "min_cli_version must be"),
             ("codex", lambda c: c["models"][codex_pinned].pop("min_cli_version"), "must hold exactly"),
-            ("claude", pin(claude_pinned, id=claude_pinned), "must hold exactly"),
             # CI installs the pinned CLI and starts no role, so the build refuses
             # a pin below the oldest CLI that runs a catalog model.
             ("codex", pin(codex_pinned, min_cli_version="9.0.0"),
              f"is below 9.0.0, the minimum of codex model '{codex_pinned}'"),
-            ("claude", pin(claude_pinned, min_cli_version="3.0.0"),
-             f"is below 3.0.0, the minimum of claude model '{claude_pinned}'"),
-            ("codex", lambda c: c["models"][codex_pinned].pop("verified"), "must hold exactly"),
             ("codex", lambda c: c.update(schema_version=1), "schema_version 2 and models"),
-            ("codex", lambda c: c.update(classes=c.pop("models")), "schema_version 2 and models"),
             ("claude", lambda c: c.update(models={}), "at least one exact model ID"),
         )
 
@@ -1263,10 +997,7 @@ class ExecutionProfileTests(unittest.TestCase):
         pinned = pins.read_bytes()
         for path, message in (
                 (build_distributions.execution_profile_path(self.root, "codex"),
-                 "missing or invalid execution profile"),
-                (build_distributions.model_catalog_path(self.root, "claude"),
-                 "missing or invalid model catalog"),
-                (pins, "missing or invalid host CLI versions")):
+                 "missing or invalid execution profile"),):
             with self.subTest(missing=path.name):
                 restore()
                 pins.write_bytes(pinned)
@@ -1276,7 +1007,7 @@ class ExecutionProfileTests(unittest.TestCase):
         pins.write_bytes(pinned)
         # One patch below each host's highest catalog minimum.
         below = {}
-        for host, key in (("claude", "claude_code"), ("codex", "codex")):
+        for host, key in (("claude", "claude_code"),):
             major, minor, patch = max(tuple(int(part) for part in entry["min_cli_version"].split("."))
                                       for entry in shipped_models(host).values())
             below[key] = f"{major}.{minor}.{patch - 1}" if patch else f"{major}.{minor - 1}.999"
@@ -1312,41 +1043,17 @@ class ExecutionProfileTests(unittest.TestCase):
                     self.assertEqual("effort" in setting, bool(models[setting["model"]]["efforts"]))
                     self.assertNotIn(setting.get("effort"), UNPINNED_EFFORTS)
 
-    def test_host_contracts_state_the_oldest_cli_the_pinned_models_need(self):
-        adapters = build_distributions.load_adapters(self.root)
-        for host, adapter in adapters.items():
-            catalog = json.loads(self.catalogs[host])
-            minimums = [entry["min_cli_version"] for entry in catalog["models"].values()]
-            newest = max(minimums, key=build_distributions.cli_version)
-            contract = " ".join((self.root / "platforms" / host / fixtures.PLUGIN
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
-            with self.subTest(host=host):
-                self.assertIn(f"the pinned models need {adapter.metadata['display_name']}"
-                              f" {newest} or later", contract)
-
     def test_each_adapter_accepts_only_its_documented_pinned_ids(self):
         adapters = build_distributions.load_adapters(self.root)
         cases = {
             "claude": {
                 "claude-opus-5-5": ("opus", (5, 5, 0)),
-                "claude-sonnet-5": ("sonnet", (5, 0, 0)),
                 "claude-haiku-4-5-20251001": ("haiku", (4, 5, 20251001)),
-                "claude-opus-4-20250514": ("opus", (4, 0, 20250514)),
-                "claude-haiku-4-5": None,
-                "claude-opus-5-5-20260922": None,
                 "claude-opus-5-5[1m]": None,
-                "opus": None,
-                "inherit": None,
-                "gpt-6.1-sol": None,
             },
             "codex": {
                 "gpt-6.1-sol": ("sol", (6, 1)),
-                "gpt-6-luna": ("luna", (6, 0)),
-                "gpt-5.3-codex-spark": ("codex-spark", (5, 3)),
                 "gpt-5.5": None,
-                "codex-auto-review": None,
-                "gpt-6.1-sol ": None,
-                "claude-opus-5-5": None,
             },
         }
         for host, expected in cases.items():

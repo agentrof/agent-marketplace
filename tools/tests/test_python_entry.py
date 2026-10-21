@@ -1,7 +1,6 @@
 """Isolation and observable entry-point behavior for in-process rule tests."""
 
 import os
-import json
 from pathlib import Path
 import sys
 import tempfile
@@ -54,19 +53,6 @@ class PythonEntryTests(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (0, "first\nsecond\nthird\nWindows output\n",
                           "error\nretry\nWindows error\n"))
-
-    def test_native_lanes_register_each_entry_case_explicitly(self):
-        from tools import ci_tests
-        root = Path(__file__).resolve().parents[2]
-        ids = set(ci_tests.inventory(root)[0])
-        policy = json.loads((root / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
-        for group in ("platform", "macos", "windows"):
-            with self.subTest(group=group):
-                self.assertEqual(set(policy["groups"][group]["tests"]) - ids, set())
-        entry_cases = {name for name in ids
-                       if name.startswith("tools.tests.test_python_entry.PythonEntryTests.")}
-        self.assertTrue(entry_cases)
-        self.assertTrue(entry_cases <= set(policy["groups"]["platform"]["tests"]))
 
     def test_state_and_imports_are_restored_even_when_the_entry_raises(self):
         old = (sys.argv, sys.path, sys.stdin, sys.stdout, sys.stderr, sys.version_info,

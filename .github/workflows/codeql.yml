@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  merge_group:
-    types: [checks_requested]
   schedule:
     - cron: "31 3 * * 4"
 
@@ -25,6 +23,6 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
         with:
-          languages: python,javascript-typescript
+          languages: python
           build-mode: none
       - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4

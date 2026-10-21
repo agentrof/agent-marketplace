@@ -14,6 +14,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
+import threading
+import time
 import shlex
 import shutil
 import subprocess
@@ -72,9 +75,92 @@ def installed(verify: dict, root: Path) -> bool:
     if verify["kind"] == "command":
         return verify.get("contains", "") in result.stdout
     try:
-        return verify["plugin_id"] in strings(json.loads(result.stdout))
+        listing = json.loads(result.stdout)
+        if argv[0] == "codex":
+            return any(item.get("pluginId") == verify["plugin_id"]
+                       and item.get("installed") is True and item.get("enabled") is True
+                       for item in listing.get("installed", []))
+        return verify["plugin_id"] in strings(listing)
     except json.JSONDecodeError:
         return False
+
+
+def codex_skills(registry: dict, root: Path) -> tuple[dict[str, bool], list[str]]:
+    """Ask the host loader; files and installation records alone are not proof."""
+    available, findings = {}, []
+    process = None
+    try:
+        listing = subprocess.run(["codex", "plugin", "list", "--json"], cwd=root,
+                                 capture_output=True, text=True, check=True, timeout=30)
+        plugins = {item["pluginId"]: item for item in json.loads(listing.stdout)["installed"]}
+        process = subprocess.Popen(["codex", "app-server", "--stdio"], cwd=root,
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
+        replies = queue.Queue()
+
+        def read_replies():
+            for line in process.stdout:
+                replies.put(line)
+            replies.put(None)
+
+        threading.Thread(target=read_replies, daemon=True).start()
+        request_id = 0
+
+        def request(method, params):
+            nonlocal request_id
+            request_id += 1
+            process.stdin.write(json.dumps({"id": request_id, "method": method, "params": params}) + "\n")
+            process.stdin.flush()
+            deadline = time.monotonic() + 30
+            while True:
+                line = replies.get(timeout=max(0, deadline - time.monotonic()))
+                if line is None:
+                    raise ValueError("host closed before replying")
+                response = json.loads(line)
+                if response.get("id") == request_id:
+                    if "error" in response:
+                        raise ValueError(f"{method} failed")
+                    return response["result"]
+
+        request("initialize", {"clientInfo": {"name": "companion_check", "version": "1"},
+                               "capabilities": {"experimentalApi": True}})
+        process.stdin.write('{"method":"initialized","params":{}}\n')
+        process.stdin.flush()
+        loaded = request("skills/list", {"cwds": [str(root)], "forceReload": True})
+        for entry in loaded["data"]:
+            for skill in entry["skills"]:
+                available[skill["name"]] = (skill.get("enabled") is True
+                                            and Path(skill["path"]).is_file()
+                                            and bool(Path(skill["path"]).read_text(encoding="utf-8").strip()))
+        for companion in registry["companions"]:
+            spec = companion["hosts"]["codex"]["verify"]
+            plugin = plugins.get(spec.get("plugin_id"), {})
+            if plugin.get("source", {}).get("source") != "remote":
+                continue
+            remote_id = plugin["source"]["id"]
+            marketplace = plugin["marketplaceName"]
+            detail = request("plugin/read", {"pluginName": remote_id, "remoteMarketplaceName": marketplace})["plugin"]
+            summary = detail["summary"]
+            enabled = {skill["name"] for skill in detail["skills"] if skill.get("enabled") is True}
+            for name in spec.get("skills", []):
+                short_name = name.split(":", 1)[-1]
+                available[name] = (summary.get("installed") is True and summary.get("enabled") is True
+                                   and short_name in enabled and bool(request("plugin/skill/read", {
+                                       "remoteMarketplaceName": marketplace, "remotePluginId": remote_id,
+                                       "skillName": short_name}).get("contents")))
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, queue.Empty):
+        findings.append("codex: could not verify skills through the host loader; availability is unverified")
+    finally:
+        if process is not None:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            process.stdin.close()
+            process.stdout.close()
+    return available, findings
 
 
 def codex_disabled() -> set[str]:
@@ -131,6 +217,8 @@ def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dic
     env = settings.get("env", {})
     disabled = codex_disabled() if "codex" in hosts else set()
     rows, findings = [], []
+    skills, skill_findings = codex_skills(registry, root) if "codex" in hosts else ({}, [])
+    findings.extend(skill_findings)
     for companion in registry["companions"]:
         names = blocked_names(companion)
         files_ok = all(file_present(root / item["path"], item["content"], item.get("if_missing", False))
@@ -138,7 +226,7 @@ def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dic
         for step in companion.get("steps", []):
             rows.append({"id": companion["id"], "host": step["name"],
                          "installed": installed(step["verify"], root),
-                         "blocked_rules_present": None, "env_present": None, "files_present": None})
+                         "blocked_rules_present": None, "env_present": None, "files_present": None, "skills_available": None})
             for path in hook_missing(step, root):
                 findings.append(f"{companion['id']}: hook {path.name} lacks `{step['hook_env']['line']}`;"
                                 " rerun companions apply")
@@ -158,6 +246,8 @@ def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dic
                 "installed": installed(companion["hosts"][host]["verify"], root),
                 "blocked_rules_present": blocked, "env_present": env_ok,
                 "files_present": files_ok if companion.get("files") else None,
+                "skills_available": (all(skills.get(name) is True for name in companion["hosts"][host]["verify"].get("skills", []))
+                                     if host == "codex" else None),
             })
     return rows, findings
 
@@ -269,7 +359,7 @@ def main(argv=None) -> int:
         print(json.dumps({"ok": ok, "rows": rows, "findings": findings,
                           "owner_commands": owner, "owner_app_steps": notes, "notes": info}, indent=2))
     else:
-        columns = ("id", "host", "installed", "blocked_rules_present", "env_present", "files_present")
+        columns = ("id", "host", "installed", "blocked_rules_present", "env_present", "files_present", "skills_available")
         print(" | ".join(columns))
         for row in rows:
             print(" | ".join(row[c] if c in ("id", "host") else mark(row[c]) for c in columns))

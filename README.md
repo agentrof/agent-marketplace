@@ -35,6 +35,8 @@ Claude Code and Codex use the same canonical workflows and project-local files.
 
 ## Companions
 
+Codex checks the selected catalog, enabled installation and required skills through the host loader. Remote skills must also return readable content; an unavailable host check fails verification instead of treating files on disk as proof.
+
 Setup can add optional third-party skills through their own official install
 paths; none is copied into the package and none is required. Run
 `scripts/setup_project.py companions check --project-root <root>` for a status
@@ -77,7 +79,7 @@ Debugging, self-verification, review intake and skill-writing disciplines. Four 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
 | claude | project | `claude plugin marketplace add obra/superpowers-marketplace`<br>`claude plugin install superpowers@superpowers-marketplace --scope project` | `claude plugin list --json` lists `superpowers@superpowers-marketplace` |
-| codex | user | `codex plugin add superpowers@openai-curated` | `codex plugin list --json` lists `superpowers@openai-curated` |
+| codex | user | `codex plugin add superpowers@openai-curated-remote` | `codex plugin list --json` lists `superpowers@openai-curated-remote` |
 
 Blocked: `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `using-git-worktrees`, `finishing-a-development-branch`, `test-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `diagnosing-superpowers`. They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.
 

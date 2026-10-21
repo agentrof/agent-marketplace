@@ -128,7 +128,7 @@
       "45165c3aa0e864396eb2a04ae8b9fb4595dbfdda9fa06a24d042c2ba399ce4e4"
     ,
     "scripts/setup_companions.py":
-      "9f9c7f1b2d81c3f39a638d0658bab6d008cf348f0c95460ab76a6499fad1e62d"
+      "430dbe8fe61431507fddc5a1474a604eadefd7e076b2a8f0b39c51f3a82e56fc"
     ,
     "scripts/setup_project.py":
       "681b9fa94f6a55f5fdab66ffe49cf49915f79eaf0f2bc2eb7984f647175464a8"
@@ -317,7 +317,7 @@
       "d5a7d5a4118ab70406d7c9a44d5f7d6cc5fe7a7a18c4ea63727ac08cd84f6dee"
     ,
     "skill-content/setup/data/companions.json":
-      "e80a4fb563cb2058b7355a67919141c3d354c8c4770a1ac3cb189a252a3ec8dd"
+      "ce92aca15f7a293fbdffb48baa1e1e3d01975ab70b4e87e52536572b7497071a"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "d1a8d26ff998f886f46a7d776118fba73ccee242b1d817e89dfee6afc1cc51d8"

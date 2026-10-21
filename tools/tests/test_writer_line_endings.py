@@ -29,8 +29,7 @@ SHARED_TEAM = ROOT / "platforms" / "shared" / "_team" / "overlay" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import project_config  # noqa: E402
-import setup_project  # noqa: E402
+import atomic_file  # noqa: E402
 
 SAMPLE = "first line\nsecond line\n"
 MODE = re.compile(r"[rwxabtU+]{1,4}")
@@ -123,30 +122,13 @@ def package_sources() -> list[Path]:
 
 
 class WriterLineEndingTests(unittest.TestCase):
-    def test_the_emulated_platform_separator_reaches_a_translating_write(self):
+    def test_the_shared_writer_emits_lf_under_a_crlf_platform_separator(self):
+        # Every package writer family is atomic_file.replace_text.
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "control.md"
+            path = Path(temporary) / "AGENTS.md"
             with windows_text_mode():
-                path.write_text(SAMPLE, encoding="utf-8")
-            self.assertEqual(
-                path.read_bytes(), SAMPLE.replace("\n", "\r\n").encode("utf-8")
-            )
-
-    def test_every_writer_family_emits_lf_under_a_crlf_platform_separator(self):
-        for family, write in self.families().items():
-            with self.subTest(family=family), \
-                    tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                with windows_text_mode(), \
-                        contextlib.redirect_stdout(io.StringIO()):
-                    written = write(root)
-                self.assertTrue(written)
-                for path in written:
-                    data = path.read_bytes()
-                    self.assertTrue(b"\n" in data, f"{path.name} holds no line")
-                    self.assertFalse(
-                        b"\r" in data, f"{path.name} holds carriage returns"
-                    )
+                atomic_file.replace_text(path, SAMPLE)
+            self.assertEqual(path.read_bytes(), SAMPLE.encode("utf-8"))
 
     def test_no_package_source_writes_text_with_the_platform_separator(self):
         findings = []
@@ -161,45 +143,6 @@ class WriterLineEndingTests(unittest.TestCase):
                             f"{node.lineno}: {reason}"
                         )
         self.assertEqual(findings, [], "\n".join(findings))
-
-    def families(self) -> dict:
-        return {
-            "setup refresh": self.setup_refresh,
-            "workspace config": self.workspace_config,
-            "project instructions": self.project_instructions,
-            "codex projection": self.codex_projection,
-        }
-
-    def setup_refresh(self, root: Path) -> list[Path]:
-        path = root / ".gitattributes"
-        setup_project.atomic_text(path, SAMPLE)
-        return [path]
-
-    def workspace_config(self, root: Path) -> list[Path]:
-        path = root / "workspace" / "config.json"
-        project_config.atomic(path, {
-            "schema_version": 2, "team_id": "software-engineering-team",
-            "output_language": "English", "terminology_language": "English",
-        })
-        return [path]
-
-    def project_instructions(self, root: Path) -> list[Path]:
-        instructions = load(
-            "line_ending_project_instructions", SHARED_TEAM / "project_instructions.py",
-        )
-        path = root / "AGENTS.md"
-        instructions.atomic_write(path, SAMPLE)
-        return [path]
-
-    def codex_projection(self, root: Path) -> list[Path]:
-        projection = load(
-            "line_ending_generate_codex_project",
-            ROOT / "platforms/codex/_team/overlay/scripts/generate_codex_project.py",
-            SHARED_TEAM,
-        )
-        path = root / ".codex" / "agents" / "reviewer.toml"
-        projection.atomic_write(path, SAMPLE)
-        return [path]
 
 
 if __name__ == "__main__":

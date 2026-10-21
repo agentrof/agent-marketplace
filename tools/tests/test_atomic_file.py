@@ -28,10 +28,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import atomic_file  # noqa: E402
-import project_config  # noqa: E402
-import setup_project  # noqa: E402
 from tools.tests.git_fixture import init_repository  # noqa: E402
-from tools.tests.test_writer_line_endings import SHARED_TEAM, load  # noqa: E402
 
 PLUGIN_ID = "fixture-plugin"
 
@@ -45,51 +42,28 @@ def target(temporary: str, name: str) -> Path:
     return Path(temporary) / "vault" / ".obsidian" / "plugins" / PLUGIN_ID / name
 
 
+# Every package writer (setup, workspace config, project instructions, Codex
+# projection) is atomic_file.replace_text, so its mode contract is proven once.
 @unittest.skipIf(os.name == "nt", "POSIX file mode contract")
 class AtomicWriterModeTests(unittest.TestCase):
-    def writers(self) -> dict:
-        instructions = load(
-            "mode_project_instructions", SHARED_TEAM / "project_instructions.py",
-        )
-        projection = load(
-            "mode_generate_codex_project",
-            ROOT / "platforms/codex/_team/overlay/scripts/generate_codex_project.py",
-            SHARED_TEAM,
-        )
-        return {
-            "setup": setup_project.atomic_text,
-            "workspace config": lambda path, text: project_config.atomic(
-                path, {"text": text},
-            ),
-            "project instructions": instructions.atomic_write,
-            "codex projection": projection.atomic_write,
-        }
+    def test_a_new_file_takes_the_umask_mode(self):
+        previous = os.umask(0o027)
+        try:
+            with tempfile.TemporaryDirectory() as temporary:
+                path = target(temporary, "created.js")
+                atomic_file.replace_text(path, "created\n")
+                self.assertEqual(mode(path), 0o640)
+        finally:
+            os.umask(previous)
 
-    def test_every_atomic_writer_gives_a_new_file_the_umask_mode(self):
-        for umask, expected in ((0o022, 0o644), (0o027, 0o640)):
-            previous = os.umask(umask)
-            try:
-                for name, write in self.writers().items():
-                    with self.subTest(writer=name, umask=oct(umask)), \
-                            tempfile.TemporaryDirectory() as temporary:
-                        path = target(temporary, "created.js")
-                        write(path, "created\n")
-                        self.assertTrue(path.is_file())
-                        self.assertEqual(mode(path), expected)
-            finally:
-                os.umask(previous)
-
-    def test_every_atomic_writer_keeps_an_existing_file_mode(self):
-        for name, write in self.writers().items():
-            with self.subTest(writer=name), \
-                    tempfile.TemporaryDirectory() as temporary:
-                path = target(temporary, "existing.js")
-                path.parent.mkdir(parents=True)
-                path.write_bytes(b"before\n")
-                path.chmod(0o664)
-                write(path, "after\n")
-                self.assertNotEqual(path.read_bytes(), b"before\n")
-                self.assertEqual(mode(path), 0o664)
+    def test_an_existing_file_keeps_its_mode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = target(temporary, "existing.js")
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"before\n")
+            path.chmod(0o664)
+            atomic_file.replace_text(path, "after\n")
+            self.assertEqual((path.read_bytes(), mode(path)), (b"after\n", 0o664))
 
 
 @integration

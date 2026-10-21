@@ -30,6 +30,9 @@
   stay, and a header-stamped user copy is listed under `kept`. The first render
   creates `.claude/agents/`, which loads only at session start, so setup asks
   for a restart.
+- Workhorse model: `deliver` runs in a fresh session per task started with
+  `claude --model sonnet` (or `/model` in the app); a skill's `model:` does
+  not switch the session model.
 - Models: every spawn passes the `model` alias and `effort` that
   `model_class.py resolve` returns; the pinned models need Claude Code 2.1.293
   or later. `/configure models` records

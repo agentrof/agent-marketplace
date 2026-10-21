@@ -20,6 +20,10 @@ and derive its inputs with `scripts/task_inputs.py --entry deliver`.
 `/deliver <request>` starts one task. `/deliver resume TK-###` continues one
 from its task and branch; `/retrospective` reads the times.
 
+Run each task in its own fresh, short session started on the workhorse model
+the host contract names; a skill cannot switch the session model. On another
+model, tell the owner once and continue.
+
 ## Procedure
 
 1. Pre-flight: read `workspace/config.json` (missing: route to the setup entry

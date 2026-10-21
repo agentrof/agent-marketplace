@@ -173,6 +173,10 @@ with the read-only `security-reviewer` in parallel on a risky change; it
 merges with 0 critical and 0 major findings. The flow is defined in
 `plugins/software-engineering-team/flows/fast-lane.md`.
 
+Start each `/deliver` task, parallel ones included, in its own fresh session
+on Sonnet: Claude `claude --model sonnet` (or `/model` in the app), Codex
+`codex -m gpt-6.1-sol -c model_reasoning_effort=medium`.
+
 `/issue-report` is a stateless support path for Agent Marketplace defects and
 improvements. It previews the exact GitHub payload in chat, files only after
 explicit approval and never stores issue state in the consuming project.

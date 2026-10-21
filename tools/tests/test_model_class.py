@@ -62,7 +62,8 @@ class ResolverTests(unittest.TestCase):
                   for slot, setting in self.map["hosts"]["claude"]["classes"].items()}
         self.assertEqual(claude["mechanical"], ("claude-haiku-5-5", "high"))
         self.assertEqual(claude["critical_decision"], ("claude-opus-5-5", "high"))
-        self.assertEqual(claude["security_review"], ("claude-opus-5-5", "xhigh"))
+        self.assertEqual(claude["security_review"], ("claude-opus-5-5", "high"))
+        self.assertEqual(claude["routine_review"], ("claude-sonnet-5-5", "medium"))
         codex = self.map["hosts"]["codex"]["classes"]
         self.assertEqual(codex["mechanical"]["model"], "gpt-6-luna")
         self.assertEqual({setting["model"] for slot, setting in codex.items()
@@ -92,7 +93,7 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual((own["class"], own["agent"]), ("routine_review", "code-reviewer"))
         security = self.resolve("claude", "security_review", role="code-reviewer", size="l")
         self.assertEqual((security["slot"], security["spawn"]),
-                         ("security_review", {"model": "opus", "effort": "xhigh"}))
+                         ("security_review", {"model": "opus", "effort": "high"}))
 
     def test_project_overrides_take_precedence_over_the_package(self):
         config = {"class_models": {"claude": {"routine_review": {"effort": "low"},

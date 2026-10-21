@@ -87,6 +87,8 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
      recurring and rare rework groups, unclassified events and memory
      candidates;
    - the slowest tasks with their steps and verdict against their size target;
+   - per kind the tasks over their size's cost budget, `cost_budget_usd` in
+     `skill-content/deliver/data/targets.json`;
    - per kind the size targets beside the per-size medians calibrated from the
      scope and the kept history (shown at 5 or more tasks of a size);
    - up to 5 numbered proposals, one per cause across kinds, only from kinds

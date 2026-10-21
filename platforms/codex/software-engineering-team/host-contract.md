@@ -21,6 +21,8 @@
   roots, local memory and the header-stamped role files in `.codex/agents/`. A
   stale stamp means the role still runs what it was rendered with until setup
   renders it again; the next start reads the new file.
+- Workhorse model: `deliver` runs in a fresh session per task started with
+  `codex -m gpt-6.1-sol -c model_reasoning_effort=medium`.
 - Models: a role file's `model` and `model_reasoning_effort` win over a spawn
   request, so the spawn passes no model; the pinned models need Codex 0.159.1
   or later. `/configure models` records

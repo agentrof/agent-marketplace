@@ -94,16 +94,21 @@ omitted `effort` follows the session. Codex dist agents carry the resolved
 The package defaults follow the owner's decision of 16 Oct 2026: small
 models for mechanical work, large ones only for critical decisions, security
 and data-loss review and large build work. On Claude Code `mechanical` runs
-Haiku 5.5 at `high`, `routine_authoring` and `routine_review` Sonnet 5.5 at
-`high`, `complex_authoring` Sonnet 5.5 at `xhigh`, `critical_decision` Opus
-5.5 at `high`, `security_review` Opus 5.5 at `xhigh` and `orchestration`
-Sonnet 5.5 at `medium`; each escalated slot moves one effort or model up.
+Haiku 5.5 at `high`, `routine_authoring` Sonnet 5.5 at `high`,
+`routine_review` Sonnet 5.5 at `medium`, `complex_authoring` Sonnet 5.5 at
+`xhigh`, `critical_decision` and `security_review` Opus 5.5 at `high` and
+`orchestration` Sonnet 5.5 at `medium`; each escalated slot moves one effort
+or model up. The 21 Oct 2026 cost decision lowered routine and security review
+one effort each, because in one measured project the orchestrating session on
+the top model was over half the delivery cost: `deliver` runs in a fresh
+session started on Sonnet, one per task.
 Haiku 5.5 takes `low` to `max` and needs Claude Code 2.1.293
 ([models](https://platform.claude.com/docs/en/about-claude/models/overview),
 [model config](https://code.claude.com/docs/en/model-config)); its `haiku`
 alias still resolves to Haiku 4.5 on Bedrock, Vertex and Foundry. On Codex
 `mechanical` runs GPT-6 Luna at `high` and every other slot GPT-6.1 Sol,
-from `low` for `orchestration` to `xhigh` for `security_review`. Every slot
+from `low` for `orchestration` to `high` for `security_review` and
+`xhigh` for the escalated authoring and decision slots. Every slot
 pins an effort, because a Claude Code subagent without `effort` follows the
 session's level, `max` included
 ([subagents](https://code.claude.com/docs/en/sub-agents)). No slot defaults

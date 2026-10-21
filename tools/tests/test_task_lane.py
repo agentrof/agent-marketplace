@@ -741,6 +741,17 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.assertEqual(list(goal), ["knowledge"])
         self.assertEqual((goal["knowledge"]["average_target"], goal["knowledge"]["over_size_target"]), (5, []))
 
+    def test_a_task_over_its_cost_budget_is_flagged(self):
+        rows = [task_lane.task_row({**RetrospectiveTests.task, "id": task_id},
+                                   pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:10:00Z"))
+                for task_id in ("TK-001", "TK-002")]
+        budget = task_lane.COST_BUDGETS["build"]["s"]
+        cost = {"main": {"usd": 0.0}, "tokens": dict.fromkeys(task_lane.COST_TOKENS, 0)}
+        rows[0]["cost"], rows[1]["cost"] = {**cost, "usd": budget + 1}, {**cost, "usd": budget}
+        data = task_lane.report(rows, "latest 20")
+        self.assertEqual(data["targets"]["build"]["over_cost_budget"], ["TK-001"])
+        self.assertIn("Over cost budget build (s/m/l $", task_lane.render(data))
+
     def test_a_knowledge_task_is_approved_by_its_request_and_needs_no_criteria(self):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))

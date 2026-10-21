@@ -118,15 +118,5 @@ recreate it without changing Requirement or Delivery state.
   `python3 tools/release.py verify-release` recomputes it at the commit a
   release tags.
 - Setup never copies a package version or build ID into project configuration,
-  and upgrade never compares an old project build ID with a new one. Active
-  Delivery compatibility is proven from package metadata plus the remote Fence
-  and control-record protocol, without a project upgrade ledger.
-
-When open Deliveries exist, the Delivery coordinator acquires the project Fence
-in `upgrade` mode, quiesces active Items, validates every Integration and Item
-control record with the advertised protocol adapters, applies only
-package-owned schema changes, and releases all Delivery barriers atomically
-before returning the Fence to `open`. Setup never performs a remote mutation.
-If it discovers a protocol-1 Fence, complete the coordinator's
-`upgrade-fence-v1` migration after all Slots are free and after Governance is
-approved; protocol-1 state is otherwise readable only for that conversion.
+  and upgrade never compares an old project build ID with a new one. Setup
+  never performs a remote mutation.

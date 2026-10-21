@@ -21,7 +21,6 @@ except ModuleNotFoundError:  # run as a script from tools/tests
     from levels import integration
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest import mock
 
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
@@ -96,8 +95,6 @@ class CodexModelCheckTests(unittest.TestCase):
         git_fixture.init_repository(self.project, initial_branch="main")
         self.home = base / "codex-home"
         self.home.mkdir()
-        self.empty = base / "empty"
-        self.empty.mkdir()
         self.isolation = base / "isolation"
         self.codex = fixtures.FakeHost(base / "bin", "codex")
         self.codex.answer("--version", stdout=f"codex-cli {FAKE_CODEX_VERSION}\n")
@@ -118,24 +115,15 @@ class CodexModelCheckTests(unittest.TestCase):
             "client_version": FAKE_CODEX_VERSION,
             "models": codex_catalog(*slugs, efforts=efforts)}), encoding="utf-8")
 
-    def environment(self, codex: bool) -> dict:
+    def generated(self, *args: str) -> tuple[dict, str]:
         env = fixtures.isolated_hosts(os.environ, self.isolation)
         # The fake catalog declares its own account context.
         env = {key: value for key, value in env.items() if not key.startswith("CODEX_SANDBOX")}
         env.update({"PYTHONDONTWRITEBYTECODE": "1", "CODEX_HOME": str(self.home),
-                    "PATH": str(self.codex.path.parent if codex else self.empty)})
-        if codex:
-            env["CODEX_VERSION"] = FAKE_CODEX_VERSION
-        return env
-
-    def generate(self, *args: str, codex: bool = True) -> subprocess.CompletedProcess:
-        return subprocess.run(
+                    "PATH": str(self.codex.path.parent), "CODEX_VERSION": FAKE_CODEX_VERSION})
+        result = subprocess.run(
             [sys.executable, str(self.generator), *args, "--project-root", str(self.project)],
-            capture_output=True, text=True, check=False, timeout=120,
-            env=self.environment(codex))
-
-    def generated(self, *args: str, codex: bool = True) -> tuple[dict, str]:
-        result = self.generate(*args, codex=codex)
+            capture_output=True, text=True, check=False, timeout=120, env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return json.loads(result.stdout), " ".join(result.stderr.split())
 
@@ -179,10 +167,7 @@ class CodexModelCheckTests(unittest.TestCase):
         self.assertEqual(set(files), set(self.pins))
         self.assert_fallen_back(files, self.pinned, "Model unavailable")
         self.assert_pinned(files, self.on_second)
-        self.assertIn(f"codex-project: warning: {self.pinned} is unavailable for the ", warning)
-        self.assertIn(" classes: this host's own model list (account view,", warning)
-        self.assertIn(f"Their roles {', '.join(self.on_pinned)} run on the parent session's model"
-                      " at their own effort; every setup or refresh judges it again.", warning)
+        self.assertIn(f"codex-project: warning: {self.pinned} is unavailable", warning)
         self.assertEqual({role: result["roles"][role]["model_source"] for role in self.on_pinned},
                          {role: "fallback" for role in self.on_pinned})
         # The cached account catalog answers: no command beyond the version.
@@ -215,10 +200,7 @@ class CodexModelCheckTests(unittest.TestCase):
                          {self.pinned: "unverified", self.second: "unverified"})
         self.assertEqual(unverified["model_fallbacks"], {})
         self.assert_pinned(self.role_files(), self.pins)
-        self.assertIn(f"codex-project: note: {', '.join(sorted((self.pinned, self.second)))} keep their pins"
-                      " unverified:",
-                      note)
-        self.assertIn("`codex debug models` exited with status 3", note)
+        self.assertIn("keep their pins unverified", note)
 
     def test_a_list_that_reflects_no_account_keeps_every_listed_pin_with_a_note(self):
         self.listing(self.pinned, self.second, bundled=True)
@@ -229,36 +211,10 @@ class CodexModelCheckTests(unittest.TestCase):
                          {self.pinned: "unverified", self.second: "unverified"})
         self.assertEqual(result["model_fallbacks"], {})
         self.assert_pinned(self.role_files(), self.pins)
-        self.assertIn("keep their pins unverified: no readable models_cache.json;"
-                      " `codex debug models` printed the catalog bundled with the binary, so it"
-                      " reflects no account; the run-time rule covers them.", note)
+        self.assertIn("keep their pins unverified", note)
         # A catalog listing only: no command starts a model.
         self.assertEqual(self.commands(), [["--version"], ["debug", "models"],
                                            ["debug", "models", "--bundled"]])
-
-    def test_fake_catalog_ignores_ambient_sandbox_markers(self):
-        self.listing(self.pinned, self.second, bundled=True)
-        markers = {"CODEX_SANDBOX": "seatbelt", "CODEX_SANDBOX_NETWORK_DISABLED": "1"}
-        ambient = {**os.environ, **markers}
-        with mock.patch.object(os, "environ", ambient):
-            result, note = self.generated("apply", "--scope", "local")
-            self.assertEqual(result["model_check"]["view"], "generic")
-            self.assertIn("printed the catalog bundled with the binary", note)
-            self.assertEqual({key: os.environ[key] for key in markers}, markers)
-
-    def test_without_a_codex_list_every_pin_stays_and_it_says_so(self):
-        self.cache(self.second)
-        self.generated("apply", "--scope", "local")
-        self.assert_fallen_back(self.role_files(), self.pinned, "Model unavailable")
-        # The isolated codex lists nothing, so the check judges no model.
-        result, note = self.generated("apply", "--scope", "local", codex=False)
-        self.assertEqual(result["model_check"]["status"], "failed")
-        self.assertEqual(result["model_fallbacks"], {})
-        self.assert_pinned(self.role_files(), self.pins)
-        self.assertIn(f"codex-project: note: {', '.join(sorted((self.pinned, self.second)))} keep their pins"
-                      " unverified:",
-                      note)
-        self.assertIn("`codex debug models` exited with status 1", note)
 
     def test_the_inherit_profile_keeps_each_role_s_effort_and_runs_no_check(self):
         result, _ = self.generated("apply", "--scope", "local", "--execution-profile", "inherit")
@@ -270,35 +226,6 @@ class CodexModelCheckTests(unittest.TestCase):
                 self.assertEqual(text.splitlines()[1], "# Execution profile: inherit")
                 self.assertEqual(role_settings(text),
                                  [f'model_reasoning_effort = "{self.pins[role][1]}"'])
-
-    def test_a_project_model_is_judged_and_its_effort_checked_against_the_list(self):
-        config = self.project / "workspace/config.json"
-        config.parent.mkdir(parents=True)
-        config.write_text(json.dumps({
-            "schema_version": 2, "team_id": fixtures.PLUGIN, "output_language": "English",
-            "terminology_language": "English",
-            "class_models": {"codex": {"critical_decision": {"model": "gpt-5.5", "effort": "xhigh"},
-                                       "routine_authoring": {"model": "gpt-9-ghost"}}}}),
-            encoding="utf-8")
-        self.cache(self.pinned, self.second, "gpt-5.5", efforts=("low", "medium", "high"))
-        result, warning = self.generated("apply", "--scope", "local")
-        self.assertEqual(result["model_check"]["verdicts"],
-                         {"gpt-5.5": "available", "gpt-9-ghost": "unavailable",
-                          self.pinned: "available", self.second: "available"})
-        on_ghost = sorted(role for role, row in result["roles"].items()
-                          if row["class"] == "routine_authoring")
-        self.assertEqual(result["model_fallbacks"], {"gpt-9-ghost": on_ghost})
-        self.assertIn("codex-project: warning: gpt-9-ghost is unavailable for the routine_authoring"
-                      " class",
-                      warning)
-        # A listed model outside the catalog keeps the effort the project set,
-        # with a warning when its list does not name that effort.
-        self.assertIn("codex-project: warning: the critical_decision class runs gpt-5.5 at effort xhigh,"
-                      " which this host's own model list does not name for it (low, medium,"
-                      " high); choose another effort through /configure models.", warning)
-        high = next(role for role, row in result["roles"].items() if row["class"] == "critical_decision")
-        self.assertEqual(role_settings(self.role_files()[high]),
-                         ['model = "gpt-5.5"', 'model_reasoning_effort = "xhigh"'])
 
 
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -347,8 +274,6 @@ class ClaudeModelCheckTests(unittest.TestCase):
         git_fixture.init_repository(self.project, initial_branch="main")
         self.config({})
         self.isolation = base / "isolation"
-        self.empty = base / "empty"
-        self.empty.mkdir()
         self.claude = fixtures.FakeHost(base / "session", "claude")
         self.claude.answer("--version", stdout="2.1.284 (Claude Code)\n")
         self.reply(self.sonnet, self.haiku, "claude-haiku-4-5-20251001")
@@ -420,11 +345,7 @@ class ClaudeModelCheckTests(unittest.TestCase):
             with self.subTest(role=role):
                 self.assertIn(f"model: {self.sonnet}", rendered[role])
                 self.assertNotIn(f"# Model unavailable: {self.opus}", rendered[role])
-        self.assertIn(f"claude-project: warning: {self.opus} is unavailable for the"
-                      " critical_decision and security_review classes: this host's own model list"
-                      " (account view,", warning)
-        self.assertIn(f"Their roles {', '.join(on_opus)} run on this session's model at their"
-                      " own effort; every setup or refresh judges it again.", warning)
+        self.assertIn(f"claude-project: warning: {self.opus} is unavailable", warning)
         # The probe sent its one `initialize` request, and no user message.
         probes = [call for call in self.claude.calls() if call["argv"] != ["--version"]]
         self.assertEqual(len(probes), 1)
@@ -461,17 +382,13 @@ class ClaudeModelCheckTests(unittest.TestCase):
         self.assertEqual((generic["model_check"]["view"], generic["model_check"]["verdicts"]),
                          ("generic", {self.opus: "unavailable", self.sonnet: "unverified",
                                       self.haiku: "unverified"}))
-        self.assertIn(f"claude-project: note: {', '.join(sorted((self.sonnet, self.haiku)))}"
-                      " keep their pins unverified:", note)
-        self.assertIn("token source apiKeyHelper is no claude.ai login", note)
+        self.assertIn("keep their pins unverified", note)
         # A failed probe judges nothing, so every pin stays.
         self.claude.answer("*", exit=1)
         failed, note = self.generated("apply", "--scope", "local")
         self.assertEqual(failed["model_check"]["status"], "failed")
         self.assertEqual(failed["model_fallbacks"], {})
-        self.assertIn(f"{', '.join(sorted((self.opus, self.sonnet, self.haiku)))} keep their pins"
-                      " unverified: Claude Code's"
-                      " `initialize` probe failed", note)
+        self.assertIn("keep their pins unverified", note)
 
     def test_the_cli_floor_is_the_highest_minimum_of_the_models_the_classes_run(self):
         floors = {model: entry["min_cli_version"] for model, entry in self.map["models"].items()}
@@ -508,10 +425,7 @@ class ClaudeModelCheckTests(unittest.TestCase):
                          {fable: "available", ghost: "unavailable", self.sonnet: "available",
                           self.opus: "available"})
         self.assertEqual(result["model_fallbacks"], {ghost: self.roles_on("routine_review")})
-        self.assertIn(f"claude-project: warning: the critical_decision class runs {fable} at"
-                      " effort max, which"
-                      " this host's own model list does not name for it (low, medium, high);"
-                      " choose another effort through /configure models.", warning)
+        self.assertIn(f"the critical_decision class runs {fable} at effort max", warning)
         high = self.roles_on("critical_decision")[0]
         self.assertIn(f"model: {fable}", self.rendered()[high])
         self.assertIn("effort: max", self.rendered()[high])

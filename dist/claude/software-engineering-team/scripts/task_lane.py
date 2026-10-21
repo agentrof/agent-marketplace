@@ -102,6 +102,8 @@ KINDS = ("build", "knowledge")
 TARGETS_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "deliver" / "data" / "targets.json"
 # Request to merge targets in minutes per kind: s, m, l, max and the average.
 TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
+# Cost budget in USD per kind and size; the retrospective flags a merged task above its own.
+COST_BUDGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8")).get("cost_budget_usd", {})
 TARGET_MINUTES = TARGETS["build"]["average"]
 ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
 PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
@@ -1468,6 +1470,9 @@ def targets(rows: list[dict], totals: list[float], history: list[dict] | None = 
             continue
         average = round(statistics.mean(row["total"] for row in done), 1)
         over = [row["task_id"] for row in done if row["total"] > goal.get(row["size"] or "s", goal["max"])]
+        budget = COST_BUDGETS.get(kind, {})
+        over_cost = [row["task_id"] for row in done
+                     if (row.get("cost") or {}).get("usd", 0) > budget.get(row["size"] or "s", float("inf"))]
         result[kind] = {"tasks": len(done), "average": average, "average_target": goal["average"],
                         "target_gap": round(average - goal["average"], 1),
                         "total": summary([row["total"] for row in done]),
@@ -1476,6 +1481,7 @@ def targets(rows: list[dict], totals: list[float], history: list[dict] | None = 
                         "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
                         "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over,
+                        "cost_budget_usd": budget, "over_cost_budget": over_cost,
                         "calibrated": calibrated(rows, history or [], kind),
                         "cost": cost_summary(done), "quality": quality_summary(done),
                         "rework": rework_summary([row["rework"] for row in done if row.get("rework")]),
@@ -1567,6 +1573,10 @@ def render(data: dict) -> str:
     for kind, goal in (data.get("targets") or {}).items():
         if goal.get("cost"):
             lines.append(f"Cost {kind}: {cost_line(goal['cost'])}")
+        if goal.get("over_cost_budget"):
+            lines.append(f"Over cost budget {kind} (s/m/l $" + "/".join(
+                str(goal["cost_budget_usd"].get(size, "-")) for size in SIZES)
+                + f"): {', '.join(goal['over_cost_budget'])}")
     if data.get("cost"):
         lines.append(f"Cost all merged: {cost_line(data['cost'])}")
     for kind, goal in (data.get("targets") or {}).items():

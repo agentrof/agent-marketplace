@@ -2,7 +2,7 @@
 name: code-reviewer
 description: Code reviewer role. Spawned by software-engineering-team flows after implementation to audit the change and emit a verdict; never auto-triggered.
 model: claude-sonnet-5-5
-effort: high
+effort: medium
 output_contract: prose
 disallowedTools: Artifact, ArtifactComments, ArtifactData, Workflow, ScheduleWakeup, CronCreate, Agent, mcp__*
 omitClaudeMd: true

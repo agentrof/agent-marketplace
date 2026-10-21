@@ -102,7 +102,7 @@
           "model": "claude-sonnet-5-5"
         },
         "routine_review": {
-          "effort": "high",
+          "effort": "medium",
           "efforts": [
             "low",
             "medium",
@@ -124,7 +124,7 @@
           "model": "claude-sonnet-5-5"
         },
         "security_review": {
-          "effort": "xhigh",
+          "effort": "high",
           "efforts": [
             "low",
             "medium",
@@ -331,7 +331,7 @@
           "model": "gpt-6.1-sol"
         },
         "security_review": {
-          "effort": "xhigh",
+          "effort": "high",
           "efforts": [
             "low",
             "medium",

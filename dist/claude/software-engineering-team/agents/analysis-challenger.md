@@ -2,7 +2,7 @@
 name: analysis-challenger
 description: Adversarial reviewer role for analysis spaces. Spawned fresh-context by the deliver entry with one lens or expert profile and scoped inputs; returns structured findings only.
 model: claude-sonnet-5-5
-effort: high
+effort: medium
 output_contract: prose
 tools: Read, Grep, Glob
 omitClaudeMd: true

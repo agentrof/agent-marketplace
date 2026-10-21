@@ -38,7 +38,7 @@
       "f175072f1eabaabf6409873f8cb2f66c7465f9c0ebb3d39f311630b13b70bbaf"
     ,
     "agents/security-reviewer.md":
-      "db2e81011033c7d11f1570b61d005985aa7fe88c40b153f0a29d6ded4a759c0a"
+      "bf561091cc43153523ecfd37348e0caed14aaac12610d94772844f12f5bbe8ca"
     ,
     "agents/software-architect.md":
       "0fa51c097481fe80a78671313cc75cc41b6028b04788e9312bf7ba2529bf9e29"
@@ -59,7 +59,7 @@
       "e30483a24936acd1e67ad83bcb4e34a282c3c72243e5d581abf52e2fbbe04bce"
     ,
     "host-contract.md":
-      "43eb30edfe78b8a883cd2cfe41ca77921eb1408f38a5148b655a708903295a7f"
+      "e801c80c6bc8811c0e2876de5b64c9d25bca0c7f3d51b6e132433a503a391d66"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -146,7 +146,7 @@
       "d19af55eec08738727d088cf154111d97e0621cdd96022973071b720cc332ae3"
     ,
     "scripts/task_lane.py":
-      "5d9e0f09fe5020578f841b53bd1977f3c96a1ce9a046e6a0bd4cbae02ca8bbc1"
+      "271d4c4f3f1adbe36f0d36f896b7b3a1468b495ed41c1af9259f82c3e9ad5a39"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -236,13 +236,13 @@
       "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
     ,
     "skill-content/deliver/SKILL.md":
-      "a20b5e59b5e3f201effe0e27f6bbff04acd9c402294fa0f6f784d1294cf584a1"
+      "1153ad19f205d3f1cf5b0f0c3e23c4279eb4fd53911fa2e849b85b808fc612c5"
     ,
     "skill-content/deliver/data/role-routing.json":
       "e4df0dfeeb7cae08e398b1a0d64d441657b31b2dc557ab316e463677bf3f94f8"
     ,
     "skill-content/deliver/data/targets.json":
-      "c13f5b0a00877fb0bd8b7f7324a52d3deff55fadd2d5dda6597880debde58d77"
+      "6463bc53cb9595254e0cad2f3439c6f2104f328dcfc58ca57f9f2c8bf16f9898"
     ,
     "skill-content/deliver/data/task-triggers.json":
       "09bb304997a0ca720744c97af3e04d0498959e47bbc967d57dab6d1b8b7125de"
@@ -332,7 +332,7 @@
       "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a"
     ,
     "skill-content/retrospective/SKILL.md":
-      "4534cbe6034978657b50ca15bc539165de55a3723097eb6dc82a995d043f6f99"
+      "e324c4f3369ed810efbef71e7299a6fe96cf1093e1098f0acd4adf2a9a2d7f91"
     ,
     "skill-content/retrospective/data/pricing.json":
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"
@@ -344,7 +344,7 @@
       "616b6b3720b930306653e393590a2f41ec882745ce81db826905d05d526f8066"
     ,
     "skill-content/setup/SKILL.md":
-      "cbc8a4d8eec5159533bc5d1c45ab1552cbcda2ab37cfc3e24b32e88f76c936b2"
+      "0a540936b0611c4b6b4fd617e946929cf33a126e37dbf56b107491f55a8d08a3"
     ,
     "skill-content/setup/data/companions.json":
       "e80a4fb563cb2058b7355a67919141c3d354c8c4770a1ac3cb189a252a3ec8dd"
@@ -500,7 +500,7 @@
       "b830be1df67cf93730e457cd3bf683923ed60aa2e78a098fa8de0d94cd334bd0"
     ,
     "templates/model-classes.json":
-      "4bce7e1222a9673ba95875e86e144a368a5de289e780eca4ccc925d71552054c"
+      "e86b24a60470eb0d1b7eb9d92e066417a481f1dd8630d4d8e2619b519f87333c"
     ,
     "templates/project-context-policy.json":
       "33c751e088616132fd76485509434fb0c35cc3f558ae605e08584318ad22a7b4"

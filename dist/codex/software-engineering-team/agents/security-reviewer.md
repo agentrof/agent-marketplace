@@ -2,7 +2,7 @@
 name: security-reviewer
 description: Security reviewer role. Spawned by software-engineering-team flows for the security pass of a risky change to audit it and emit a verdict; never auto-triggered.
 model: gpt-6.1-sol
-model_reasoning_effort: xhigh
+model_reasoning_effort: high
 output_contract: prose
 tools: Read, Grep, Glob
 ---

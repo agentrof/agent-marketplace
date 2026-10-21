@@ -1,0 +1,6 @@
+{
+  "summary": "Fast lane spawns less: size s runs writer and reviewer only, the architect pre-check routes on path rules at size m on the routine_review class, suggest roles spawn only on the owner's ask, reviewers read the diff from a file review-inputs writes, and the main session no longer re-runs the writer's tests.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

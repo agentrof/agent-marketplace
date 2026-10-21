@@ -1,0 +1,6 @@
+{
+  "summary": "The docker-compose method skill is renamed container-environment, since it covers Compose, Helm and kind; a project trigger rule or an open task that still names docker-compose maps to the new name.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

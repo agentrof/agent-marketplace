@@ -1,0 +1,6 @@
+{
+  "summary": "Setup companions add graphify (CLI through uv, host skills, git hooks, output under .agentrof/graphify) and ponytail (level full, review and debt routing); a background graphify_refresh script re-extracts changed docs Markdown after a merge.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

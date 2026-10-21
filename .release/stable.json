@@ -1,22 +1,12 @@
 {
   "schema_version": 2,
-  "version": "2026.10.7",
-  "build_id": "snapshot.7440b6d80731c1bb4cf485a90b8aab7d7e90ef140afa077e62a809d31b31dbfc",
+  "version": "2026.10.6",
+  "build_id": "snapshot.f9332f5e83b0b914237d5122d13a6de3ecb8eb5afe0f4120e6c603d50c91db10",
   "impacts": {
-    "software-engineering-team": "minor",
-    "agent-marketplace": "minor"
+    "software-engineering-team": "patch"
   },
   "summaries": [
-    "Restore the autopilot grant guard as a dedicated hook: file tools cannot write the grant or arming record, and a shell command that adds autopilot authority outside the packaged autopilot.py is put back.",
-    "Setup companions add graphify (CLI through uv, host skills, git hooks, output under .agentrof/graphify) and ponytail (level full, review and debt routing); a background graphify_refresh script re-extracts changed docs Markdown after a merge.",
-    "The docker-compose method skill is renamed container-environment, since it covers Compose, Helm and kind; a project trigger rule or an open task that still names docker-compose maps to the new name.",
-    "Routine code review runs at medium effort and security review at high; deliver runs in a fresh, short Sonnet session per task as setup, the host contracts and the README say; the retrospective flags each task over its size's cost budget.",
-    "A project's proof commands, role routing and task triggers move from files under .agentrof/ to the local_proof, role_routing and task_triggers fields of workspace/config.json, so .agentrof/ stays fully untracked; setup keeps them on refresh.",
-    "The fast lane, vault tooling, autopilot and setup no longer import any governed compiler; open-pr stops resealing business-analysis spaces.",
-    "Fast lane spawns less: size s runs writer and reviewer only, the architect pre-check routes on path rules at size m on the routine_review class, suggest roles spawn only on the owner's ask, reviewers read the diff from a file review-inputs writes, and the main session no longer re-runs the writer's tests.",
-    "Remove the per-spawn task-input manifest, the Process Policy switches and step timing, the Claude model fallback hook and Codex --inherit-model/--restore-model, the unread BA space schema and the Delivery grouping of task_lane; pr_proof moves to an optional workspace/config.json key (remote_ci by default, local_record).",
-    "The retrospective bounds its figures (filed at most found, shares at most 100%, merge refuses an issue number as a count), stops counting merges from main, the deliver-docs commit and the first feature commit as rework and classifies commit prefixes and role verdicts, adds an unaccounted column and reasons for missing steps and cost, proposes one lever per cause only from kinds with 5 merged tasks, calibrates per-size medians from history, flags a price-table change, and gives every duration a verdict and a baseline.",
-    "Role prompts gain compact Rules lists (identity source, membership filters, deadlines, idempotency, hashed tokens, secrets from files, test tiers, flaky tests, restart survival); the relational skill adds a tenant isolation reference, the environment skill covers Helm and kind with a cluster patterns reference, and the review checklists gain deadline, idempotency, docs-delta, file and browser-session checks.",
-    "Setup gains a companions check and apply step for optional third-party skills, driven by one registry that also generates the Companion skills routing table in the project instructions and the README section."
+    "Under process_profile fast_lane, a stale or superseded input binding in the backlog and Experience checks is a warning instead of an error, so governed packages read as knowledge no longer fail the full vault gate after a task edit.",
+    "Task lane open-pr re-approves every approved business-analysis space the task edited, so a plain task edit no longer leaves the package and everything that requires it stale."
   ]
 }

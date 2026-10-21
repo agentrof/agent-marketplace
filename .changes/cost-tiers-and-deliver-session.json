@@ -1,0 +1,6 @@
+{
+  "summary": "Routine code review runs at medium effort and security review at high; deliver runs in a fresh, short Sonnet session per task as setup, the host contracts and the README say; the retrospective flags each task over its size's cost budget.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

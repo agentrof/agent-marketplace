@@ -1,0 +1,6 @@
+{
+  "summary": "A project's proof commands, role routing and task triggers move from files under .agentrof/ to the local_proof, role_routing and task_triggers fields of workspace/config.json, so .agentrof/ stays fully untracked; setup keeps them on refresh.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

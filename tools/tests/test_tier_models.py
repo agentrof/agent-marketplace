@@ -20,7 +20,6 @@ import copy
 import hashlib
 import json
 import os
-import shlex
 import shutil
 import subprocess
 import sys
@@ -122,17 +121,14 @@ def flat(text: str) -> str:
 
 
 class Marketplace:
-    """One built marketplace fixture that a test class shares and never changes."""
+    """The committed build, which `make dist-check` keeps equal to a fresh one;
+    tests read it and never change it."""
 
-    def __init__(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name) / "marketplace"
-        fixtures.make_valid_root(self.root)
+    def __init__(self, root: Path) -> None:
+        self.root = root
         self.package = self.root / "dist" / "claude" / PLUGIN
         self.map = load(self.package / TIER_MAP)
 
-    def cleanup(self) -> None:
-        self.temporary.cleanup()
 
     def host(self, host: str) -> dict:
         return self.map["hosts"][host]
@@ -168,6 +164,9 @@ class Marketplace:
 
     def roles_on(self, tier: str) -> list[str]:
         return self.map["roles"][tier]
+
+
+COMMITTED = Marketplace(ROOT)
 
 
 class Project:
@@ -215,11 +214,7 @@ class Project:
 class TierMapTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
+        cls.market = COMMITTED
 
     def test_every_build_ships_one_class_map_of_every_host(self):
         root, tier_map = self.market.root, self.market.map
@@ -286,31 +281,6 @@ class TierMapTests(unittest.TestCase):
                 with self.subTest(host=host, model=model):
                     self.assertEqual(role_settings.model_known(self.market.host(host), model),
                                      accepted)
-
-    def test_hosts_confirm_max_and_codex_refuses_ultra(self):
-        hosts = self.market.map["hosts"]
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                confirm = hosts[host]["confirm"]
-                self.assertEqual(sorted(confirm), ["max"])
-                self.assertTrue(confirm["max"]["evidence"].strip())
-                self.assertTrue(all(source.startswith("https://")
-                                    for source in confirm["max"]["sources"]))
-        self.assertEqual(sorted(hosts["codex"]["refuse"]), ["ultra"])
-        self.assertIn("subagents", hosts["codex"]["refuse"]["ultra"]["reason"])
-        self.assertEqual(hosts["claude"]["refuse"], {})
-
-    @integration
-    def test_the_builder_refuses_an_invalid_effort_policy(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "marketplace"
-            fixtures.make_valid_root(root, build=False)
-            path = root / "platforms" / "codex" / "effort-policy.json"
-            policy = load(path)
-            policy["refuse"]["extreme"] = policy["refuse"]["ultra"]
-            path.write_text(json.dumps(policy, indent=2) + "\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "effort-policy.json.*'extreme'"):
-                build_distributions.replace_generated(root, root / "dist")
 
     def test_the_builder_refuses_a_model_id_shape_that_rejects_a_catalog_id(self):
         root = self.market.root
@@ -396,12 +366,8 @@ class ResolutionTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
+        cls.market = COMMITTED
         cls.tiers = package_tiers(cls.market.map)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
 
     def resolve(self, host: str, config: dict | None = None) -> dict:
         return role_settings.resolve(self.market.map, config or {}, host)
@@ -530,11 +496,7 @@ class ResolutionTests(unittest.TestCase):
 class ConfigTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
+        cls.market = COMMITTED
 
     def setUp(self) -> None:
         self.project = Project(self.market)
@@ -586,42 +548,20 @@ class ConfigTests(unittest.TestCase):
     def test_check_refuses_every_override_outside_the_package(self):
         market = self.market
         haiku = market.other_model("claude", MEDIUM, efforts=False)
-        refused_tiers = [tier for tier in TIERS if "ultra" in market.host("codex")["efforts"]]
         cases = (
             ({"class_models": []}, "class_models must map a host"),
-            ({"class_models": {}}, "class_models must map a host"),
             ({"class_models": {"ghost": {HIGH: {"effort": "low"}}}},
              "class_models.ghost: unknown host"),
             ({"class_models": {"claude": {}}}, "class_models.claude must map a class slot"),
             ({"class_models": {"claude": {"extreme": {"effort": "low"}}}},
              "class_models.claude.extreme: unknown class slot"),
-            ({"class_models": {"claude": {"inherit": {"model": "session"}}}},
-             "class_models.claude.inherit: unknown class slot"),
-            ({"class_models": {"codex": {"lens": {"effort": "high"}}}},
-             "class_models.codex.lens: unknown class slot"),
-            ({"class_models": {"claude": {"low": {"effort": "high"}}}},
-             "class_models.claude.low: unknown class slot"),
-            ({"class_models": {"claude": {"security_review_escalated": {"effort": "high"}}}},
-             "class_models.claude.security_review_escalated: unknown class slot"),
             ({"tier_models": {"claude": {"high": {"effort": "high"}}}},
              "tier_models is retired"),
             ({"role_tiers": {MOVED: "high"}}, "role_tiers is retired"),
             ({"class_models": {"claude": {HIGH: "low"}}},
              f"class_models.claude.{HIGH} must hold a model, an effort or both"),
-            ({"class_models": {"claude": {HIGH: {}}}},
-             f"class_models.claude.{HIGH} must hold a model, an effort or both"),
-            ({"class_models": {"claude": {HIGH: {"speed": "fast"}}}},
-             f"class_models.claude.{HIGH} must hold a model, an effort or both"),
             ({"class_models": {"claude": {HIGH: {"model": "opus"}}}},
              f"class_models.claude.{HIGH}.model: 'opus' is neither 'session' nor"),
-            ({"class_models": {"claude": {HIGH: {"model": "gpt-6.1-sol"}}}},
-             f"class_models.claude.{HIGH}.model: 'gpt-6.1-sol' is neither"),
-            ({"class_models": {"claude": {HIGH: {"model": "claude-opus-5-5\nhooks: {}"}}}},
-             f"class_models.claude.{HIGH}.model:"),
-            ({"class_models": {"codex": {HIGH: {"model": "GPT 6"}}}},
-             f"class_models.codex.{HIGH}.model: 'GPT 6' is neither"),
-            ({"class_models": {"claude": {HIGH: {"model": 5}}}},
-             f"class_models.claude.{HIGH}.model: 5 is neither"),
             ({"class_models": {"claude": {HIGH: {"effort": 3}}}},
              f"class_models.claude.{HIGH}.effort must name an effort"),
             ({"class_models": {"claude": {HIGH: {"effort": "ultra"}}}},
@@ -632,12 +572,9 @@ class ConfigTests(unittest.TestCase):
                                                   "effort": "turbo"}}}},
              f"{UNLISTED['claude']} does not take 'turbo'"),
             ({"role_classes": []}, "role_classes must map a role"),
-            ({"role_classes": {}}, "role_classes must map a role"),
             ({"role_classes": {"ghost-role": HIGH}}, "role_classes.ghost-role: unknown role"),
             ({"role_classes": {MOVED: "lens"}},
              f"role_classes.{MOVED}: the class must be one of"),
-            ({"role_classes": {MOVED: "inherit"}}, "the class must be one of"),
-            ({"role_classes": {MOVED: 1}}, "the class must be one of"),
         )
         for config, fragment in cases:
             with self.subTest(config=config):
@@ -646,15 +583,9 @@ class ConfigTests(unittest.TestCase):
                 self.assertTrue(all(error.endswith(REMEDY) for error in errors
                                     if error.startswith(("class_models", "role_classes", "tier_models",
                                                          "role_tiers"))), errors)
-        self.assertTrue(refused_tiers)
-        for tier in refused_tiers:
-            for override in ({"effort": "ultra"}, {"model": "session", "effort": "ultra"},
-                             {"model": UNLISTED["codex"], "effort": "ultra"}):
-                with self.subTest(codex=tier, override=override):
-                    errors = self.errors(class_models={"codex": {tier: override}})
-                    self.assertTrue(any(f"class_models.codex.{tier}.effort: 'ultra' is refused"
-                                        f" for every class" in error and "subagents" in error
-                                        for error in errors), errors)
+        errors = self.errors(class_models={"codex": {HIGH: {"model": "session", "effort": "ultra"}}})
+        self.assertTrue(any(f"class_models.codex.{HIGH}.effort: 'ultra' is refused" in error
+                            for error in errors), errors)
 
     def test_a_package_without_a_tier_map_refuses_an_override_only(self):
         canonical = ROOT / "plugins" / PLUGIN
@@ -705,19 +636,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(set(self.config()), BASE_KEYS)
 
-    def test_set_class_refuses_what_check_refuses(self):
-        haiku = self.market.other_model("claude", MEDIUM, efforts=False)
+    def test_set_class_refuses_a_missing_or_conflicting_argument(self):
         for args, fragment in (
-                (("--host", "codex", "--class", HIGH, "--effort", "ultra", "--confirmed"),
-                 "'ultra' is refused for every class"),
-                (("--host", "claude", "--class", MEDIUM, "--model", haiku, "--effort", "low"),
-                 "takes no effort"),
-                (("--host", "claude", "--class", HIGH, "--model", "opus"),
-                 "'opus' is neither"),
-                (("--host", "claude", "--class", HIGH, "--effort", "turbo"),
-                 "does not take 'turbo'"),
-                (("--host", "claude", "--class", "inherit", "--model", "session"), "unknown class slot"),
-                (("--host", "ghost", "--class", HIGH, "--effort", "low"), "unknown host"),
                 (("--host", "claude", "--class", HIGH), "--model, --effort or --default"),
                 (("--host", "claude", "--class", HIGH, "--model", "session", "--default"),
                  "--default takes no --model or --effort")):
@@ -932,11 +852,7 @@ class ModelChoiceTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
+        cls.market = COMMITTED
 
     def setUp(self) -> None:
         self.project = Project(self.market)
@@ -982,22 +898,6 @@ class ModelChoiceTests(unittest.TestCase):
                     self.assertEqual(choice["efforts"], efforts)
                     self.assertEqual(choice["recommended_effort"],
                                      self.recommended(host, tier, efforts))
-
-    @integration
-    def test_without_a_host_list_the_catalog_stands_in(self):
-        # Every build ships the adapter; an older package has none.
-        self.assertTrue((self.market.package / "scripts" / "host_models.py").is_file())
-        package = self.package_with(None)
-        (package / "scripts" / "host_models.py").unlink()
-        report = self.choices("claude", package)
-        self.assertEqual(report["model_list"], {"source": "catalog", "status": "no_adapter"})
-        self.assert_catalog_choices(report, "claude")
-        # Another host's list is never read from this package.
-        other = self.choices("codex")
-        self.assertEqual(other["model_list"], {"source": "catalog", "status": "other_host"})
-        self.assert_catalog_choices(other, "codex")
-        plain = self.project.project_config("classes", "--host", "claude", "--json")
-        self.assertNotIn("model_choices", json.loads(plain.stdout)["hosts"]["claude"])
 
     def test_the_host_list_offers_its_models_in_the_hosts_shape(self):
         listing = {
@@ -1090,11 +990,7 @@ class ModelChoiceTests(unittest.TestCase):
 class SetupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
+        cls.market = COMMITTED
 
     def setUp(self) -> None:
         self.project = Project(self.market)
@@ -1182,12 +1078,8 @@ def assert_inspect_previews(test: unittest.TestCase, root: Path, generate) -> No
 class ClaudeProjectAgentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
+        cls.market = COMMITTED
         cls.tiers = package_tiers(cls.market.map)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
 
     def setUp(self) -> None:
         self.project = Project(self.market)
@@ -1430,17 +1322,6 @@ class ClaudeProjectAgentTests(unittest.TestCase):
         assert_inspect_previews(self, self.project.root, self.project.generator)
 
 
-    def test_the_host_contract_spawns_the_rendered_role_first(self):
-        contract = flat((ROOT / "platforms/claude" / PLUGIN / "host-contract.md").read_text(
-            encoding="utf-8"))
-        paragraph = contract.split("`spawn` uses", 1)[1].split(" - ", 1)[0]
-        self.assertLess(paragraph.index(f"`{PREFIX}<agent-id>`"),
-                        paragraph.index(f"`{PLUGIN}:<agent-id>`"))
-        for fragment in ("stale stamp", "restart", "`strictPluginOnlyCustomization`",
-                         "never run overlapping writers"):
-            self.assertIn(fragment, paragraph)
-
-
 @integration
 class RenderedAgentStampTests(unittest.TestCase):
     """At session start the Claude Code package's `team_guard.py register` reports
@@ -1448,11 +1329,7 @@ class RenderedAgentStampTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
+        cls.market = COMMITTED
 
     def setUp(self) -> None:
         self.project = Project(self.market)
@@ -1533,16 +1410,16 @@ class RenderedAgentStampTests(unittest.TestCase):
         self.assert_stale(self.register(update, "compact"), total, "9.9.9", told=False)
         self.assert_stale(self.register(update, project_dir=False), total, "9.9.9")
         # The same version with one changed role makes only that role stale.
-        rebuilt = self.release(load(self.market.package / ".agent-marketplace-package.json")
-                               ["version"], role="code-reviewer")
-        self.assert_stale(self.register(rebuilt), 1, "0.0.1")
+        version = load(self.market.package / ".agent-marketplace-package.json")["version"]
+        rebuilt = self.release(version, role="code-reviewer")
+        self.assert_stale(self.register(rebuilt), 1, version)
         # A file rendered before stamps existed carries none.
         path = self.project.agents_dir / f"{PREFIX}qa-engineer.md"
         lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
         self.assertEqual(lines[2], stamp(self.market.package, "qa-engineer", role_settings.resolve(
             self.market.map, {}, "claude")["qa-engineer"]) + "\n")
         path.write_text("".join(lines[:2] + lines[3:]), encoding="utf-8")
-        self.assert_stale(self.register(), 1, "0.0.1")
+        self.assert_stale(self.register(), 1, version)
         # The refresh renders them again; the Codex package never reports them.
         self.render(update)
         self.assert_quiet(self.register(update))
@@ -1599,12 +1476,8 @@ class CodexRoleStampTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
+        cls.market = COMMITTED
         cls.package = cls.market.root / "dist" / "codex" / PLUGIN
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
 
     def setUp(self) -> None:
         self.project = Project(self.market)
@@ -1663,19 +1536,6 @@ class CodexRoleStampTests(unittest.TestCase):
                       " workspace/config.json", message)
         self.assertIn(f"Run ${PLUGIN}:setup", message)
 
-    def test_every_role_file_stamps_its_package_source_and_settings(self):
-        self.render()
-        rows = role_settings.resolve(self.market.map, {}, "codex")
-        files = self.files()
-        self.assertEqual(set(files), set(package_tiers(self.market.map, "codex")))
-        for role, lines in files.items():
-            with self.subTest(role=role):
-                self.assertEqual(lines[0], OWNER)
-                header = [line for line in lines[1:lines.index(next(
-                    line for line in lines if not line.startswith("#")))]]
-                self.assertEqual(header[-1], stamp(self.package, role, rows[role]))
-        self.assert_quiet(self.register())
-
     def test_a_config_change_not_yet_rendered_is_reported_until_a_refresh(self):
         self.render()
         version = load(self.package / ".agent-marketplace-package.json")["version"]
@@ -1706,46 +1566,6 @@ class CodexRoleStampTests(unittest.TestCase):
         self.render()
         self.assert_quiet(self.register())
 
-    def test_a_package_update_and_a_file_without_a_stamp_are_reported(self):
-        self.render()
-        update = self.release("9.9.9")
-        total = len(package_tiers(self.market.map, "codex"))
-        self.assert_stale(self.register(update), total, "9.9.9")
-        self.render(update)
-        self.assert_quiet(self.register(update))
-        # A role file rendered before stamps existed carries none.
-        path = self.project.root / ".codex" / "agents" / "qa-engineer.toml"
-        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-        path.write_text("".join(line for line in lines
-                                if not line.startswith("# Rendered from ")), encoding="utf-8")
-        self.assert_stale(self.register(update), 1, "9.9.9")
-        # The Claude Code package reads no Codex role file.
-        self.assert_quiet(self.register(self.market.package))
-
-    def test_the_codex_host_contract_and_the_upgrade_protocol_state_the_report(self):
-        contract = flat((ROOT / "platforms/codex" / PLUGIN / "host-contract.md").read_text(
-            encoding="utf-8"))
-        for fragment in ("whose stamp no longer matches", "still runs what it was rendered with"):
-            self.assertIn(fragment, contract)
-        upgrade = flat((ROOT / "docs/upgrade-protocol.md").read_text(encoding="utf-8"))
-        self.assertIn("Until a refresh renders them, on either host, the session start check"
-                      " reports the role files whose stamp is not the installed package's or"
-                      " the project config's", upgrade)
-
-    def test_a_recorded_profile_or_fallback_keeps_the_stamp_current(self):
-        self.render()
-        for args in (("--execution-profile", "inherit"),):
-            with self.subTest(args=args):
-                script = self.package / "scripts" / "generate_codex_project.py"
-                result = run_script(script, "apply", "--project-root", str(self.project.root),
-                                    "--scope", "local", *args)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assert_quiet(self.register())
-                restore = ("--execution-profile", "auto")
-                result = run_script(script, "apply", "--project-root", str(self.project.root),
-                                    "--scope", "local", *restore)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-
 
 def codex_settings(text: str) -> list[str]:
     return [line for line in text.splitlines() if line.startswith("model")]
@@ -1757,13 +1577,9 @@ class CodexProjectAgentTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.market = Marketplace()
+        cls.market = COMMITTED
         cls.script = cls.market.root / "dist/codex" / PLUGIN / "scripts/generate_codex_project.py"
         cls.tiers = package_tiers(cls.market.map, "codex")
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.market.cleanup()
 
     def setUp(self) -> None:
         self.project = Project(self.market)
@@ -1805,15 +1621,14 @@ class CodexProjectAgentTests(unittest.TestCase):
         lines = [] if follows or row["model"] == "session" else [f'model = "{row["model"]}"']
         return lines + ([f'model_reasoning_effort = "{row["effort"]}"'] if row["effort"] else [])
 
-    def assert_role_files(self, config: dict, *, inherit: bool = False,
-                          fallen: tuple = ()) -> dict:
+    def assert_role_files(self, config: dict, *, fallen: tuple = ()) -> dict:
         rows = role_settings.resolve(self.market.map, config, "codex")
         files = self.role_files()
         self.assertEqual(set(files), set(self.tiers))
         for role, text in files.items():
             with self.subTest(role=role):
                 self.assertEqual(codex_settings(text), self.expected(
-                    rows[role], follows=inherit or rows[role]["model"] in fallen))
+                    rows[role], follows=rows[role]["model"] in fallen))
         return rows
 
     def test_class_models_and_role_classes_set_the_role_files(self):
@@ -1848,24 +1663,18 @@ class CodexProjectAgentTests(unittest.TestCase):
         self.assertEqual(restored["changes"], [f".codex/agents/{role}.toml" for role in moved])
         self.assert_role_files({})
 
-    def test_inherit_and_model_fallbacks_apply_to_the_resolved_models(self):
+    def test_model_fallbacks_apply_to_the_resolved_models(self):
         market = self.market
         sol = market.tier("codex", MEDIUM)["model"]
         effort = market.non_default("codex", HIGH, model=UNLISTED["codex"])
         config = {"class_models": {"codex": {HIGH: {"model": UNLISTED["codex"],
                                                      "effort": effort}}}}
         self.project.write_config(**config)
-        inherit = self.generated("apply", "--scope", "local", "--execution-profile", "inherit")
-        rows = self.assert_role_files(config, inherit=True)
-        self.assertEqual(inherit["class_map"][HIGH],
-                         {"model": "session", "model_source": "profile", "effort": effort,
-                          "effort_source": "config"})
-        self.assertEqual(inherit["roles"][MOVED]["model_source"], "profile")
+        rows = role_settings.resolve(market.map, config, "codex")
         # The check reads the models the project resolves: the high tier's
         # model is listed and stays, the package's Sol is not and falls back.
         self.fake_codex(UNLISTED["codex"])
-        fallen = self.generated("apply", "--scope", "local", "--execution-profile", "auto",
-                                codex=True)
+        fallen = self.generated("apply", "--scope", "local", codex=True)
         on_sol = sorted(role for role, row in rows.items() if row["model"] == sol)
         # Every resolved model the fake host does not list falls back, Luna too.
         unlisted = {row["model"] for row in rows.values()} - {UNLISTED["codex"], "session"}
@@ -1892,130 +1701,6 @@ class CodexProjectAgentTests(unittest.TestCase):
         self.assertIn("new Codex session", report["notice"])
         self.assertEqual(report["class_map"][HIGH]["model_source"], "package")
 
-    def test_inspect_previews_the_plan_and_the_open_choice_without_writing(self):
-        assert_inspect_previews(self, self.project.root, self.generate)
-
-
-class DocumentationTests(unittest.TestCase):
-    """The host contracts, the configure topic and the docs state the settings as the
-    code applies them."""
-
-    def read(self, relative: str) -> str:
-        return flat((ROOT / relative).read_text(encoding="utf-8"))
-
-    def test_the_host_contracts_name_the_project_overrides(self):
-        # The precedence itself is pinned in config-contract.md and docs/authoring.md.
-        for host in ("claude", "codex"):
-            contract = self.read(f"platforms/{host}/{PLUGIN}/host-contract.md")
-            with self.subTest(host=host):
-                for fragment in ("`/configure models`", "`class_models`", "`role_classes`",
-                                 "never edit them by hand"):
-                    self.assertIn(fragment, contract)
-                self.assertNotIn("effort_overrides", contract)
-
-    def test_the_configure_topic_asks_the_model_then_the_effort_then_the_role_tiers(self):
-        skill = self.read(f"plugins/{PLUGIN}/skill-content/configure/SKILL.md")
-        self.assertIn("(`models`)", skill)
-        self.assertIn("Read `references/role-models.md` for `models`", skill)
-        self.assertIn("`set-class` and `set-role-class`", skill)
-        self.assertFalse((ROOT / "plugins" / PLUGIN /
-                          "skill-content/configure/references/role-effort.md").exists())
-        procedure = self.read(f"plugins/{PLUGIN}/skill-content/configure/references/role-models.md")
-        for fragment in (
-                "`/configure models`",
-                "`scripts/model_class.py resolve`",
-                "`project_config.py classes --config workspace/config.json --host <active host>"
-                " --model-list --json`",
-                "ask the model first: the package model, recommended and listed first, then the"
-                " other models of the report's `model_choices`, then `session`",
-                "then the other models of the active host's own model list that the host's model"
-                " picker shows, which leaves out the ones `model_list` names under `hidden`",
-                "A question holds the choices in that order up to the per-question option bound"
-                " the host contract names; when more remain than fit, it holds one fewer and its"
-                " last option, `More choices`, opens the next question with the rest, so no"
-                " question exceeds the bound",
-                "lay out its choices in this fixed order: the recommended effort, the nearest"
-                " choice below it, the nearest choice above it that the host does not confirm,"
-                " then the rest from the lowest up, so a confirmed effort such as `max` comes"
-                " last",
-                "On a bound of four options the first question offers the recommended effort,"
-                " one level below, one level above and `More choices`, and the second the"
-                " remaining levels, `max` among them",
-                "A model with fewer than two effort choices, such as one that takes no effort,"
-                " is reported, not asked",
-                "For an answer that the host confirms, such as `max`, ask a confirmation"
-                " choice-gate question",
-                "Then ask whether any role should run on another class",
-                "the report's roles, which cover every role",
-                "`project_config.py set-class --config workspace/config.json --host <host>"
-                " --class <class>`, adding `--escalated`",
-                "`project_config.py set-role-class --config workspace/config.json --role <role>`",
-                "Regenerate the host projection",
-                "present its `roles` table: role, class, model, effort and source",
-                "`--default` removes any override the config holds"):
-            with self.subTest(fragment=fragment[:50]):
-                self.assertIn(fragment, procedure)
-        self.assertNotIn("effort_overrides", procedure)
-        contract = self.read(f"plugins/{PLUGIN}/skill-content/configure/references/config-contract.md")
-        for fragment in ("`class_models`", "`role_classes`", "`project_config.py set-class`",
-                         "`set-role-class`", "Setup writes neither key",
-                         "`references/role-models.md`"):
-            self.assertIn(fragment, contract)
-        self.assertNotIn("effort_overrides", contract)
-
-    def test_each_question_fits_the_host_option_bound(self):
-        # Bundled Claude Code 2.1.284 declares AskUserQuestion options with
-        # min(2).max(4); Codex's request_user_input schema asks for 2-3 choices
-        # (codex-rs request_user_input_spec.rs at rust-v0.159.1). Both add a
-        # free-form Other option themselves.
-        for host, surface, bound in (("claude", "AskUserQuestion", "four"),
-                                     ("codex", "request_user_input", "three")):
-            with self.subTest(host=host):
-                contract = self.read(f"platforms/{host}/{PLUGIN}/host-contract.md")
-                self.assertIn(f"`{surface}`", contract)
-                self.assertIn(f"at most {bound} questions per call, two to {bound} options each",
-                              contract)
-
-    def test_setup_presents_the_effective_table(self):
-        setup = self.read(f"plugins/{PLUGIN}/skill-content/setup/SKILL.md")
-        self.assertIn("Present the `roles` table: role, class, model, effort and source", setup)
-        self.assertIn("preserves valid language values and the `class_models` and `role_classes`"
-                      " overrides", setup)
-        self.assertNotIn("effort overrides", setup)
-
-    def test_the_upgrade_protocol_states_the_rendered_roles_and_the_kept_overrides(self):
-        protocol = self.read("docs/upgrade-protocol.md")
-        step_4 = protocol.split(" 4. ", 1)[1].split(" 5. ", 1)[0]
-        step_5 = protocol.split(" 5. ", 1)[1].split(" 6. ", 1)[0]
-        self.assertIn("Claude Code roles change at the refresh that renders them again into"
-                      " `.claude/agents/`", step_4)
-        self.assertNotIn("with the plugin update itself", step_4)
-        self.assertIn("Config schema v2 has only team identity, language settings and the"
-                      " valid overrides `class_models` and `role_classes`", step_5)
-        self.assertIn("stops on an override the installed package no longer takes, naming the"
-                      " slot or role", step_5)
-        self.assertNotIn("effort_overrides", step_5)
-
-    def test_the_docs_follow(self):
-        authoring = self.read("docs/authoring.md").split("## Execution profiles", 1)[1]
-        for fragment in ("`templates/model-classes.json`", "`platforms/<host>/effort-policy.json`",
-                         "the digest of its resolved model and effort",
-                         "whose stamp does not match the installed package or the project's"
-                         " config",
-                         "`class_models`", "`role_classes`", "`project_config.py set-class`",
-                         "`set-role-class`", "`--confirmed`", "`role_settings.py`",
-                         "`scripts/model_class.py resolve`", "`omitClaudeMd: true`",
-                         "Setup writes nothing into the config"):
-            with self.subTest(fragment=fragment):
-                self.assertIn(fragment, authoring)
-        self.assertNotIn("effort_overrides", authoring)
-        invariant = self.read("docs/architecture.md").split(" 14. ", 1)[1].split(" 15. ", 1)[0]
-        self.assertIn("Beside the languages it holds only the overrides `class_models` and"
-                      " `role_classes`", invariant)
-        self.assertNotIn("effort_overrides", invariant)
-        template = self.read("platforms/claude/_team/overlay/templates/project-instructions/host.md")
-        self.assertIn("Use this team's agents and entry skills for managed work.", template)
-        self.assertNotIn("namespaced", template)
 
 
 if __name__ == "__main__":

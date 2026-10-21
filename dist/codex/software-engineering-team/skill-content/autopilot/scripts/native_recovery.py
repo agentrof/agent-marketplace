@@ -29,12 +29,12 @@ def store(directory: Path, value: dict) -> None:
     autopilot.write_private(directory / STATE, value)
 
 
-def active(project: Path, host: str, owner: str, now: datetime, *, settle: bool = True) -> tuple[Path, dict]:
+def active(project: Path, host: str, owner: str, now: datetime) -> tuple[Path, dict]:
     directory = autopilot.state_dir(project)
     if not (directory / autopilot.GRANT).is_file():
         raise autopilot.Refusal("no active native recovery grant")
     with autopilot.locked(directory):
-        grant = autopilot.active_grant(directory, now, project if settle else None, bound=False)
+        grant = autopilot.active_grant(directory, now, bound=False)
     if (grant.get("transport_recovery") is not True or grant.get("host") != host
             or grant.get("armed_by", {}).get("session_id") != owner):
         raise autopilot.Refusal("native recovery belongs to the user-armed host session")
@@ -184,7 +184,7 @@ def watch(payload: dict, *, clock=None, sleep=None) -> int:
         held = True
         while (clock() - started).total_seconds() < policy["native_watch_seconds"]:
             try:
-                current_dir, current = active(project, "claude", owner, clock(), settle=False)
+                current_dir, current = active(project, "claude", owner, clock())
             except (autopilot.Refusal, OSError, ValueError):
                 return 0
             if current["id"] != grant["id"]:
@@ -254,7 +254,7 @@ def plan(project: Path, snapshots: list[dict] | None, now: datetime, requested_g
     if not (directory / autopilot.GRANT).is_file():
         return {"active": False, "reason": "no grant"}
     with autopilot.locked(directory):
-        grant = autopilot.active_grant(directory, now, project, bound=False)
+        grant = autopilot.active_grant(directory, now, bound=False)
     if grant["id"] != requested_grant:
         return {"active": False, "reason": "grant replaced"}
     owner = identity(grant.get("armed_by", {}).get("session_id"))
@@ -334,7 +334,7 @@ def dispatch_guard(payload: dict, now: datetime) -> str | None:
                 raise ValueError("recovery message changed or would interrupt the agent")
             if payload.get("session_id") != permit["owner"]:
                 raise ValueError("recovery dispatch belongs to another coordinator")
-            grant = autopilot.active_grant(directory, now, Path(permit["project"]), bound=False)
+            grant = autopilot.active_grant(directory, now, bound=False)
             if (grant["id"] != permit["grant"] or not grant.get("transport_recovery")
                     or grant.get("host") != permit["host"] or grant.get("armed_by", {}).get("session_id") != permit["owner"]):
                 raise ValueError("recovery grant ended or changed")

@@ -38,7 +38,7 @@ names, followed by one verb:
   at the earlier of that time and its goal.
 - `on --allow release,phase_start` adds excluded classes; `on --deny merge`
   drops a default one. `on` while a grant is active replaces it.
-- `status`: the remaining time, the goal and its current state, the classes,
+- `status`: the remaining time, the goal, the classes,
   the counts and the guards this package declares.
 - `complete --evidence "<what shows the goal is reached>"`: ends the grant.
 - `off`: revokes the grant and prints the report. `report`: the report alone.
@@ -99,9 +99,6 @@ session to asking. No agent invokes this entry, only its script.
    question. Each decision is recorded with `record` before it is applied;
    `record` and `queue` refuse once the grant has ended. Roles never read the
    grant: they return questions to the orchestrating session.
-4. A readable goal ends only when its owning compiler reads a terminal state.
-   `complete` ends any grant and records whether that compiler agreed; the
-   session's own judgement never ends a readable goal otherwise.
 
 Stop only when every remaining task waits on a queued question: run
 `autopilot.py --project-root <root> waiting`, then end with the queued list of

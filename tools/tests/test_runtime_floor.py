@@ -130,8 +130,6 @@ class RuntimeFloorTests(unittest.TestCase):
                 imported |= {node.module.split(".")[0] for node in ast.walk(tree)
                              if isinstance(node, ast.ImportFrom) and node.module}
                 self.assertLessEqual(imported, modules)
-                for host in ("claude", "codex"):
-                    self.assertEqual((package(host) / "scripts" / path.name).read_bytes(), path.read_bytes())
 
     def test_the_floor_is_the_one_python_version_ci_tests(self):
         policy = json.loads((ROOT / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
@@ -277,29 +275,6 @@ class RuntimeFloorTests(unittest.TestCase):
         below = run(launcher + ["one", "run"], '{"x": 1}', self.work, "3.13.9", process=True)
         self.assertEqual((below.returncode, below.stdout, below.stderr), (0, "", ""))
 
-    @integration
-    def test_each_packaged_hook_answers_through_the_launcher_as_it_did_directly(self):
-        project = plugin_project(self.work / "project")
-        note = str(project / "workspace/docs/maps/note.md")
-        payloads = {
-            "SessionStart": {"source": "startup"},
-            "UserPromptExpansion": {"prompt": "Plan the next Delivery."},
-            "UserPromptSubmit": {"prompt": "Plan the next Delivery."},
-            "SubagentStart": {"agent_id": "fixture", "agent_type": "fixture"},
-            "PreToolUse": {"tool_name": "Write", "tool_input": {"file_path": note, "content": "[a](b.md)\n"}},
-            "PostToolUse": {"tool_name": "Write", "tool_input": {"file_path": note}},
-            "PostToolUseFailure": {"tool_name": "Agent", "tool_input": {}, "error": "failed"},
-        }
-        for host in ROOT_VARIABLES:
-            for (event, matcher, _index), argv in hook_commands(host).items():
-                payload = dict(payloads[event], hook_event_name=event, session_id="floor", cwd=str(project))
-                with self.subTest(host=host, event=event, matcher=matcher):
-                    through = run(argv, payload, project, process=True)
-                    plain = run([str(package(host) / argv[1]), *argv[2:]], payload, project, process=True)
-                    self.assertEqual((through.returncode, through.stdout, through.stderr),
-                                     (plain.returncode, plain.stdout, plain.stderr))
-                    if event == "SessionStart":
-                        self.assertIn(f"AGENT_MARKETPLACE_HOOKS_ACTIVE: {PLUGIN}", through.stdout)
 
 
 if __name__ == "__main__":

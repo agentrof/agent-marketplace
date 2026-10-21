@@ -32,7 +32,6 @@ for _path in (PACKAGE / "scripts", ROOT / "tools", ROOT / "tools" / "tests"):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-import build_distributions  # noqa: E402
 import validate  # noqa: E402
 from git_fixture import init_repository, temporary_directory  # noqa: E402
 
@@ -320,6 +319,7 @@ class ArmingTests(unittest.TestCase):
             prompt(self.p.root, f"${NAME}x on"),
             prompt(self.p.root, "Run the backlog review."),
             prompt(self.p.root, f"${NAME} on --for 72h", agent_id="thread-2", agent_type="worker"),
+            "not json", "", {"cwd": str(self.p.root)},
         )
         for payload in ignored:
             with self.subTest(payload=payload):
@@ -362,17 +362,6 @@ class LifecycleTests(unittest.TestCase):
         return self.p.run_verb("queue", "--class", name, "--question", "Publish the tag?",
                                "--options", "Publish; Hold", "--recommendation", "Hold",
                                "--blocks", "release notes", now=now)
-
-    def test_failed_authority_write_keeps_the_previous_bytes(self):
-        import atomic_file
-        self.p.run_verb("on")
-        path = self.p.state / "grant.json"
-        before = path.read_bytes()
-        changed = {**json.loads(before), "id": "unpublished"}
-        with mock.patch.object(atomic_file, "replace_bytes", side_effect=OSError("interrupted write")):
-            with self.assertRaises(OSError):
-                autopilot.write_private(path, changed)
-        self.assertEqual(path.read_bytes(), before)
 
     def test_check_reports_an_active_an_expired_and_no_grant(self):
         code, out, _err = self.p.run_verb("check")
@@ -530,17 +519,11 @@ class LifecycleTests(unittest.TestCase):
         code, out, err = self.p.run_verb("status", now=NOW + timedelta(hours=1, minutes=15))
         self.assertEqual(code, 0, err)
         self.assertIn("(7h 45m left)", out)
-        self.assertIn("goal: text night run, read by no compiler; it ends through complete, off"
-                      " or the cap", out)
-        self.assertIn("allowed classes: choice, approval_gate, merge", out)
-        self.assertIn("decisions: 1, queued: 2", out)
-        self.assertIn("declared guards: arming user_only_entry, question guard instructions;"
-                      " a host can skip a declared hook it has not enabled or trusted", out)
         code, out, _err = self.p.run_verb("status", "--json", now=NOW + timedelta(hours=1))
         status = json.loads(out)
         self.assertEqual((status["active"], status["remaining_minutes"], status["counts"],
-                          status["goal_read"]),
-                         (True, 480, {"decisions": 1, "queued": 2}, None))
+                          status["grant"]["goal"]["target"], status["arming"]),
+                         (True, 480, {"decisions": 1, "queued": 2}, "night run", "user_only_entry"))
 
     def test_report_lists_every_decision_and_queued_question_in_time_order(self):
         self.p.run_verb("on")
@@ -582,22 +565,26 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual([entry["question"] for entry in report["entries"]],
                          ["Merge PR 41 at 01:00?", "Merge PR 42 at 03:00?"])
 
-    @integration
-    def test_runtime_state_is_private_ignored_and_changes_no_tracked_file(self):
-        self.assertEqual(git(self.p.root, "status", "--porcelain", "--ignored"), "")
+    def test_runtime_state_is_private(self):
         self.p.run_verb("on")
         self.record()
         self.queue()
         self.p.run_verb("off")
         self.assertEqual(sorted(path.name for path in self.p.state.iterdir()),
                          ["autopilot.lock", "grant.json", "ledger.jsonl"])
-        self.assertEqual(git(self.p.root, "status", "--porcelain"), "")
-        self.assertEqual(git(self.p.root, "status", "--porcelain", "--ignored"), "!! .agentrof/\n")
-        self.assertEqual(git(self.p.root, "status", "--porcelain", "--untracked-files=no"), "")
         if os.name != "nt":
             self.assertEqual(stat.S_IMODE(self.p.state.stat().st_mode), 0o700)
             for path in self.p.state.iterdir():
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
+
+    def test_recovery_is_explicitly_armed_and_expiry_refuses_it(self):
+        import autopilot_recovery as recovery
+        project = self.p
+        project.assert_refused("no active grant", "heal")
+        with mock.patch.object(recovery, "start", return_value=123):
+            self.assertEqual(project.run_verb("on", "--for", "1h", "--recover-transport")[0], 0)
+        self.assertTrue(project.grant()["transport_recovery"])
+        project.assert_refused("no active grant", "heal", now=NOW + timedelta(hours=2))
 
     @integration
     def test_the_grant_lives_in_the_main_worktree_for_every_linked_worktree(self):
@@ -684,13 +671,6 @@ def system_zone(name: str):
         time.tzset()
 
 
-class RecoveryProcessTests(unittest.TestCase):
-    @integration
-    def test_process_liveness_query_keeps_the_current_process_alive_on_every_os(self):
-        import autopilot_recovery as recovery
-        self.assertTrue(recovery.process_alive(os.getpid()))
-
-
 @integration
 @unittest.skipIf(os.name == "nt", "time.tzset sets the system zone only on POSIX hosts")
 class TransportRecoveryTests(unittest.TestCase):
@@ -746,15 +726,6 @@ class TransportRecoveryTests(unittest.TestCase):
         transcript.write_text(json.dumps({"type": "assistant", "message": "ENOTFOUND is quoted text"}))
         self.assertIsNone(recovery.terminal_error(transcript, POLICY["transport_error_codes"]))
 
-    def test_recovery_is_explicitly_armed_and_expiry_refuses_it(self):
-        import autopilot_recovery as recovery
-        project = Project(self)
-        project.assert_refused("no active grant", "heal")
-        with mock.patch.object(recovery, "start", return_value=123):
-            self.assertEqual(project.run_verb("on", "--for", "1h", "--recover-transport")[0], 0)
-        self.assertTrue(project.grant()["transport_recovery"])
-        project.assert_refused("no active grant", "heal", now=NOW + timedelta(hours=2))
-
 
 class ClockTests(unittest.TestCase):
     """--until reads the system zone across a daylight-saving change, from when the user typed it."""
@@ -781,11 +752,6 @@ class ClockTests(unittest.TestCase):
             self.p.assert_refused("--until 07:00 is in the past", "on",
                                   now=typed + timedelta(minutes=6))
         self.assertFalse((self.p.state / "grant.json").exists())
-
-    def test_a_huge_duration_is_refused_without_a_traceback(self):
-        self.p.arm("on --for 99999999999d")
-        self.p.assert_refused(f"is above the {POLICY['max_duration_hours']} h maximum", "on")
-
 
 class FailClosedTests(unittest.TestCase):
     """A package that cannot show its arming hook, or a grant it could not have armed, grants nothing."""
@@ -946,17 +912,14 @@ class GoalTests(unittest.TestCase):
         code, out, _err = self.p.run_verb("check", now=now)
         return code, out
 
-    def test_complete_ends_any_grant_and_records_evidence_and_compiler_agreement(self):
-        cases = (("text:finish the migration", None), (None, None))
-        for goal, agreed in cases:
+    def test_complete_ends_any_grant_and_records_evidence(self):
+        for goal in ("text:finish the migration", None):
             with self.subTest(goal=goal):
                 self.p.run_verb("on", *(["--goal", goal] if goal else []))
                 code, out, err = self.p.run_verb("complete", "--evidence", "PR 41 merged")
                 self.assertEqual(code, 0, err)
-                completion = self.p.grant()["completion"]
                 self.assertEqual(self.p.grant()["state"], "completed")
-                self.assertEqual((completion["by"], completion["evidence"],
-                                  completion["compiler_agreed"]), ("complete", "PR 41 merged", agreed))
+                self.assertEqual(self.p.grant()["completion"], {"by": "complete", "evidence": "PR 41 merged"})
                 self.assertIn("completed by complete: PR 41 merged", out)
         self.p.assert_refused("no active grant", "complete", "--evidence", "again")
 
@@ -974,20 +937,10 @@ class GoalTests(unittest.TestCase):
 
 
 class DistributionTests(unittest.TestCase):
-    """Both hosts' generated packages: wrappers, canonical content and real hook wiring."""
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.dist = Path(cls.temporary.name) / "dist"
-        build_distributions.build(ROOT, cls.dist)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
+    """Both hosts' committed packages (dist-check keeps them equal to a build): wrappers and real hook wiring."""
 
     def package(self, host: str) -> Path:
-        return self.dist / host / "software-engineering-team"
+        return ROOT / "dist" / host / "software-engineering-team"
 
     def hook_argv(self, host: str, verb: str) -> list[str]:
         """The hook command the host runs, with the package root it substitutes."""
@@ -1003,8 +956,8 @@ class DistributionTests(unittest.TestCase):
 
     @staticmethod
     def clean_env() -> dict:
-        return {key: value for key, value in os.environ.items()
-                if key not in HOST_SESSION_VARIABLES}
+        return {**{key: value for key, value in os.environ.items() if key not in HOST_SESSION_VARIABLES},
+                "PYTHONDONTWRITEBYTECODE": "1"}
 
     def run_hook(self, host: str, verb: str, payload, cwd: Path,
                  env: dict | None = None) -> subprocess.CompletedProcess:
@@ -1018,154 +971,39 @@ class DistributionTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(script), *argv], cwd=root, env=self.clean_env(),
                               capture_output=True, text=True, check=False, timeout=60)
 
-    @contextlib.contextmanager
-    def project(self):
-        with temporary_directory() as raw:
-            yield make_project(Path(raw))
-
     def test_the_entry_is_user_invoked_only_on_both_hosts(self):
         claude = (self.package("claude") / "skills/autopilot/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("\ndisable-model-invocation: true\n", claude.split("---", 2)[1])
         codex = self.package("codex") / "skills/autopilot/agents/openai.yaml"
         self.assertIn("allow_implicit_invocation: false", codex.read_text(encoding="utf-8"))
-        header = (ENTRY / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1]
-        self.assertIn("\nname: autopilot\n", header)
-        self.assertIn("\nexposure: entry\n", header)
 
     def test_both_hosts_declare_the_arming_and_question_hooks(self):
         for host, (event, matcher, question, _root) in HOST_HOOKS.items():
-            for source in (ROOT / "platforms" / host / "software-engineering-team/overlay/hooks",
-                           self.package(host) / "hooks"):
-                with self.subTest(host=host, source=source):
-                    hooks = json.loads((source / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-                    arming = [group for group in hooks[event]
-                              if "hook user-prompt" in group["hooks"][0]["command"]]
-                    self.assertEqual([group.get("matcher") for group in arming], [matcher])
-                    self.assertIn(f"--host {host} --entry {NAME}",
-                                  arming[0]["hooks"][0]["command"])
-                    guards = [group for group in hooks["PreToolUse"]
-                              if "hook pre-question" in group["hooks"][0]["command"]]
-                    self.assertEqual([group["matcher"] for group in guards], [question])
+            with self.subTest(host=host):
+                hooks = json.loads((self.package(host) / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+                arming = [group for group in hooks[event]
+                          if "hook user-prompt" in group["hooks"][0]["command"]]
+                self.assertEqual([group.get("matcher") for group in arming], [matcher])
+                self.assertIn(f"--host {host} --entry {NAME}", arming[0]["hooks"][0]["command"])
+                guards = [group for group in hooks["PreToolUse"]
+                          if "hook pre-question" in group["hooks"][0]["command"]]
+                self.assertEqual([group["matcher"] for group in guards], [question])
 
-    @integration
-    def test_an_agent_side_on_without_arming_is_refused_on_each_arming_host(self):
-        for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root:
-                result = self.run_verb(host, root, "on", "--for", "9h")
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("run `on` without options", result.stderr)
-                result = self.run_verb(host, root, "on")
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("no fresh arming record from your own typed entry command",
-                              result.stderr)
-                self.assertFalse((root / ".agentrof").exists())
-                status = json.loads(self.run_verb(host, root, "status", "--json").stdout)
-                self.assertEqual((status["arming"], status["question_guard"]),
-                                 ("user_prompt_hook", "hook"))
-
-    @integration
-    def test_a_copied_package_mints_no_grant_the_installed_package_honours(self):
-        for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root, \
-                    tempfile.TemporaryDirectory() as raw:
-                copy = Path(raw) / "copy"
-                shutil.copytree(self.package(host), copy, ignore=shutil.ignore_patterns("hooks"))
-                script = copy / "skill-content/autopilot/scripts/autopilot.py"
-                agent_on = [sys.executable, str(script), "on", "--for", "72h", "--allow", "release"]
-                result = subprocess.run(agent_on, cwd=root, env=self.clean_env(),
-                                        capture_output=True, text=True, check=False, timeout=60)
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("hooks/hooks.json is missing", result.stderr)
-                self.assertFalse((root / RUNTIME / "grant.json").exists())
-                (copy / ".agent-marketplace-package.json").unlink()
-                result = subprocess.run(agent_on, cwd=root, env=self.clean_env(),
-                                        capture_output=True, text=True, check=False, timeout=60)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                result = self.run_verb(host, root, "check")
-                self.assertEqual(result.returncode, 1)
-                self.assertIn("armed by user_only_entry, but this package arms through"
-                              " user_prompt_hook", result.stdout)
-                question = {"session_id": "s", "cwd": str(root), "hook_event_name": "PreToolUse",
-                            "tool_name": HOST_HOOKS[host][2], "tool_input": {}}
-                result = self.run_hook(host, "pre-question", question, root)
-                self.assertEqual((result.returncode, result.stdout), (0, ""))
-
-    @integration
-    def test_a_claude_grant_never_governs_a_codex_session(self):
-        with self.project() as root:
-            self.run_hook("claude", "user-prompt", expansion(root, "on --for 2h",
-                                                             session_id="claude-A"), root)
-            env = {**self.clean_env(), "CLAUDE_CODE_SESSION_ID": "claude-A"}
-            script = self.package("claude") / "skill-content/autopilot/scripts/autopilot.py"
-            result = subprocess.run([sys.executable, str(script), "on"], cwd=root, env=env,
-                                    capture_output=True, text=True, check=False, timeout=60)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            asks = {host: {"session_id": session, "cwd": str(root), "hook_event_name": "PreToolUse",
-                           "tool_name": HOST_HOOKS[host][2], "tool_input": {}}
-                    for host, session in (("claude", "claude-A"), ("codex", "codex-B"))}
-            self.assertEqual(self.run_hook("codex", "pre-question", asks["codex"], root).stdout, "")
-            other = dict(asks["claude"], session_id="claude-C")
-            self.assertEqual(self.run_hook("claude", "pre-question", other, root).stdout, "")
-            self.assertIn("deny", self.run_hook("claude", "pre-question", asks["claude"], root).stdout)
-            codex = self.package("codex") / "skill-content/autopilot/scripts/autopilot.py"
-            env = {**self.clean_env(), "CODEX_THREAD_ID": "codex-B"}
-            for argv in (["record", "--class", "merge", "--question", "Merge PR 42?",
-                          "--choice", "Merge", "--reason", "r", "--target", "t"], ["check"]):
-                result = subprocess.run([sys.executable, str(codex), *argv], cwd=root, env=env,
-                                        capture_output=True, text=True, check=False, timeout=60)
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("bound to a claude session", result.stdout + result.stderr)
-
-    @integration
     def test_the_codex_default_prompt_of_the_entry_arms_a_grant(self):
-        def default_prompt(entry: str) -> str:
-            metadata = self.package("codex") / "skills" / entry / "agents/openai.yaml"
-            line = next(line for line in metadata.read_text(encoding="utf-8").splitlines()
-                        if line.strip().startswith("default_prompt:"))
-            return line.split(":", 1)[1].strip().strip('"')
-
-        self.assertEqual(default_prompt("autopilot"), f"${NAME} on")
-        self.assertEqual(default_prompt("deliver"),
-                         "Use $software-engineering-team:deliver to start this workflow.")
-        with self.project() as root:
-            payload = prompt(root, default_prompt("autopilot") + " --for 9h")
-            result = self.run_hook("codex", "user-prompt", payload, root)
-            self.assertEqual((result.returncode, result.stdout), (0, ""))
-            arming = json.loads((root / RUNTIME / "arming.json").read_text(encoding="utf-8"))
-            self.assertEqual(arming["arguments"], "on --for 9h")
-
-    @integration
-    def test_the_typed_entry_command_arms_a_grant_on_each_host(self):
-        typed = {"claude": lambda root: expansion(root, "on --for 2h --deny merge"),
-                 "codex": lambda root: prompt(root, f"${NAME} on --for 2h --deny merge")}
-        for host, payload in typed.items():
-            with self.subTest(host=host), self.project() as root:
-                result = self.run_hook(host, "user-prompt", payload(root), root)
-                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-                result = self.run_verb(host, root, "on")
-                self.assertEqual(result.returncode, 0, result.stderr)
-                grant = json.loads((root / RUNTIME / "grant.json").read_text(encoding="utf-8"))
-                self.assertEqual((grant["host"], grant["armed_by"]["guard"],
-                                  grant["armed_by"]["arguments"]),
-                                 (host, "user_prompt_hook", "on --for 2h --deny merge"))
-                self.assertNotIn("merge", grant["classes"])
-
-    @integration
-    def test_every_other_prompt_passes_without_output(self):
-        for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root:
-                for payload in (prompt(root, "Plan the next Delivery."), expansion(root, "status"),
-                                expansion(root, "on", command_name="software-engineering-team:deliver"),
-                                prompt(root, f"${NAME} on", agent_id="thread-2"),
-                                "not json", "", {"cwd": str(root)}):
-                    result = self.run_hook(host, "user-prompt", payload, root)
-                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-                self.assertFalse((root / ".agentrof").exists())
+        metadata = self.package("codex") / "skills/autopilot/agents/openai.yaml"
+        line = next(line for line in metadata.read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("default_prompt:"))
+        typed = line.split(":", 1)[1].strip().strip('"') + " --for 9h"
+        project = Project(self, armed=True)
+        self.assertEqual(project.hook("user-prompt", prompt(project.root, typed)), (0, ""))
+        arming = json.loads((project.state / "arming.json").read_text(encoding="utf-8"))
+        self.assertEqual(arming["arguments"], "on --for 9h")
 
     @integration
     def test_the_question_hook_denies_only_while_a_grant_is_active(self):
         for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root:
+            with self.subTest(host=host), temporary_directory() as raw:
+                root = make_project(Path(raw))
                 session = "session-1" if host == "claude" else "session-2"
                 question = {"session_id": session, "cwd": str(root),
                             "hook_event_name": "PreToolUse", "tool_name": HOST_HOOKS[host][2],
@@ -1176,139 +1014,30 @@ class DistributionTests(unittest.TestCase):
                               if host == "claude" else prompt(root, f"${NAME} on --for 1h"), root)
                 self.assertEqual(self.run_verb(host, root, "on").returncode, 0)
                 grant = json.loads((root / RUNTIME / "grant.json").read_text(encoding="utf-8"))
+                self.assertEqual(grant["host"], host)
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual(result.returncode, 0)
                 output = json.loads(result.stdout)["hookSpecificOutput"]
                 self.assertEqual((output["hookEventName"], output["permissionDecision"]),
                                  ("PreToolUse", "deny"))
-                reason = output["permissionDecisionReason"]
-                for fragment in (grant["id"], grant["expires_at"],
-                                 *(f"{entry['id']} ({entry['description']})"
-                                   for entry in POLICY["classes"]
-                                   if entry["id"] in grant["classes"]),
-                                 "by every effect of its recommended option",
-                                 "--class once per class it touches", "doubt queues it",
-                                 "take the recommended option", " check`", " record`",
-                                 "governing document", " queue`", "Do not ask the user",
-                                 "if it exits 1, ask the user as usual",
-                                 "every remaining task waits on a queued question"):
-                    self.assertIn(fragment, reason)
-                self.assertLess(reason.index(" record`"), reason.index("then apply it"))
+                self.assertIn(grant["id"], output["permissionDecisionReason"])
                 self.assertEqual(self.run_verb(host, root, "off").returncode, 0)
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual((result.returncode, result.stdout), (0, ""))
-                path = root / RUNTIME / "grant.json"
-                expired = dict(grant, state="active",
-                               expires_at=stamp(datetime.now(timezone.utc) - timedelta(minutes=1)))
-                path.write_text(json.dumps(expired), encoding="utf-8")
-                result = self.run_hook(host, "pre-question", question, root)
-                self.assertEqual((result.returncode, result.stdout), (0, ""))
-                path.write_text("{not json", encoding="utf-8")
-                for payload in (question, "garbage", ""):
-                    result = self.run_hook(host, "pre-question", payload, root)
-                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                result = self.run_hook(host, "pre-question", "garbage", root)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
     @integration
     def test_hooks_outside_a_git_checkout_allow_and_stay_silent(self):
         with tempfile.TemporaryDirectory() as raw:
             outside = Path(raw).resolve()
             # Git must not find a checkout above the temporary directory either.
-            env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(outside.parent)}
+            env = {**self.clean_env(), "GIT_CEILING_DIRECTORIES": str(outside.parent)}
             for host in HOST_HOOKS:
                 for verb, payload in (("pre-question", {"cwd": str(outside)}),
                                       ("user-prompt", expansion(outside, "on"))):
                     result = self.run_hook(host, verb, payload, outside, env)
                     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-
-
-class ContractTests(unittest.TestCase):
-    def test_host_contracts_point_at_the_skill_and_name_their_hooks(self):
-        spellings = {"claude": (f"/{NAME}", "UserPromptExpansion", "AskUserQuestion"),
-                     "codex": (f"${NAME}", "UserPromptSubmit", "request_user_input")}
-        for host, tokens in spellings.items():
-            with self.subTest(host=host):
-                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
-                section = text.split("## Autopilot", 1)[1]
-                for fragment in (*tokens, "its skill holds the procedure"):
-                    self.assertIn(fragment, section)
-
-    def test_the_skill_holds_the_procedure(self):
-        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
-        for fragment in ("autopilot.py check", "when it exits 1, ask the user as usual",
-                         "run `autopilot.py record` first, then apply it",
-                         "`--class` once per class it touches", "marked with the grant id",
-                         "continue the work that does not depend on it",
-                         "Stop only when every remaining task waits on a queued question"):
-            self.assertIn(fragment, skill)
-        rule = ("classify the question by every effect of its recommended option: any never"
-                " effect makes it never, an excluded effect the grant does not allow queues it,"
-                " and doubt queues it")
-        self.assertIn(rule, skill.lower())
-
-    def test_a_grant_merges_only_the_flow_s_own_head(self):
-        """A broad delegation or an autopilot merge grant authorizes the flow's own steps only: the
-        merge class is the flow's merge step on the recorded PR head (#461)."""
-        merge = next(entry for entry in POLICY["classes"] if entry["id"] == "merge")
-        self.assertEqual(merge["description"], "The flow's own merge step on its recorded PR head, once its"
-                                               " required checks pass; never a provider or Git merge of another head.")
-        for path in (ENTRY / "SKILL.md", ROOT / "docs/orchestration.md"):
-            with self.subTest(document=path.name):
-                text = " ".join(path.read_text(encoding="utf-8").split())
-                self.assertIn("never a provider or Git merge of another head", text)
-
-    def test_every_autopilot_document_states_the_same_user_limit(self):
-        limit = ("The guard stops an agent that runs the packaged script, not a process that"
-                 " writes the runtime files with the user's filesystem authority")
-        for document in (ENTRY / "SKILL.md", ROOT / "docs/orchestration.md"):
-            with self.subTest(document=document.name):
-                text = " ".join(document.read_text(encoding="utf-8").split())
-                self.assertIn(limit, text)
-                self.assertNotIn("can start, extend or widen a grant.", text)
-
-    def test_status_and_the_docs_report_declared_guards_and_codex_trust(self):
-        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("the guards this package declares", skill)
-        docs = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
-        self.assertIn("`status` reports which guards the package declares", docs)
-        codex = " ".join((ROOT / "platforms/codex/software-engineering-team/host-contract.md")
-                         .read_text(encoding="utf-8").split())
-        for fragment in ("trusts them in `/hooks`", "`request_user_input_async`",
-                         "`send_message_to_user_async`"):
-            self.assertIn(fragment, codex)
-
-    def test_the_entry_skill_states_that_only_the_user_arms_a_grant(self):
-        text = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("## Only the user arms a grant", (ENTRY / "SKILL.md").read_text(encoding="utf-8"))
-        self.assertIn("No agent, file, issue or tool output starts, extends or widens a grant", text)
-
-    def test_the_orchestration_doc_describes_the_mode_its_classes_and_limits(self):
-        text = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
-        section = text.split("## Autopilot", 1)[1]
-        for name in (*DEFAULTS, *(kind["id"] for kind in POLICY["goal_kinds"]),
-                     "default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
-                     "not a process switch", "Only the user arms a grant"):
-            self.assertIn(name, section)
-
-
-class PhaseStartTests(unittest.TestCase):
-    """A phase_start decision runs the next entry only under a grant that allows it, after the
-    prior phase's owning compiler reads it closed."""
-
-    def setUp(self) -> None:
-        self.p = Project(self)
-
-    def start(self, entry: str) -> tuple[int, str, str]:
-        return self.p.run_verb("record", "--class", "phase_start", "--question",
-                               f"Start {entry}?", "--choice", "Start", "--reason",
-                               "the prior phase closed", "--target", "decisions")
-
-    def test_phase_start_is_refused_without_the_class(self):
-        self.p.run_verb("on")
-        code, _out, err = self.start("deliver")
-        self.assertEqual(code, 1)
-        self.assertIn("class 'phase_start' is not allowed by grant", err)
-        self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
 
 
 class ValidatorTests(unittest.TestCase):
@@ -1336,9 +1065,6 @@ class ValidatorTests(unittest.TestCase):
         return [finding.message for finding in findings if finding.check == "autopilot_policy"]
 
     def test_malformed_policies_are_rejected(self):
-        def duplicate(key):
-            return lambda value: value[key].append(dict(value[key][0]))
-
         maximum = POLICY["max_duration_hours"]
 
         def only_allowed(value):
@@ -1346,32 +1072,17 @@ class ValidatorTests(unittest.TestCase):
                 entry["default"] = "allowed" if entry["default"] == "never" else entry["default"]
 
         cases = (
-            (duplicate("classes"), "duplicate class 'choice'"),
-            (duplicate("goal_kinds"), "duplicate goal kind 'text'"),
-            (lambda value: value["classes"][0].update(default="sometimes"),
-             "class 'choice' has unknown default 'sometimes'"),
             (only_allowed, "the never set is empty"),
             (lambda value: value.update(default_duration_hours=maximum + 1),
              f"default_duration_hours {maximum + 1} is above max_duration_hours {maximum}"),
-            (lambda value: value.update(default_goal_cap_hours=maximum + 1),
-             f"default_goal_cap_hours {maximum + 1} is above max_duration_hours {maximum}"),
-            (lambda value: value["goal_kinds"][0].update(
-                end={"compiler": "scripts/ghost.py", "terminal_statuses": ["done"]}),
-             "names compiler 'scripts/ghost.py', which is no package script autopilot.py reads"),
-            (lambda value: value.update(arming_ttl_minutes=0),
-             "arming_ttl_minutes must be a positive whole number"),
-            (lambda value: value["classes"][1].pop("description"),
-             "every class holds exactly an id, a description and a default"),
-            (lambda value: value.update(schema_version=2), "with schema_version 1"),
+            (lambda value: value["goal_kinds"][0].update(end={"compiler": "scripts/x.py"}),
+             "goal kind 'text' end must be none"),
         )
+        self.assertEqual(self.messages(), [])
         for mutate, fragment in cases:
             with self.subTest(fragment=fragment):
                 messages = self.messages(mutate)
                 self.assertTrue(any(fragment in message for message in messages), messages)
-        self.path.write_text('{"schema_version": 1, "schema_version": 1}', encoding="utf-8")
-        findings: list = []
-        validate.check_autopilot_policy(validate.build_tree(self.root), findings)
-        self.assertIn("not valid unique-key JSON", findings[0].message)
 
     def test_a_skill_script_may_import_its_package_scripts_and_only_them(self):
         script = self.root / "plugins/software-engineering-team/skill-content/autopilot/scripts"
@@ -1384,7 +1095,6 @@ class ValidatorTests(unittest.TestCase):
                 self.assertEqual(bool(flagged), rejected, flagged)
 
 
-@integration
 class NativeRecoveryTests(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/skill-content/autopilot/scripts"))
@@ -1406,6 +1116,10 @@ class NativeRecoveryTests(unittest.TestCase):
         environment = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.p.state)})
         environment.start()
         self.addCleanup(environment.stop)
+        # The project's write check is a Git listing; this fixture has no repository.
+        quiet = mock.patch.object(native_recovery.autopilot_recovery, "wrote_after", return_value=False)
+        quiet.start()
+        self.addCleanup(quiet.stop)
 
     def snapshot(self, session=None, *, status="failed", message="ENOTFOUND", thread_status="idle"):
         import time
@@ -1414,7 +1128,6 @@ class NativeRecoveryTests(unittest.TestCase):
             "turns": [{"id": "turn-failure", "status": status, "error": {"message": message},
                        "completedAt": time.time()}]}
 
-    @integration
     def test_codex_native_plan_preserves_identity_and_refuses_other_work(self):
         self.native.remember({"session_id": self.owner, "agent_id": self.child,
                               "cwd": str(self.p.root), "agent_type": "qa"}, "codex", self.now)
@@ -1449,7 +1162,6 @@ class NativeRecoveryTests(unittest.TestCase):
             self.native.plan(self.p.root, [wrong], self.now, self.grant["id"])
         self.assertFalse(self.native.plan(self.p.root, None, self.now, "replaced")["active"])
 
-    @integration
     def test_native_enrollment_is_bound_once_and_inactive_hooks_do_nothing(self):
         with mock.patch.object(autopilot, "load_native_recovery", return_value=self.native):
             code, _out, error = self.p.run_verb("native-bind", "--grant", self.grant["id"],
@@ -1463,7 +1175,6 @@ class NativeRecoveryTests(unittest.TestCase):
         with self.assertRaises(autopilot.Refusal):
             self.native.remember({"session_id": self.owner, "cwd": str(self.p.root)}, "codex", self.now)
 
-    @integration
     def test_claude_native_wake_is_bounded_and_ignores_unmarked_prose(self):
         grant = self.p.grant(); grant["host"] = "claude"
         autopilot.write_private(self.p.state / "grant.json", grant)

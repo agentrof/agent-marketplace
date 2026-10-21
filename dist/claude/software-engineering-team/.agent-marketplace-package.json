@@ -125,13 +125,13 @@
       "c5f573942e2a79c8c3907a0081940309e3325521c03d62841b9718de4dc6dbb4"
     ,
     "scripts/setup_check.py":
-      "11ed3660383ed1970870cae04c534ada141a36c7f04f433833de227b6913872d"
+      "45165c3aa0e864396eb2a04ae8b9fb4595dbfdda9fa06a24d042c2ba399ce4e4"
     ,
     "scripts/setup_companions.py":
       "9f9c7f1b2d81c3f39a638d0658bab6d008cf348f0c95460ab76a6499fad1e62d"
     ,
     "scripts/setup_project.py":
-      "c776610aa77e99c5304df51ed23041a60ca76a8594c1868d5077249e794b35a0"
+      "c8d7624e020ff941ea1ea5b0f328ae1069f85986ef9ffdb1939ddf4c05acb7ec"
     ,
     "scripts/task_lane.py":
       "feadbf71380fbb9c725ad361b6d58a1e2ad1ccbe0d969d6861eb50bd11454dd4"
@@ -146,7 +146,7 @@
       "f29df7f1ba48fb3c20fda18f517be7dc8812ef50a0621a1b111cfa6543627f59"
     ,
     "skill-content/autopilot/SKILL.md":
-      "3a6c28c1713428f8331f4a43a0fa66e74f21bf9c5120084f542c4fe64c2ca128"
+      "105521b32e2daade22d465217e626654cb95df371a8b70a7c547f8afd833df09"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
       "cde9d72c1ae4a029e2afce76fc4cdfd4939582537e38a36d8e05c91e11f66a18"
@@ -155,13 +155,13 @@
       "7a3ea3f0b5b5235315d2532f8c44427e27d3f30790491330d24246c1421b87b2"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "ae2a0a535f0307e287e56211003af3d2bb5e80a49ba99fec70d30b5f4e7ba422"
+      "f1e7a392e0b521045efc07ccd49a81ac654f24e8af228b626ff4aa9a22e125b5"
     ,
     "skill-content/autopilot/scripts/autopilot_recovery.py":
       "80f96c50339cf002d9ca9d3ef5c9a7d0d9d6806c1950f61ddb793acf917b3e56"
     ,
     "skill-content/autopilot/scripts/native_recovery.py":
-      "f304a97f94a65e4ca4cc94e7448dbf5c7c062606513a05dcb8dff88fdffe1802"
+      "2b57fb23756a7464fb59cf08174212f06a6f3b5f6e611b591784dfbda557d6a2"
     ,
     "skill-content/autopilot/scripts/transport_recovery_host.py":
       "ce09b658b99f436ccb0b0f65402f4c7449b3f1079cfc6f02cf882b6281ead3d6"

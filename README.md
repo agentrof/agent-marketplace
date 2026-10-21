@@ -9,7 +9,7 @@ branch and one pull request, verified by the project's CI and one reviewer.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 11 | 6 | 10 |
+| 1 | 11 | 7 | 10 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.
@@ -62,6 +62,20 @@ config; the environment is written to the Claude project settings.
    It exits 0 when every row reads `yes` or `-` and nothing is printed below
    the table.
 
+The table has one row per companion and host: its type (plugin, skill, cli,
+hook), `installed`, `enabled` for plugins, and `skills_loaded`, the count of its
+skills that a fresh host session lists (Claude from its init event, Codex
+through its app server). A short count or an `ERROR` line fails the check.
+
+### Uninstall
+
+`scripts/setup_project.py companions uninstall --project-root <root>` (the
+`/companions-uninstall` entry skill) removes every companion from both hosts,
+or one with `--host`: plugins, skills, the graphify CLI and git hooks, and the
+deny rules, environment and Codex disable block that `apply` wrote. The team
+plugin, project marker files and graphify output stay. It prints a table with
+`removed` per row and exits 1 unless every row reads `yes`.
+
 The docs graph is built once by the owner
 (`GRAPHIFY_OUT=.agentrof/graphify/docs graphify extract workspace/docs --backend claude-cli`);
 after that, deliver refreshes it in the background for each merged task
@@ -78,7 +92,7 @@ Debugging, self-verification, review intake and skill-writing disciplines. Four 
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | project | `claude plugin marketplace add obra/superpowers-marketplace`<br>`claude plugin install superpowers@superpowers-marketplace --scope project` | `claude plugin list --json` lists `superpowers@superpowers-marketplace` |
+| claude | user | `claude plugin marketplace add obra/superpowers-marketplace`<br>`claude plugin install superpowers@superpowers-marketplace --scope user` | `claude plugin list --json` lists `superpowers@superpowers-marketplace` |
 | codex | user | `codex plugin add superpowers@openai-curated-remote` | `codex plugin list --json` lists `superpowers@openai-curated-remote` |
 
 Blocked: `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `using-git-worktrees`, `finishing-a-development-branch`, `test-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `diagnosing-superpowers`. They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.
@@ -91,8 +105,8 @@ Removes AI-writing tells from prose. Pull request bodies, documents and issues r
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | project | `claude plugin marketplace add blader/humanizer`<br>`claude plugin install humanizer@humanizer --scope project` | `claude plugin list --json` lists `humanizer@humanizer` |
-| codex | project | `npx skills add blader/humanizer --agent codex -y` | `.agents/skills/humanizer/SKILL.md` exists |
+| claude | user | `claude plugin marketplace add blader/humanizer`<br>`claude plugin install humanizer@humanizer --scope user` | `claude plugin list --json` lists `humanizer@humanizer` |
+| codex | user | `npx skills add blader/humanizer --agent codex -g -y` | `.agents/skills/humanizer/SKILL.md` exists in the home directory |
 
 ### security-audit
 
@@ -100,8 +114,8 @@ Security review lens with a tenant data isolation reference. High-rigor reviews 
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | project | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -y` | `.claude/skills/security-audit/SKILL.md` exists |
-| codex | project | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y` | `.agents/skills/security-audit/SKILL.md` exists |
+| claude | user | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -g -y` | `.claude/skills/security-audit/SKILL.md` exists in the home directory |
+| codex | user | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -g -y` | `.agents/skills/security-audit/SKILL.md` exists in the home directory |
 
 ### diagram-design
 
@@ -109,7 +123,7 @@ Architecture, delta, sequence and ER diagrams. Structural architecture changes g
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | project | `claude plugin marketplace add cathrynlavery/diagram-design`<br>`claude plugin install diagram-design@diagram-design --scope project` | `claude plugin list --json` lists `diagram-design@diagram-design` |
+| claude | user | `claude plugin marketplace add cathrynlavery/diagram-design`<br>`claude plugin install diagram-design@diagram-design --scope user` | `claude plugin list --json` lists `diagram-design@diagram-design` |
 | codex | user | `codex plugin marketplace add cathrynlavery/diagram-design`<br>`codex plugin add diagram-design@diagram-design` | `codex plugin list --json` lists `diagram-design@diagram-design` |
 
 Setup writes `.diagram-design`.
@@ -120,8 +134,8 @@ Frontend design craft and read-only UI critique. Closes the frontend design qual
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | project | `npx impeccable install --providers=claude --project --no-hooks -y` | `.claude/skills/impeccable/SKILL.md` exists |
-| codex | project | `npx impeccable install --providers=codex --project --no-hooks -y` | `.agents/skills/impeccable/SKILL.md` exists |
+| claude | user | `npx impeccable install --providers=claude --user --no-hooks -y` | `.claude/skills/impeccable/SKILL.md` exists in the home directory |
+| codex | user | `npx impeccable install --providers=codex --user --no-hooks -y` | `.agents/skills/impeccable/SKILL.md` exists in the home directory |
 
 Environment: `IMPECCABLE_CONTEXT_DIR=workspace/experience-design`, `IMPECCABLE_NO_TELEMETRY=1`.
 
@@ -152,7 +166,7 @@ Smallest complete change, plain-language review and a shortcut debt ledger. Deve
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | project | `claude plugin marketplace add DietrichGebert/ponytail`<br>`claude plugin install ponytail@ponytail --scope project` | `claude plugin list --json` lists `ponytail@ponytail` |
+| claude | user | `claude plugin marketplace add DietrichGebert/ponytail`<br>`claude plugin install ponytail@ponytail --scope user` | `claude plugin list --json` lists `ponytail@ponytail` |
 | codex | user | `codex plugin marketplace add DietrichGebert/ponytail`<br>`codex plugin add ponytail@ponytail` | `codex plugin list --json` lists `ponytail@ponytail` |
 
 Codex runs the ponytail hooks only after the owner trusts them once in /hooks.

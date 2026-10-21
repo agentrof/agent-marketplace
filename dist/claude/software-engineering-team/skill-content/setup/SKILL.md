@@ -92,8 +92,15 @@ placeholder is allowed to reach a consuming repository.
    0644 under a 022 or 002 umask, and no write bit; `inspect` lists it as a
    `file_mode` operation and `check` reports it as drift.
 9. Setup never emits a template with unresolved command placeholders.
-10. Run `setup_project.py companions check`; optional third-party skills, and
-    `companions apply` installs them only on the owner's go (README Companions).
+10. Run `setup_project.py companions apply` and then `companions check`;
+    `apply` installs the optional third-party companions at user level on both
+    hosts (README Companions) and ends with the same table. Show that table
+    as the setup report: one row per companion with its type (plugin, skill,
+    cli, hook), host, `installed`, `enabled` and `skills_loaded` (how many of
+    its skills a fresh host session lists), then the config columns. Every
+    cell must read `yes`, `-` or a full count such as `4/4`. A `NO`, a short
+    count or an `ERROR` line means setup did not finish: name the row and what
+    is missing. Never report setup done on a table you did not read. `/companions-uninstall` removes them all.
 11. Review and commit the exact tracked refresh diff before a workflow handoff.
     Report `deliver` as the next entry, run in a fresh session per task
     started with the workhorse-model command the host contract names.

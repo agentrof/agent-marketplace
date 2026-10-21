@@ -30,19 +30,21 @@
       ],
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add obra/superpowers-marketplace",
-            "claude plugin install superpowers@superpowers-marketplace --scope project"
+            "claude plugin install superpowers@superpowers-marketplace --scope user"
           ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "superpowers@superpowers-marketplace"}
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "superpowers@superpowers-marketplace"},
+          "uninstall": ["claude plugin uninstall superpowers@superpowers-marketplace --scope user"]
         },
         "codex": {
           "scope": "user",
           "install": [
             "codex plugin add superpowers@openai-curated-remote"
           ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "superpowers@openai-curated-remote", "skills": ["superpowers:systematic-debugging", "superpowers:verification-before-completion", "superpowers:receiving-code-review", "superpowers:writing-skills"]}
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "superpowers@openai-curated-remote", "skills": ["superpowers:systematic-debugging", "superpowers:verification-before-completion", "superpowers:receiving-code-review", "superpowers:writing-skills"]},
+          "uninstall": ["codex plugin remove superpowers@openai-curated-remote"]
         }
       },
       "routing": [
@@ -60,19 +62,21 @@
       "why": "Pull request bodies, documents and issues read as written by the team, without changing what they say.",
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add blader/humanizer",
-            "claude plugin install humanizer@humanizer --scope project"
+            "claude plugin install humanizer@humanizer --scope user"
           ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "humanizer@humanizer"}
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "humanizer@humanizer"},
+          "uninstall": ["claude plugin uninstall humanizer@humanizer --scope user"]
         },
         "codex": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx skills add blader/humanizer --agent codex -y"
+            "npx skills add blader/humanizer --agent codex -g -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md", "skills": ["humanizer:humanizer"]}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md", "base": "home", "skills": ["humanizer:humanizer"]},
+          "uninstall": ["npx skills remove humanizer -g -y"]
         }
       },
       "routing": [
@@ -87,18 +91,20 @@
       "why": "High-rigor reviews get a security method; guidance mode writes nothing.",
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -y"
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -g -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/security-audit/SKILL.md"}
+          "verify": {"kind": "path_exists", "path": ".claude/skills/security-audit/SKILL.md", "base": "home"},
+          "uninstall": ["npx skills remove security-audit -g -a claude-code -y"]
         },
         "codex": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y"
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -g -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md", "skills": ["security-audit"]}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md", "base": "home", "skills": ["security-audit"]},
+          "uninstall": ["npx skills remove security-audit -g -y"]
         }
       },
       "routing": [
@@ -117,12 +123,13 @@
       ],
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add cathrynlavery/diagram-design",
-            "claude plugin install diagram-design@diagram-design --scope project"
+            "claude plugin install diagram-design@diagram-design --scope user"
           ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "diagram-design@diagram-design"}
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "diagram-design@diagram-design"},
+          "uninstall": ["claude plugin uninstall diagram-design@diagram-design --scope user"]
         },
         "codex": {
           "scope": "user",
@@ -130,7 +137,8 @@
             "codex plugin marketplace add cathrynlavery/diagram-design",
             "codex plugin add diagram-design@diagram-design"
           ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "diagram-design@diagram-design", "skills": ["diagram-design:diagram-design"]}
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "diagram-design@diagram-design", "skills": ["diagram-design:diagram-design"]},
+          "uninstall": ["codex plugin remove diagram-design@diagram-design"]
         }
       },
       "routing": [
@@ -154,18 +162,20 @@
       "forbidden_reason": "DESIGN.md and PRODUCT.md live only in workspace/experience-design.",
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx impeccable install --providers=claude --project --no-hooks -y"
+            "npx impeccable install --providers=claude --user --no-hooks -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/impeccable/SKILL.md"}
+          "verify": {"kind": "path_exists", "path": ".claude/skills/impeccable/SKILL.md", "base": "home"},
+          "remove_paths": [".claude/skills/impeccable", ".claude/agents/impeccable-*.md"]
         },
         "codex": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx impeccable install --providers=codex --project --no-hooks -y"
+            "npx impeccable install --providers=codex --user --no-hooks -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md", "skills": ["impeccable"]}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md", "base": "home", "skills": ["impeccable"]},
+          "remove_paths": [".agents/skills/impeccable"]
         }
       },
       "routing": [
@@ -185,13 +195,15 @@
           "scope": "user",
           "install": ["uv tool install graphifyy"],
           "requires": {"command": "uv", "hint": "uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply."},
-          "verify": {"kind": "command", "command": "graphify --version"}
+          "verify": {"kind": "command", "command": "graphify --version"},
+          "uninstall": ["uv tool uninstall graphifyy"]
         },
         {
           "name": "git-hook",
           "scope": "project",
           "install": ["graphify hook install"],
           "verify": {"kind": "command", "command": "graphify hook status", "contains": "post-commit: installed"},
+          "uninstall": ["graphify hook uninstall"],
           "hook_env": {
             "hooks": ["post-commit", "post-checkout", "post-merge", "post-rewrite"],
             "marker": "graphify",
@@ -212,14 +224,16 @@
           "install": [
             "graphify install --platform claude"
           ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/graphify/SKILL.md", "base": "home"}
+          "verify": {"kind": "path_exists", "path": ".claude/skills/graphify/SKILL.md", "base": "home"},
+          "remove_paths": [".claude/skills/graphify"]
         },
         "codex": {
           "scope": "user",
           "install": [
             "graphify install --platform codex"
           ],
-          "verify": {"kind": "path_exists", "path": ".codex/skills/graphify/SKILL.md", "base": "home", "skills": ["graphify"]}
+          "verify": {"kind": "path_exists", "path": ".codex/skills/graphify/SKILL.md", "base": "home", "skills": ["graphify"]},
+          "remove_paths": [".codex/skills/graphify"]
         }
       },
       "routing": [
@@ -239,12 +253,13 @@
       ],
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add DietrichGebert/ponytail",
-            "claude plugin install ponytail@ponytail --scope project"
+            "claude plugin install ponytail@ponytail --scope user"
           ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "ponytail@ponytail"}
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "ponytail@ponytail"},
+          "uninstall": ["claude plugin uninstall ponytail@ponytail --scope user"]
         },
         "codex": {
           "scope": "user",
@@ -253,6 +268,7 @@
             "codex plugin add ponytail@ponytail"
           ],
           "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "ponytail@ponytail", "skills": ["ponytail:ponytail", "ponytail:ponytail-review", "ponytail:ponytail-debt"]},
+          "uninstall": ["codex plugin remove ponytail@ponytail"],
           "note": "Codex runs the ponytail hooks only after the owner trusts them once in /hooks."
         }
       },

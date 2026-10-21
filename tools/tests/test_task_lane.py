@@ -431,6 +431,16 @@ class LocalProofTests(unittest.TestCase):
             self.assertEqual(result["pr"], "9")
             self.assertNotIn("Local proof", body)
 
+    def test_a_knowledge_task_changing_only_markdown_needs_no_proof(self):
+        root = self.project()
+        task = task_lane.task_path(root, "TK-004")
+        task.write_text(task.read_text(encoding="utf-8").replace("type: task", "type: task\ntask_kind: knowledge", 1),
+                        encoding="utf-8")
+        for changed, waived in (("docs/a.md\nREADME.md", True), ("docs/a.md\nsrc/app.py", False), ("", False)):
+            with self.subTest(changed), mock.patch.object(task_lane, "changed_files",
+                                                          return_value=set(filter(None, changed.splitlines()))):
+                self.assertEqual(task_lane.proof_waived(root, task, "main"), waived)
+
     def test_a_missing_stale_red_or_dirty_proof_refuses_before_pushing(self):
         red = {"command": "echo boom; exit 3", "exit_code": 3, "failed_tests": ["tests/test_a.py::test_one"]}
         cases = (("no local proof record; run prove --task TK-004", None, True),

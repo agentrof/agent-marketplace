@@ -1,0 +1,6 @@
+{
+  "summary": "At pr_proof local_record, open-pr no longer demands a local proof record for a knowledge task whose whole diff is Markdown, since no test can observe such a change. A knowledge task that touches any other file, and every build task, still needs the proof.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

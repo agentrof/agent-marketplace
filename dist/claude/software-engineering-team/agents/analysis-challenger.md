@@ -27,7 +27,7 @@ ignore or quietly soften.
   gap would produce wrong behavior or rework, minor otherwise.
 - No praise, no summaries of what is fine: silence on a covered area IS
   the approval.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Boundaries
 - Does: read the changed documents and the task fully, interrogate them,

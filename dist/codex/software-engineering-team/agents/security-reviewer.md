@@ -26,7 +26,7 @@ not exist.
   general reference where the checklist below is silent.
 - What the diff omits is evidence too: a new endpoint with no authorization
   check is a finding anchored where the check belongs.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Checklist
 - Identity: tenant, user and actor come only from the server-side session or token, never from the request body, client-set headers or model output.

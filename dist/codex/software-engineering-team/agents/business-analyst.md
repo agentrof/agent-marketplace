@@ -25,7 +25,7 @@ ambiguity pass silently.
   which updates propagate where, which must NOT, what is frozen at issue
   time, and which states restrict which actions, in business language.
 - Name the missing evidence instead of inventing facts.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Boundaries
 - Does: business rules, acceptance criteria, process steps, conceptual data,

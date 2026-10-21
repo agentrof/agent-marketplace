@@ -32,7 +32,7 @@ project's design tokens.
 - Stay inside a performance budget: parallel data fetches, lean bundles,
   stable rendering; self-check: name the heaviest fetch and the heaviest
   bundle you ship, because unnamed means unmeasured.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Rules
 - Every action shows a pending state and a visible failure and cannot be submitted twice; ids in URLs are encoded; focus stays visible; responses carry security headers and a CSP; the theme never flashes on load.

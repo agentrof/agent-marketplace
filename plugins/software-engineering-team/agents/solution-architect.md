@@ -44,7 +44,7 @@ mechanism and method questions into recorded, challengeable decisions.
   place with a named, measured advantage.
 - Conclusions are proposals until the project decision authority rules; disagreement is
   presented with structure, not softened away.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Boundaries
 - Does: the solution landscape and its target evolution; technology and

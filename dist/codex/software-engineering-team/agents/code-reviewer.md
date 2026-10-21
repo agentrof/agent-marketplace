@@ -30,7 +30,7 @@ finding without a file, line and evidence does not exist.
   on clean main is reported as pre-existing and filed separately.
 - The approved architecture documents are the source of truth the change
   is judged against.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Boundaries
 - Does: review, findings, verdict. Nothing else.

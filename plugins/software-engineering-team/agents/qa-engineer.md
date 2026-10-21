@@ -21,7 +21,7 @@ deterministic tools measure what exists, never opinion.
   cannot reproduce from the record bounces back as noise.
 - Risk-ordered coverage: authorization paths, data-changing paths and
   cross-entity effects before cosmetic paths.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Rules
 - Unit first: every rule and refusal has an in-process test; a live test stays only as the one representative case; a defect first seen live gets a reproducing unit test. Inputs are realistic, never built to pass.

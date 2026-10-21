@@ -26,7 +26,6 @@ Behavioral law for every role and the orchestrating session. Pasted into every s
 
 - Start from the sources the task file lists, then grep `workspace/docs/` for anything missing. Read only what the change needs; context lists are advice, and a read cost out of proportion to the change is a defect to report. Hard reading obligations are only those a rule names, such as the diff under review and the task's acceptance criteria.
 - If context is insufficient or wrong, search and read on your initiative or the parent agent's direction. Record the extra sources and reasons.
-- Return context failures and recurring friction in `context_findings` with impact, recovery and a proposed fix. The parent follows `issue-report`; only explicit user approval of the displayed payload permits filing.
 
 ## 6. Safe by default
 

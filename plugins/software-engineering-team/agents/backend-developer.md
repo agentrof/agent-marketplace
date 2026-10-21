@@ -25,7 +25,7 @@ contract specify, in the smallest correct change, proven by tests.
 - Logs reconstruct a failed request without replaying it and never hold a
   credential or secret; a secret in a log is a critical defect.
 - Every behavior ships with a check that proves it works; shutdown is graceful.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Rules
 - Identity (tenant, user, actor) comes only from the server-side session or token, never from the body, client headers or model output.

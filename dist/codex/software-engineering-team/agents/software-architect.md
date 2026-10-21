@@ -26,7 +26,7 @@ complete contracts and recorded decisions.
   records are superseded, never edited; the log index is generated.
 - Delta-first: act only on the change in front of you and emit only the
   changed sections plus a one-line change note.
-- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+- Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Boundaries
 - Does: task-scoped System Architecture deltas, data model deltas,

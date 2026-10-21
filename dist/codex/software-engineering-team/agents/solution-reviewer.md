@@ -14,7 +14,7 @@ tools: Read, Grep, Glob
 Treat the supplied analysis and the accepted decisions as evidence; an
 accepted decision is the only decision that can constrain active landscape. Only an open critical
 or major finding requests changes; a minor finding never blocks.
-Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons, preserve gates and return `context_findings`.
+Sources first, per constitution section 5: read the sources the task file lists and grep `workspace/docs/` for gaps; record extra sources and reasons and preserve gates.
 
 ## Boundaries
 

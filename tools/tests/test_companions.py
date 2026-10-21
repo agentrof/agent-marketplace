@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import subprocess
 import sys
@@ -22,6 +23,71 @@ from git_fixture import init_repository  # noqa: E402
 TEAM = ROOT / "plugins" / "software-engineering-team"
 OVERLAY = ROOT / "platforms" / "shared" / "software-engineering-team" / "overlay"
 REGISTRY = json.loads((OVERLAY / "skill-content" / "setup" / "data" / "companions.json").read_text(encoding="utf-8"))
+
+
+class CompanionAvailabilityTests(unittest.TestCase):
+    def setUp(self):
+        sys.path[:0] = [str(OVERLAY / "scripts"), str(TEAM / "scripts")]
+        import setup_companions
+        self.module = setup_companions
+
+    def test_plugin_record_must_be_installed_enabled_and_in_the_selected_catalog(self):
+        verify = REGISTRY["companions"][0]["hosts"]["codex"]["verify"]
+        self.assertEqual(verify["plugin_id"], "superpowers@openai-curated-remote")
+        cases = [
+            ({"pluginId": "superpowers@openai-curated", "installed": True, "enabled": True}, False),
+            ({"pluginId": verify["plugin_id"], "installed": False, "enabled": True}, False),
+            ({"pluginId": verify["plugin_id"], "installed": True, "enabled": False}, False),
+            ({"pluginId": verify["plugin_id"], "installed": True, "enabled": True}, True),
+        ]
+        for record, expected in cases:
+            with self.subTest(record=record), \
+                    mock.patch.object(self.module.shutil, "which", return_value="codex"), \
+                    mock.patch.object(self.module.subprocess, "run", return_value=subprocess.CompletedProcess(
+                        [], 0, json.dumps({"installed": [record]}), "")):
+                self.assertEqual(self.module.installed(verify, ROOT), expected)
+
+    def test_host_skill_probe_checks_local_loading_and_reads_remote_contents(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            skill = root / "SKILL.md"
+            skill.write_text("skill instructions", encoding="utf-8")
+            remote = {"pluginId": "example@openai-curated-remote", "marketplaceName": "openai-curated-remote",
+                      "source": {"source": "remote", "id": "opaque-plugin-id"}}
+            registry = {"companions": [{"hosts": {"codex": {"verify": {
+                "plugin_id": remote["pluginId"], "skills": ["example:review"]}}}}]}
+            for content, expected in [(None, False), ("review instructions", True)]:
+                responses = [{"id": 1, "result": {}}, {"id": 2, "result": {"data": [{"skills": [
+                    {"name": "local", "enabled": True, "path": str(skill)},
+                    {"name": "disabled", "enabled": False, "path": str(skill)}]}]}},
+                    {"id": 3, "result": {"plugin": {"summary": {"installed": True, "enabled": True},
+                        "skills": [{"name": "review", "enabled": True}]}}},
+                    {"id": 4, "result": {"contents": content}}]
+                process = mock.Mock(stdin=io.StringIO(), stdout=io.StringIO(
+                    "".join(json.dumps(r) + "\n" for r in responses)))
+                with mock.patch.object(self.module.subprocess, "Popen", return_value=process), \
+                        mock.patch.object(self.module.subprocess, "run", return_value=subprocess.CompletedProcess(
+                            [], 0, json.dumps({"installed": [remote]}), "")):
+                    skills, findings = self.module.codex_skills(registry, root)
+                self.assertEqual(findings, [])
+                self.assertTrue(skills["local"])
+                self.assertFalse(skills["disabled"])
+                self.assertEqual(skills["example:review"], expected)
+
+    def test_installed_plugin_with_missing_host_skills_fails_the_check(self):
+        with mock.patch.object(self.module, "codex_skills", return_value=({}, [])), \
+                mock.patch.object(self.module, "installed", return_value=True), \
+                mock.patch.object(self.module, "file_present", return_value=True), \
+                mock.patch.object(self.module, "hook_missing", return_value=[]):
+            rows, _ = self.module.status(REGISTRY, ROOT, ("codex",))
+        self.assertTrue(all(row["installed"] for row in rows))
+        self.assertTrue(all(row["skills_available"] is False for row in rows if row["host"] == "codex"))
+
+    def test_unavailable_host_never_reports_verified_skills(self):
+        with mock.patch.object(self.module.subprocess, "run", side_effect=OSError):
+            skills, findings = self.module.codex_skills(REGISTRY, ROOT)
+        self.assertFalse(skills)
+        self.assertIn("unverified", findings[0])
 
 
 class GraphifyHookEnvTests(unittest.TestCase):
@@ -63,12 +129,25 @@ class CompanionCheckTests(unittest.TestCase):
             ids = [spec["verify"]["plugin_id"] for companion in REGISTRY["companions"]
                    for spec in companion["hosts"].values() if "plugin_id" in spec["verify"]]
             listings = {"claude": json.dumps([{"id": value} for value in ids]),
-                        "codex": json.dumps({"installed": [{"pluginId": value} for value in ids]})}
+                        "codex": json.dumps({"installed": [{"pluginId": value, "installed": True, "enabled": True} for value in ids]})}
             listings["graphify"] = "post-commit: installed"
             for name, listing in listings.items():
                 tool = fake / name
                 tool.write_text(f"#!/bin/sh\necho '{listing}'\n", encoding="utf-8")
                 tool.chmod(0o755)
+            loaded = project / "loaded.md"
+            loaded.write_text("instructions", encoding="utf-8")
+            skills = [{"name": name, "enabled": True, "path": str(loaded)}
+                      for companion in REGISTRY["companions"]
+                      for name in companion["hosts"]["codex"]["verify"]["skills"]]
+            (fake / "codex").write_text(
+                "#!/usr/bin/env python3\nimport json, sys\n"
+                "if sys.argv[1] != 'app-server':\n"
+                + " print(" + repr(listings["codex"]) + ")\n"
+                + "else:\n for line in sys.stdin:\n  request=json.loads(line)\n"
+                + "  if 'id' in request:\n"
+                + "   result=" + repr({"data": [{"skills": skills}]}) + " if request['method']=='skills/list' else {}\n"
+                + "   print(json.dumps({'id':request['id'],'result':result}),flush=True)\n", encoding="utf-8")
             env = {**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}",
                    "CODEX_HOME": str(codex_home), "HOME": str(temporary),
                    "PYTHONPATH": str(TEAM / "scripts")}

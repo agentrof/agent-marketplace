@@ -40,9 +40,9 @@
         "codex": {
           "scope": "user",
           "install": [
-            "codex plugin add superpowers@openai-curated"
+            "codex plugin add superpowers@openai-curated-remote"
           ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "superpowers@openai-curated"}
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "superpowers@openai-curated-remote", "skills": ["superpowers:systematic-debugging", "superpowers:verification-before-completion", "superpowers:receiving-code-review", "superpowers:writing-skills"]}
         }
       },
       "routing": [
@@ -72,7 +72,7 @@
           "install": [
             "npx skills add blader/humanizer --agent codex -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md"}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md", "skills": ["humanizer:humanizer"]}
         }
       },
       "routing": [
@@ -98,7 +98,7 @@
           "install": [
             "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md"}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md", "skills": ["security-audit"]}
         }
       },
       "routing": [
@@ -130,7 +130,7 @@
             "codex plugin marketplace add cathrynlavery/diagram-design",
             "codex plugin add diagram-design@diagram-design"
           ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "diagram-design@diagram-design"}
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "diagram-design@diagram-design", "skills": ["diagram-design:diagram-design"]}
         }
       },
       "routing": [
@@ -165,7 +165,7 @@
           "install": [
             "npx impeccable install --providers=codex --project --no-hooks -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md"}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md", "skills": ["impeccable"]}
         }
       },
       "routing": [
@@ -219,7 +219,7 @@
           "install": [
             "graphify install --platform codex"
           ],
-          "verify": {"kind": "path_exists", "path": ".codex/skills/graphify/SKILL.md", "base": "home"}
+          "verify": {"kind": "path_exists", "path": ".codex/skills/graphify/SKILL.md", "base": "home", "skills": ["graphify"]}
         }
       },
       "routing": [
@@ -252,7 +252,7 @@
             "codex plugin marketplace add DietrichGebert/ponytail",
             "codex plugin add ponytail@ponytail"
           ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "ponytail@ponytail"},
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "ponytail@ponytail", "skills": ["ponytail:ponytail", "ponytail:ponytail-review", "ponytail:ponytail-debt"]},
           "note": "Codex runs the ponytail hooks only after the owner trusts them once in /hooks."
         }
       },

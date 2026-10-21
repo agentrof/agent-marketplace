@@ -68,7 +68,7 @@ The team flow owns plans, task files, branches, worktrees, commits, pull request
 | Review | code-reviewer | /ponytail-review | inside its single review pass |
 | Retrospective | retrospective | /ponytail-debt | report the shortcut debt ledger |
 
-Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph is `--graph .agentrof/graphify/docs/graph.json`); otherwise read the task file's sources and grep.
+Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph, `--graph .agentrof/graphify/docs/graph.json`, exists only after its first build; without it use the default graph); otherwise read the task file's sources and grep.
 
 # Load user context
 

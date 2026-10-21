@@ -250,16 +250,11 @@ class CompanionCheckTests(unittest.TestCase):
             settings = project / ".claude" / "settings.json"
             settings.parent.mkdir(exist_ok=True)
             settings.write_text('{"permissions": {"allow": ["Bash(ls)"]}}\n', encoding="utf-8")
-            ignore = project / "workspace" / "docs" / ".graphifyignore"
-            ignore.parent.mkdir(parents=True)
-            ignore.write_text("own\n", encoding="utf-8")
             self.assertEqual(run("apply").returncode, 0)
-            self.assertEqual(ignore.read_text(encoding="utf-8"), "own\n")
-            ignore.unlink()
-            self.assertEqual(run("apply").returncode, 0)
+            self.assertFalse((project / "workspace" / "docs" / ".graphifyignore").exists())
             written = {path: path.read_bytes() for path in (
                 settings, codex_home / "config.toml", project / ".diagram-design",
-                project / ".impeccable" / "config.json", ignore)}
+                project / ".impeccable" / "config.json")}
             self.assertEqual(run("apply").returncode, 0)
             self.assertEqual(written, {path: path.read_bytes() for path in written})
             merged = json.loads(settings.read_text(encoding="utf-8"))

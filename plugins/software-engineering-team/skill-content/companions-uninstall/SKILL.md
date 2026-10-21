@@ -10,9 +10,8 @@ project_scope: external
 Removes the optional third-party companions that setup installs: the plugins,
 the skills, the graphify CLI and its git hooks, and the deny rules, environment
 and disable block that `companions apply` wrote. The team plugin itself is
-never touched. Project marker files (`.diagram-design`, `.impeccable/`,
-`workspace/docs/.graphifyignore`) and graphify output stay: they are project
-files.
+never touched. Project marker files (`.diagram-design`, `.impeccable/`) and
+graphify output stay: they are project files.
 
 ## When to Use
 

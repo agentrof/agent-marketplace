@@ -1,8 +1,7 @@
 # CI and release validation
 
 The required `check` aggregate proves the selected test inventory completed;
-it depends directly on the shard results. Every PR and every merge queue group
-also emits the CodeQL and two-host lifecycle contexts. Branch protection
+it depends directly on the shard results. Every PR also emits the CodeQL and two-host lifecycle contexts. Branch protection
 requires `check`, `analyze-python` and `Claude Code and Codex lifecycle`.
 
 ## Test scope and execution
@@ -103,7 +102,7 @@ observations, remain real.
 
 | Profile | Selection |
 | --- | --- |
-| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions. Every PR, merge queue group, manual and scheduled run, and main without reusable proof |
+| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions. Every PR, manual and scheduled run, and main without reusable proof |
 | `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff; on request only, no event selects it |
 | `reuse` | Main's prior successful validation of the identical input, its PR's full run, with fresh static and transition checks |
 
@@ -276,7 +275,7 @@ reusable evidence. The reader checks the latest relevant run and attempt,
 artifact provenance and digest, safe archive shape, age (at most 24 hours),
 repository identity, exact tree and plan legitimacy. A failed, running or
 rerun successor invalidates an older result. Missing or unusable evidence
-selects fresh full validation. Fork, scheduled and merge queue runs still verify
+selects fresh full validation. Fork and scheduled runs still verify
 all their reports but do not emit reusable receipts.
 
 The merge path additionally verifies that the receipt tested the selected
@@ -294,10 +293,11 @@ plans fail. Final evidence remains immutable and names the current run attempt,
 so a prior attempt's receipt never authorizes a retry.
 
 Unit-test evidence covers repository test execution and never grants host
-installation coverage. Every PR, merge queue group, manual and scheduled run
-installs both real hosts fresh, on the runner, Python and Node versions
-`tools/data/ci-host-policy.json` pins and the CLI versions
-`tools/data/host-cli-versions.json` pins; no host result is reused.
+installation coverage. Every manual and scheduled run, and every PR that
+changes a package, host, install or release-hosts path, installs both real
+hosts fresh on macOS with Python 3.14, Node 24 and the CLI versions
+`tools/data/host-cli-versions.json` pins; no host result is reused. A PR that
+changes none of them skips the install, and the required check still reports.
 
 Evidence never replaces current Git topology, release policy, ref-transaction
 checks, CodeQL or newly published public-channel installs. The read-only

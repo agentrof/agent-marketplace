@@ -12,7 +12,7 @@ Every rule in this repository is machine-enforced or it is not a rule.
 `tools/validate.py` is the rulebook; `make check` runs it together with
 the count-drift gate and the complete test suite. CI runs fresh static gates
 and independently selects and verifies the required platform test matrix on
-push, pull request and merge queue groups. One finding is red. There are no
+push and pull request. One finding is red. There are no
 exception files, no allowlists, no temporary waivers. If you believe a rule is
 wrong, change the rule in `tools/validate.py` in your PR and update its
 fixture; do not work around it.
@@ -93,9 +93,7 @@ orchestration model in [docs/orchestration.md](docs/orchestration.md).
 Repository maintainers use the separate, manually invoked
 [issue and release operations protocol](docs/maintainer-operations-protocol.md);
 an issue event never starts an agent and issue text never grants merge or
-release authority. When `main` requires the merge queue, a green PR need not be
-brought up to date before merging: the queue runs the required checks again on
-the exact commit it merges. The protocol lists the
+release authority. The protocol lists the
 [repository settings](docs/maintainer-operations-protocol.md#repository-settings)
 the owner enables for it.
 

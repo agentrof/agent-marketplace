@@ -7,8 +7,8 @@ requires `check`, `analyze-python` and `Claude Code and Codex lifecycle`.
 ## Test scope and execution
 
 `tools/data/ci-test-policy.json` owns the one supported Python version,
-operating systems, shard jobs and worker processes per job, impact groups,
-dependency closures and initial duration weights. CI tests that Python once per
+operating systems, shard jobs and worker processes per job and initial
+duration weights. CI tests that Python once per
 operating system. Linux runs every test. macOS and Windows run only the tests
 that prove behavior of their own system, each named by its exact ID: the
 platform group both run (worker processes, the hook launcher, case-insensitive
@@ -103,35 +103,22 @@ observations, remain real.
 | Profile | Selection |
 | --- | --- |
 | `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions. Every PR, manual and scheduled run, and main without reusable proof |
-| `impact` | Always-required contracts and the transitive affected groups for the complete base-to-candidate diff; on request only, no event selects it |
 | `reuse` | Main's prior successful validation of the identical input, its PR's full run, with fresh static and transition checks |
 
-Every pull request runs `full`: the sharded Linux lane runs the whole suite in
-about as long as an impact selection, and the local gate runs only a change's
-own tests, so the full suite runs before every merge.
-
-Unknown paths, new test modules, shared fixtures, workflow/selection changes
-and shared runtime inputs select full coverage. Existing test changes include
-their consumers. Plugin Markdown is shipped behavior, not repository-only
-documentation. Generated changes without corresponding canonical changes
-select full coverage. Both sides of renames and deleted files participate in
-impact analysis.
+Every pull request runs `full`: the local gate runs only a change's own tests,
+so the full suite runs before every merge.
 
 Fresh reports contain per-test duration, outcome and actual Python, Git and
-operating-system identities. Successful runs publish bounded timing history
-for later plans. Plans report each history source run, attempt, age and
-artifact digest, restored weight counts and fallback reasons. History is bound
-to the exact policy, so the first plan after a policy change weighs each test
-by the policy's `test_seconds` for its runner system: the tests that took at
-least five seconds, refreshed from a run's `ci-durations` artifact with
+operating-system identities. A plan weighs each test by the policy's
+`test_seconds` for its runner system: the tests that took at least five
+seconds, refreshed from a durations file with
 `python3 tools/ci_tests.py estimates --durations <file>`. Every other test
 weighs `default_seconds`. Fixture startup estimates favor reusing a
 process-local seed without creating empty partitions. Reports distinguish test
 time, fixture build/validation/copy time, worker wall time and shard wall time.
-Timing data changes partition balance only; missing or invalid history uses
-policy weights without changing coverage. Weekly and
-manually dispatched validation run full coverage. `make check` remains an
-exhaustive local gate; `make static-check` provides the cheap always-fresh
+Timing data changes partition balance only, never coverage. Weekly and
+manually dispatched validation run full coverage. `make check` runs the static
+checks and the change's own unit tests; `make static-check` provides the cheap always-fresh
 contract, version, count and deterministic distribution checks.
 
 ## Exact local validation
@@ -148,8 +135,7 @@ origin/main` and `python3 tools/ci_local.py verify --staged --target origin/main
 `check --fresh` ignores saved test results. The gate runs unit tests only:
 a test marked `@integration` (`tools/tests/levels.py`), alone or through its
 class, starts a process or writes outside its own temporary directory, and
-only pull request CI runs it. `ci-local-policy.json`
-sets `test_selection`. At `changed` the gate runs the change's own unit tests,
+only pull request CI runs it. The gate runs the change's own unit tests,
 most specific first, while pull request CI runs every test on Linux:
 1. the changed test methods of each changed test module, or the whole module
    when code outside its test methods changed (blank lines aside);
@@ -168,7 +154,7 @@ test that would pass the budget is left to pull request CI, and the selection
 reason counts those tests and the integration tests left to CI. A change whose
 own tests are all integration tests runs only the static checks locally. 120 estimated seconds run in about 35 seconds with
 four workers on a recent Mac, static checks included, which run beside the
-test workers. At `impact` the gate selects as `ci_tests.py plan --mode impact` does.
+test workers.
 `check --full` runs every unit test; `verify` then checks that full receipt. On macOS, `direct_tools`
 names the tools whose `/usr/bin` entry is an `xcrun` trampoline, which resolves
 the developer directory on every call; workers call the tool it resolves to,
@@ -202,7 +188,7 @@ source files fail before tests. Ignored runtime caches are explicitly allowed
 by `ci-local-policy.json`; other ignored untracked sources fail. On Windows,
 executable bits remain the index's identity because the filesystem does not
 provide POSIX executable modes. Checkouts transformed by text filters must
-first match their staged bytes. Impact includes the entire merge-base to index
+first match their staged bytes. The selection reads the entire merge-base to index
 candidate, including earlier branch commits, deletion and both sides of a
 rename. A missing base selects the full suite. The command never fetches refs.
 
@@ -311,12 +297,10 @@ validation workflows never publish refs or releases.
    `dist/`, so the same run tests the final release tree, and `check-pr`
    proves the commit is the deterministic bump of its parent at the commit's
    own committer date, which names the release `YYYY.M.N` for that month
-   however late the pull request merges. When `main` requires the merge
-   queue, each queued group repeats the required checks on the exact commit
-   `main` moves to, selecting impact coverage over the group's complete diff.
+   however late the pull request merges.
 2. After merge, `main` runs fresh static gates and either verifies equivalent
-   PR evidence, in about a minute, or executes full tests. A queued commit
-   reuses PR evidence only when its tree equals the PR's tested merge. CodeQL
+   PR evidence, in about a minute, or executes full tests. A commit reuses
+   PR evidence only when its tree equals the PR's tested merge. CodeQL
    continues to run on `main`.
 3. A release dispatches the `Release` workflow for one `main` commit. The
    `Auto release` workflow does so on the push that merges a release commit,

@@ -180,7 +180,7 @@ reaches them.
    package declares changes.
 6. Run focused tests while iterating. Stage the complete candidate, run
    `make check-local`, and run `make verify-local` immediately before commit.
-   Partial staging is unsupported. `make check` remains the exhaustive gate;
+   Partial staging is unsupported. Pull request CI runs the full suite;
    local receipts never replace independent required remote checks.
 7. Review the final diff for unrelated changes, generated drift, secrets,
    unsafe permissions, and stale documentation.

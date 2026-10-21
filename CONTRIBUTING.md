@@ -38,8 +38,8 @@ system's own tests on macOS and Windows; `python3 tools/ci_local.py check
 before pushing, run `make check-pr`, the confidentiality and release-impact
 scan of the committed branch. Partial staging and worktree/index mismatches are rejected. Identical successful local results can be reused for
 at most 24 hours; a changed or failed candidate invalidates them. Verify the
-exact staged candidate again immediately before commit. `make check` remains
-the exhaustive local gate. Independent remote platform checks and release
+exact staged candidate again immediately before commit. `make check` runs the
+static checks and the change's own unit tests. Independent remote platform checks and release
 validation remain required; no Git hooks are installed. See
 [CI validation](docs/ci.md) for the commands and evidence boundaries.
 

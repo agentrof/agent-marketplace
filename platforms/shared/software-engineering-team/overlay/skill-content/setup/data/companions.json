@@ -215,8 +215,7 @@
         {"name": "GRAPHIFY_OUT", "value": ".agentrof/graphify"}
       ],
       "files": [
-        {"path": ".agentrof/graphify/.gitignore", "content": "*\n"},
-        {"path": "workspace/docs/.graphifyignore", "content": "# The docs graph reads Markdown only.\n*\n!*/\n!*.md\n", "if_missing": true}
+        {"path": ".agentrof/graphify/.gitignore", "content": "*\n"}
       ],
       "hosts": {
         "claude": {

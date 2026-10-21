@@ -1,0 +1,6 @@
+{
+  "summary": "Setup's companion step no longer writes a docs-folder graphify ignore file. The file only limited the docs graph to Markdown files, a small gain, and graphify already skips the paths setup keeps out of Git (the managed .gitignore block lists the local runtime folder), so the extra file duplicated a rule the project already had and appeared as an untracked or tracked change after every companions apply. A project that already has the file keeps it.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

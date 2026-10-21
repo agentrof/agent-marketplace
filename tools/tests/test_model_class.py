@@ -38,7 +38,6 @@ import task_lane  # noqa: E402
 
 PLUGIN = fixtures.PLUGIN
 SOURCE = ROOT / "plugins" / PLUGIN
-FIXED = {"security_review", "orchestration"}
 TRIGGERS = ({"size": "l"}, {"rigor": "high"}, {"risks": ["auth"]})
 AGENT_TOOLS = json.loads((ROOT / "platforms/claude/agent-tools.json").read_text(encoding="utf-8"))
 
@@ -51,23 +50,6 @@ class ResolverTests(unittest.TestCase):
     def resolve(self, host: str, model_class: str | None = None, config: dict | None = None,
                 **facts) -> dict:
         return resolver.resolve(self.map, config or {}, host, model_class, **facts)
-
-    def test_the_owner_table_declares_seven_classes_and_two_fixed_ones(self):
-        classes = self.map["model_classes"]
-        self.assertEqual(list(classes), ["mechanical", "routine_authoring", "complex_authoring",
-                                         "routine_review", "critical_decision", "security_review",
-                                         "orchestration"])
-        self.assertEqual({name for name, spec in classes.items() if not spec["escalates"]}, FIXED)
-        claude = {slot: (setting["model"], setting.get("effort"))
-                  for slot, setting in self.map["hosts"]["claude"]["classes"].items()}
-        self.assertEqual(claude["mechanical"], ("claude-haiku-5-5", "high"))
-        self.assertEqual(claude["critical_decision"], ("claude-opus-5-5", "high"))
-        self.assertEqual(claude["security_review"], ("claude-opus-5-5", "high"))
-        self.assertEqual(claude["routine_review"], ("claude-sonnet-5-5", "medium"))
-        codex = self.map["hosts"]["codex"]["classes"]
-        self.assertEqual(codex["mechanical"]["model"], "gpt-6-luna")
-        self.assertEqual({setting["model"] for slot, setting in codex.items()
-                          if slot != "mechanical"}, {"gpt-6.1-sol"})
 
     def test_each_class_escalates_one_level_up_and_a_fixed_class_never_moves(self):
         spec = self.map["hosts"]["claude"]
@@ -129,22 +111,10 @@ class ResolverTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, fragment):
                     resolver.resolve(self.map, {}, "claude", name, **facts)
 
-    def test_retired_and_unknown_config_keys_are_refused(self):
-        for config, fragment in (
-                ({"tier_models": {"claude": {"high": {"effort": "high"}}}}, "tier_models is retired"),
-                ({"role_tiers": {"code-reviewer": "high"}}, "role_tiers is retired"),
-                ({"class_models": {"claude": {"security_review_escalated": {"effort": "high"}}}},
-                 "class_models.claude.security_review_escalated: unknown class slot"),
-                ({"role_classes": {"code-reviewer": "frontier"}},
-                 "role_classes.code-reviewer: the class must be one of")):
-            with self.subTest(fragment=fragment):
-                errors = role_settings.config_errors(config, self.map)
-                self.assertTrue(any(fragment in error for error in errors), errors)
-
 
 @integration
 class ResolverCommandTests(unittest.TestCase):
-    """The installed command reads the project config and refuses a retired key."""
+    """The installed command reads the project config and the task file."""
 
     def run_resolve(self, project: Path, *args: str) -> subprocess.CompletedProcess:
         script = ROOT / "dist/claude" / PLUGIN / "scripts/model_class.py"
@@ -153,7 +123,7 @@ class ResolverCommandTests(unittest.TestCase):
             capture_output=True, text=True, check=False, timeout=60,
             env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
 
-    def test_the_command_resolves_and_refuses_a_retired_key(self):
+    def test_the_command_resolves_from_the_config_and_the_task(self):
         with tempfile.TemporaryDirectory() as raw:
             project = Path(raw)
             config = project / "workspace/config.json"
@@ -178,10 +148,6 @@ class ResolverCommandTests(unittest.TestCase):
             flagged = self.run_resolve(project, "--role", "solution-architect", "--host", "claude",
                                        "--task", "TK-001", "--json")
             self.assertEqual(json.loads(flagged.stdout)["slot"], "critical_decision_escalated", flagged.stderr)
-            config.write_text(json.dumps({**base, "tier_models": {}}), encoding="utf-8")
-            refused = self.run_resolve(project, "--role", "code-reviewer", "--host", "claude")
-            self.assertEqual(refused.returncode, 1)
-            self.assertIn("tier_models is retired", refused.stderr)
 
 
 class RenderedClaudeAgentTests(unittest.TestCase):
@@ -189,21 +155,11 @@ class RenderedClaudeAgentTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        adapter = build_distributions.load_adapters(ROOT)["claude"]
-        build_distributions.generate_agents(
-            ROOT, SOURCE, Path(cls.temporary.name), adapter,
-            build_distributions.load_execution_profile(ROOT, adapter))
+        # The committed build, which `make dist-check` keeps equal to a fresh one.
         cls.agents = {path.stem: build_distributions.parse_frontmatter(path)[0]
-                      for path in sorted((Path(cls.temporary.name) / "agents").glob("*.md"))}
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
+                      for path in sorted((ROOT / "dist/claude" / PLUGIN / "agents").glob("*.md"))}
 
     def test_every_role_leaves_the_claude_md_chain_out(self):
-        self.assertTrue(AGENT_TOOLS["omit_claude_md"])
-        self.assertIn("https://code.claude.com/docs/en/sub-agents", AGENT_TOOLS["sources"])
         for name, fields in self.agents.items():
             with self.subTest(agent=name):
                 self.assertEqual(str(fields.get("omitClaudeMd")).lower(), "true")

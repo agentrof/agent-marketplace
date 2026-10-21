@@ -19,7 +19,7 @@ Every implementation request runs through this script:
   same files as this branch.
 - ``start`` and ``approve`` also route roles: each rule in
   ``skill-content/deliver/data/role-routing.json`` (and the project's
-  ``.agentrof/role-routing.json``) that matches the task's kind, size, named
+  ``role_routing`` in ``workspace/config.json``) that matches the task's kind, size, named
   files or keywords, at the trigger kinds its size allows, lands in its
   ``roles`` field, and the roles of a ``spawn_modes`` mode in ``spawn``;
   ``role-check`` records a role's verdict in the task's ``## Role Checks`` section.
@@ -105,18 +105,14 @@ TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
 COST_BUDGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8")).get("cost_budget_usd", {})
 TARGET_MINUTES = TARGETS["build"]["average"]
 ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
-PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
 TRIGGERS_FILE = TARGETS_FILE.with_name("task-triggers.json")
-PROJECT_TRIGGERS = Path(".agentrof") / "task-triggers.json"
 TRIGGER_KEYS = {"method_skills": "skill", "risk_flags": "flag", "reviewers": "role"}
 # Renamed skills: a project trigger rule or an open task may still name the old one.
 SKILL_ALIASES = {"docker-compose": "container-environment"}
 SKILLS = Path(__file__).resolve().parent.parent / "skill-content"
 SOURCE_HASH = 12
 GRAPH_REFRESH = Path(__file__).resolve().with_name("graphify_refresh.py")
-# The project's local proof commands; {base} is the target branch. Without the file
-# the proof runs the test command the flow names.
-PROJECT_PROOF = Path(".agentrof") / "local-proof.json"
+# Without a local_proof list in workspace/config.json the proof runs the test command the flow names.
 PROOF_COMMANDS = ("make test",)
 PROOFS = Path(".agentrof") / "agent-marketplace" / ".runtime" / "proof"
 REVIEWS = PROOFS.with_name("review")
@@ -269,11 +265,9 @@ def proposed_rigor(request: str) -> tuple[str, list[str]]:
 
 
 def role_rules(root: Path | None = None) -> list[dict]:
-    """Packaged rules, a project's .agentrof/role-routing.json rule replacing the one of its role."""
+    """Packaged rules, a rule of the project's role_routing setting replacing the one of its role."""
     rules = {rule["role"]: rule for rule in json.loads(ROUTING_FILE.read_text(encoding="utf-8"))["rules"]}
-    own = root / PROJECT_ROUTING if root else None
-    if own and own.is_file():
-        rules.update({rule["role"]: rule for rule in json.loads(own.read_text(encoding="utf-8"))["rules"]})
+    rules.update({rule["role"]: rule for rule in project_setting(root, "role_routing", {}).get("rules", [])})
     for rule in rules.values():
         if rule.get("mode") not in ROLE_MODES or rule.get("step") not in ROLE_STEPS:
             raise Refused(f"role rule {rule['role']}: mode must be one of {', '.join(ROLE_MODES)}"
@@ -282,13 +276,10 @@ def role_rules(root: Path | None = None) -> list[dict]:
 
 
 def routing_policy(root: Path | None = None) -> dict:
-    """pre_check_triggers and spawn_modes, a project's .agentrof/role-routing.json value replacing the packaged one."""
+    """pre_check_triggers and spawn_modes, the project's role_routing value replacing the packaged one."""
     keys = ("pre_check_triggers", "spawn_modes")
     policy = {key: value for key, value in json.loads(ROUTING_FILE.read_text(encoding="utf-8")).items() if key in keys}
-    own = root / PROJECT_ROUTING if root else None
-    if own and own.is_file():
-        policy |= {key: value for key, value in json.loads(own.read_text(encoding="utf-8")).items() if key in keys}
-    return policy
+    return policy | {key: value for key, value in project_setting(root, "role_routing", {}).items() if key in keys}
 
 
 def spawn_roles(roles: list[dict], root: Path | None = None) -> list[str]:
@@ -331,10 +322,9 @@ def trigger_reasons(rule: dict, text: str, files: set[str]) -> list[str]:
 
 
 def task_triggers(root: Path | None = None) -> dict:
-    """Packaged trigger tables, a project's .agentrof/task-triggers.json rule replacing the one of its id."""
+    """Packaged trigger tables, a rule of the project's task_triggers setting replacing the one of its id."""
     tables = json.loads(TRIGGERS_FILE.read_text(encoding="utf-8"))
-    own = root / PROJECT_TRIGGERS if root else None
-    extra = json.loads(own.read_text(encoding="utf-8")) if own and own.is_file() else {}
+    extra = project_setting(root, "task_triggers", {})
     result = {}
     for table, key in TRIGGER_KEYS.items():
         rules = {rule[key]: rule for rule in tables[table]}
@@ -2201,20 +2191,24 @@ def cmd_overlap(args, root: Path) -> dict:
     return {"ok": True, "advisory": True, "overlaps": overlap(root, args.base)}
 
 
-def pr_proof(root: Path) -> str:
-    """``pr_proof`` from ``workspace/config.json``; ``remote_ci`` when unset or unreadable."""
+def project_setting(root: Path | None, key: str, default):
+    """``key`` from ``workspace/config.json``; ``default`` when unset or unreadable."""
     try:
-        value = json.loads((root / "workspace" / "config.json").read_text(encoding="utf-8"))
+        value = json.loads((root / "workspace" / "config.json").read_text(encoding="utf-8")) if root else None
     except (OSError, ValueError):
-        return "remote_ci"
-    return value.get("pr_proof", "remote_ci") if isinstance(value, dict) else "remote_ci"
+        return default
+    return value.get(key, default) if isinstance(value, dict) else default
+
+
+def pr_proof(root: Path) -> str:
+    return project_setting(root, "pr_proof", "remote_ci")
 
 
 def proof_commands(root: Path, base: str) -> list[str]:
-    path = root / PROJECT_PROOF
-    commands = json.loads(path.read_text(encoding="utf-8"))["commands"] if path.is_file() else PROOF_COMMANDS
-    if not commands or not all(isinstance(item, str) and item.strip() for item in commands):
-        raise Refused(f"{PROJECT_PROOF.as_posix()} must list at least one command under commands")
+    commands = project_setting(root, "local_proof", PROOF_COMMANDS)
+    if not isinstance(commands, (list, tuple)) or not commands \
+            or not all(isinstance(item, str) and item.strip() for item in commands):
+        raise Refused("local_proof in workspace/config.json must list at least one command")
     return [item.replace("{base}", base) for item in commands]
 
 

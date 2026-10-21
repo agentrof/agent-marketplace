@@ -24,11 +24,16 @@ CONFIG_FIELDS = {
     "tests_root",
     "workspace_layout",
     "pr_proof",
+    "local_proof",
+    "role_routing",
+    "task_triggers",
     role_settings.CLASS_MODELS,
     role_settings.ROLE_CLASSES,
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout",
-                   "pr_proof"}
+                   "pr_proof", "local_proof", "role_routing", "task_triggers"}
+# Deliver settings the project owns; setup writes none of them and keeps the project's.
+PROJECT_FIELDS = ("pr_proof", "local_proof", "role_routing", "task_triggers")
 # Who proves a task before its pull request; unset means remote_ci.
 PR_PROOF_VALUES = ("remote_ci", "local_record")
 # Setup writes these into a config that lacks them; the project owns them after.
@@ -129,6 +134,12 @@ def base_errors(config: dict) -> list[str]:
             errors.append(f"{field} must be a non-empty string")
     if "pr_proof" in config and config["pr_proof"] not in PR_PROOF_VALUES:
         errors.append(f"pr_proof must be one of {', '.join(PR_PROOF_VALUES)}")
+    proof = config.get("local_proof", ["make test"])
+    if not isinstance(proof, list) or not proof or not all(isinstance(item, str) and item.strip() for item in proof):
+        errors.append("local_proof must be a non-empty list of commands")
+    for field in ("role_routing", "task_triggers"):
+        if not isinstance(config.get(field, {}), dict):
+            errors.append(f"{field} must be an object")
     errors.extend(layout_errors(config))
     return errors
 

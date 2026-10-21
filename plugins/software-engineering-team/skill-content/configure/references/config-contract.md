@@ -13,8 +13,13 @@ or role, and `project_config.py set-class --default` or `set-role-class
 has. The retired `tier_models` and `role_tiers` fail the check; setup drops
 them.
 
-`output_language`, `terminology_language`, `tests_root`, `workspace_layout`
-and `pr_proof` are changed through `project_config.py set`.
+`output_language`, `terminology_language`, `tests_root`, `workspace_layout`,
+`pr_proof`, `local_proof`, `role_routing` and `task_triggers` are changed
+through `project_config.py set`. `local_proof` lists the proof commands,
+`role_routing` and `task_triggers` hold project rules in the shape of the
+deliver entry's `data/role-routing.json` and `data/task-triggers.json`. They
+live here because `.agentrof/` is never tracked; setup writes none of them and
+keeps the project's.
 `pr_proof` says who proves a fast-lane task before its pull request:
 `remote_ci` (the default when absent) leaves it to the project's CI;
 `local_record` makes `open-pr` require a green `task_lane.py prove` record of

@@ -287,7 +287,7 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             ),
             **{field: current.get(field, default)
                for field, default in project_config.DEFAULTS.items()},
-            **({"pr_proof": current["pr_proof"]} if "pr_proof" in current else {}),
+            **{field: current[field] for field in project_config.PROJECT_FIELDS if field in current},
         }
         # The owner's class and role overrides survive a refresh, and setup
         # writes none of its own; one the installed class map no longer takes

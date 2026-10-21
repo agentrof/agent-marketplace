@@ -38,11 +38,11 @@ data deletion or an irreversible action. Any flag in `risks` (`auth`,
 starts at rigor `normal` with only the `--risk` flags passed explicitly.
 
 Method skills: `skill-content/deliver/data/task-triggers.json` (project rules
-in `.agentrof/task-triggers.json`) makes a method skill mandatory for the
+in `task_triggers` of `workspace/config.json`) makes a method skill mandatory for the
 paths and words it matches; a stack no rule names is worked from the code.
 Role routing: `start` and `approve` match the task against
 `skill-content/deliver/data/role-routing.json` (project rules in
-`.agentrof/role-routing.json`) and write `roles` as `<role>:<mode>:<step>`.
+`role_routing` of `workspace/config.json`) and write `roles` as `<role>:<mode>:<step>`.
 Its `pre_check_triggers` set which triggers route at each size: none at `s`
 (writer and reviewer only), path rules at `m`, every trigger at `l`. The
 software architect is `require` on its path rules (schema, migrations,

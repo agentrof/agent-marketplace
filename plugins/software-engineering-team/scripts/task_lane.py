@@ -23,7 +23,7 @@ Every implementation request runs through this script:
 - ``open-pr`` marks the task delivered, pushes the branch and opens the PR; it
   refuses while a ``require`` role, routed by the task or its diff, has no verdict.
 - ``prove`` runs the project's local proof commands on HEAD and records each
-  one's exit code and time; at switch ``pr_proof`` ``local_record`` ``open-pr``
+  one's exit code and time; at config ``pr_proof`` ``local_record`` ``open-pr``
   refuses without a green record of a clean HEAD and adds it to the PR body.
 - ``merge`` posts the reviewers' pass on the PR and, at rigor ``normal``,
   turns on auto-merge; at rigor ``high`` the owner merges unless ``--delegated``.
@@ -71,7 +71,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-import process_policy
 from vault_markdown import parse_frontmatter
 
 TASKS = Path("workspace") / "docs" / "backlog" / "tasks"
@@ -2183,11 +2182,12 @@ def cmd_overlap(args, root: Path) -> dict:
 
 
 def pr_proof(root: Path) -> str:
-    """The ``pr_proof`` value in force; the default when the policy cannot be read."""
+    """``pr_proof`` from ``workspace/config.json``; ``remote_ci`` when unset or unreadable."""
     try:
-        return process_policy.effective_values(root / "workspace" / "docs")[0]["pr_proof"]["value"]
-    except (KeyError, OSError, ValueError):
+        value = json.loads((root / "workspace" / "config.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return "remote_ci"
+    return value.get("pr_proof", "remote_ci") if isinstance(value, dict) else "remote_ci"
 
 
 def proof_commands(root: Path, base: str) -> list[str]:
@@ -2288,7 +2288,7 @@ def cmd_open_pr(args, root: Path) -> dict:
         # Checked before the delivered-status commit, the only change open-pr adds.
         problems, record = proof_problems(root, args.task)
         if problems:
-            raise Refused("no local proof for this HEAD (switch pr_proof is local_record): " + "; ".join(problems))
+            raise Refused("no local proof for this HEAD (pr_proof is local_record): " + "; ".join(problems))
     if task_props(path).get("status") == "active":
         set_field(path, "status", "delivered")
     run("git", "add", str(path), cwd=root)

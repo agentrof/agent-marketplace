@@ -1293,22 +1293,6 @@ class ExecutionProfileTests(unittest.TestCase):
                     self.assertFalse((Path(self.temporary.name) / key).exists())
         pins.write_bytes(pinned)
 
-    def test_model_and_effort_lines_are_the_named_exception_to_default_equivalence(self):
-        # Pinned models change every role's settings with no Process Policy (#344),
-        # so invariant 18 and the release note must say they follow the catalog.
-        exception = ("the model and effort lines of rendered agents follow each host's model"
-                     " catalog and execution profile, not default equivalence")
-        repository = fixtures.REAL_REPOSITORY
-        architecture = " ".join((repository / "docs/architecture.md").read_text(
-            encoding="utf-8").split())
-        invariant = architecture.split(" 18. ", 1)[1]
-        self.assertIn(exception, invariant)
-        # The rule names both of its exceptions in one place.
-        self.assertIn("Two exceptions stand outside this rule:", invariant)
-        self.assertIn("a user-armed session entry such as autopilot ships without a switch,"
-                      " because without an active grant its hooks exit silently, no task binds it",
-                      invariant)
-
     def test_every_class_pins_the_owners_effort_and_the_docs_say_why(self):
         # A Claude Code role without `effort` follows the session's level,
         # `max` included, so every slot whose model takes an effort pins one.

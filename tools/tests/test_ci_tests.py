@@ -411,15 +411,15 @@ class CITestPlannerTests(unittest.TestCase):
     def test_known_runtime_and_regression_changes_select_dependency_closure(self):
         policy = ci_tests.policy_at(ci_tests.ROOT)
         ids, _hash = ci_tests.inventory(ci_tests.ROOT)
-        paths = ["plugins/software-engineering-team/scripts/process_policy.py",
-                 "tools/tests/test_process_policy.py",
+        paths = ["plugins/software-engineering-team/scripts/task_lane.py",
+                 "tools/tests/test_task_lane.py",
                  ".changes/delivery-regression.json",
-                 "dist/codex/software-engineering-team/scripts/process_policy.py",
-                 "dist/claude/software-engineering-team/scripts/process_policy.py"]
+                 "dist/codex/software-engineering-team/scripts/task_lane.py",
+                 "dist/claude/software-engineering-team/scripts/task_lane.py"]
         selected, mode, _reason = ci_tests.select_ids("impact", paths, policy, ids, ci_tests.ROOT)
         self.assertEqual(mode, "impact")
         self.assertLess(len(selected), len(ids))
-        self.assertTrue({test_id for test_id in ids if ".test_process_policy." in test_id} <= set(selected))
+        self.assertTrue({test_id for test_id in ids if ".test_task_lane." in test_id} <= set(selected))
         self.assertTrue({test_id for test_id in ids if ".test_writer_line_endings." in test_id} <= set(selected))
         unknown = paths + ["tools/tests/test_new_unknown.py"]
         self.assertEqual(ci_tests.select_ids("impact", unknown, policy, ids, ci_tests.ROOT)[1], "full")

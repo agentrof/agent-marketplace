@@ -12,15 +12,14 @@ with 0 critical and 0 major findings after at most one fix round; out-of-scope
 minors become one issue in the project's repository. At rigor `high` or on a
 risk flag the read-only `security-reviewer` joins; at `high` the owner merges.
 
-Every delegated role receives explicit inputs derived by
-`scripts/task_inputs.py` under `templates/task-input-contract.md`: the
-orchestrator names the complete input file set and expected output shape
-before invocation, and the owning role alone writes canonical files. Reviewer
+Every delegated role receives explicit inputs: the task file with its hashed
+`sources`, and the expected output shape, and the owning role alone writes
+canonical files. Reviewer
 replies are transient inputs, not project state. Independent readers may run
 in parallel; each host uses its native agent invocation and wait mechanism
 without changing these semantics.
 
-## Process switches
+## Fast lane
 
 The orchestrating session runs one task per change itself, with
 every role in the foreground: one task, one branch and one pull request to the
@@ -28,27 +27,15 @@ target branch, the project's CI plus one reviewer (two at task rigor `high`,
 where the owner merges), and auto-merge. The steps are in `flows/fast-lane.md`
 and `deliver/references/fast-lane.md`.
 
-Process switch `pr_proof` leaves a fast-lane task's proof to the project's CI
-at `remote_ci`. At `local_record`, `task_lane.py prove` runs the project's
-declared proof commands on HEAD and records each exit code and duration with
-the HEAD commit and a clean-tree flag, and `open-pr` refuses before pushing
-unless that record is green for the clean HEAD; the steps are in
-`deliver/references/switch-pr_proof-local_record.md`.
+`workspace/config.json` key `pr_proof` leaves a fast-lane task's proof to the
+project's CI at `remote_ci`, the default. At `local_record`, `task_lane.py
+prove` runs the project's declared proof commands on HEAD and records each
+exit code and duration with the HEAD commit and a clean-tree flag, and
+`open-pr` refuses before pushing unless that record is green for the clean
+HEAD; the steps are in `deliver/references/local-proof.md`.
 
 Every role starts from the sources its task file lists and greps
 `workspace/docs/` for gaps, per the constitution's section 5.
-Whether flow steps are timed is process switch `step_timing`. At `off`, the
-default, nothing is recorded. At `recorded`, the coordinator wraps each step
-and role spawn in `step_timing.py start` and `end` with its phase, reports an
-overrun at once and ends each run with a durable `step_timing.py report
---write`, as `deliver/references/switch-step_timing-recorded.md` defines.
-
-Whether steps are compared with a maximum is process switch `step_budgets`. At
-`off`, the default, none is. At `enforced`, each budgeted step's time is
-compared with its maximum in minutes, the owner's parameter or the package
-target in `configure/data/step-budgets.json`; a step may finish well under it,
-and only an exceeded maximum is reported, at once and never blocking, as
-`deliver/references/switch-step_budgets-enforced.md` defines.
 
 ## Autopilot
 
@@ -110,6 +97,5 @@ grant is personal and temporary: it turns on at night and off in the morning
 in the middle of any flow, without changing the policy or an approved
 document. It lives only in ignored runtime state under
 `.agentrof/agent-marketplace/.runtime/autopilot/`, and only its decisions reach
-tracked documents. With no grant every compiler output and every task binding
-stays the same: the entry delegates no task, so the task-input policy declares
-it under `session_entries`, outside the task routes.
+tracked documents. With no grant every output stays the same: the entry
+delegates no task.

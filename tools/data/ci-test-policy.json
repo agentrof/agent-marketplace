@@ -94,7 +94,7 @@
     },
     {
       "paths": [
-        "plugins/software-engineering-team/scripts/process_policy.py"
+        "plugins/software-engineering-team/scripts/task_lane.py"
       ],
       "groups": [
         "delivery"
@@ -121,11 +121,9 @@
         "tools.tests.test_host_models.*",
         "tools.tests.test_tier_models.*",
         "tools.tests.test_await_outputs.*",
-        "tools.tests.test_step_timing.*",
         "tools.tests.test_autopilot.*",
         "tools.tests.test_autopilot_guard.*",
         "tools.tests.test_workspace_guard.*",
-        "tools.tests.test_process_policy.*",
         "tools.tests.test_fast_lane_decoupling.*",
         "tools.tests.test_companions.*",
         "tools.tests.test_counts.*",
@@ -280,7 +278,6 @@
     "tools.tests.test_model_fallback",
     "tools.tests.test_package_refresh",
     "tools.tests.test_packaged_state_contract",
-    "tools.tests.test_process_policy",
     "tools.tests.test_fast_lane_decoupling",
     "tools.tests.test_companions",
     "tools.tests.test_project_config",
@@ -294,7 +291,6 @@
     "tools.tests.test_setup_project",
     "tools.tests.test_single_team_distribution",
     "tools.tests.test_smoke_plugin_installs",
-    "tools.tests.test_step_timing",
     "tools.tests.test_task_lane",
     "tools.tests.test_tier_models",
     "tools.tests.test_validator_contract",

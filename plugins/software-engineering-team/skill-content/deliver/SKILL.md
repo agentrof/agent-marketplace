@@ -27,6 +27,7 @@ model, tell the owner once and continue.
    and stop).
 2. Read `constitution.md`, which binds this session too, `flows/fast-lane.md`
    and [fast-lane](references/fast-lane.md) completely and run the flow's steps in order, from the project checkout,
-   with the request verbatim.
+   with the request verbatim. Read [local proof](references/local-proof.md)
+   only when `workspace/config.json` sets `pr_proof` to `local_record`.
 3. Report the task, its rigor, the pull request and its merge state, or the
    exact blocker.

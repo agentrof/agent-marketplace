@@ -21,7 +21,6 @@ TEAM = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
-import process_policy  # noqa: E402
 import task_lane  # noqa: E402
 
 try:
@@ -68,14 +67,6 @@ Export the month's invoices as CSV.
 
 - [[maps/backlog|Backlog]]
 """
-
-
-def run_policy(docs: Path, command: str, *argv: str) -> None:
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        code = process_policy.main([command, "--docs", str(docs), *argv])
-    if code:
-        raise AssertionError(output.getvalue())
 
 
 class TaskTests(unittest.TestCase):
@@ -439,19 +430,16 @@ class RoleRoutingTests(unittest.TestCase):
 
 @integration
 class LocalProofTests(unittest.TestCase):
-    """Switch `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
+    """Config `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
 
     def project(self, value: str | None = "local_record") -> Path:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
-        docs = root / "workspace" / "docs"
-        (docs / "delivery").mkdir(parents=True)
         if value:
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "pr_proof", "--value", value)
-            run_policy(docs, "approve")
+            (root / "workspace" / "config.json").write_text(json.dumps({"pr_proof": value}),
+                                                            encoding="utf-8")
         self.git(root, "init", "-q")
         self.git(root, "add", "-A")
         self.git(root, "commit", "-qm", "start")
@@ -488,10 +476,6 @@ class LocalProofTests(unittest.TestCase):
     def body(self, calls: list) -> str:
         create = next(call for call in calls if call[:3] == ("gh", "pr", "create"))
         return create[create.index("--body") + 1]
-
-    def test_the_switch_defaults_to_remote_ci(self):
-        spec = process_policy.load_registry()["pr_proof"]
-        self.assertEqual((spec["default"], spec["values"]), ("remote_ci", ["remote_ci", "local_record"]))
 
     def test_the_default_opens_the_pull_request_without_a_record(self):
         for value in (None, "remote_ci"):

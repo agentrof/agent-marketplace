@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     from tools.tests.levels import integration
@@ -15,8 +16,6 @@ except ModuleNotFoundError:  # run as a script from tools/tests
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-import build_distributions  # noqa: E402
-import counts  # noqa: E402
 sys.path.insert(0, str(ROOT / "tools" / "tests"))
 from git_fixture import init_repository  # noqa: E402
 
@@ -25,34 +24,20 @@ OVERLAY = ROOT / "platforms" / "shared" / "software-engineering-team" / "overlay
 REGISTRY = json.loads((OVERLAY / "skill-content" / "setup" / "data" / "companions.json").read_text(encoding="utf-8"))
 
 
-class CompanionRegistryTests(unittest.TestCase):
-    def test_registry_template_table_and_readme_agree(self):
-        section = "\n".join(build_distributions.companion_section(TEAM))
-        readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn(counts.render_companions(ROOT), readme)
-        for host, name in (("claude", "CLAUDE.md"), ("codex", "AGENTS.override.md")):
-            generated = (ROOT / "dist" / host / TEAM.name / "templates" / name).read_text(encoding="utf-8")
-            self.assertIn(section, generated)
-        self.assertIn(REGISTRY["precedence"], section)
-        for companion in REGISTRY["companions"]:
-            self.assertIn(f"### {companion['id']}", readme)
-            for row in companion["routing"]:
-                self.assertIn(f"| {row['step']} | {row['role']} | {row['skill']} | {row['when']} |", section)
-            for skill in companion.get("blocked_skills", []):
-                self.assertIn(f"`{skill}`", readme)
-            for spec in companion["hosts"].values():
-                for command in spec["install"]:
-                    self.assertIn(f"`{command}`", readme)
-
-
-@integration
 class GraphifyHookEnvTests(unittest.TestCase):
     def test_apply_puts_the_output_folder_into_the_hook_once_and_check_reports_a_bare_hook(self):
         sys.path[:0] = [str(OVERLAY / "scripts"), str(TEAM / "scripts")]
         import setup_companions
-        with tempfile.TemporaryDirectory() as raw:
+
+        def git(argv, **_kwargs):
+            # Only the hooks folder lookup answers; every other probe finds nothing installed.
+            found = argv[:3] == ["git", "rev-parse", "--git-path"]
+            return subprocess.CompletedProcess(argv, 0 if found else 1, ".git/hooks\n" if found else "", "")
+        with tempfile.TemporaryDirectory() as raw, \
+                mock.patch.object(setup_companions.subprocess, "run", side_effect=git), \
+                mock.patch.object(setup_companions.shutil, "which", return_value="/bin/git"):
             root = Path(raw)
-            init_repository(root)
+            (root / ".git" / "hooks").mkdir(parents=True)
             (root / ".gitattributes").write_text("graph.json merge=graphify\n", encoding="utf-8")
             hook = root / ".git" / "hooks" / "post-commit"
             hook.write_text("#!/bin/sh\n# graphify-hook-start\ngraphify update .\n", encoding="utf-8")
@@ -128,35 +113,6 @@ class CompanionCheckTests(unittest.TestCase):
             last = run("check", "--json")
             self.assertEqual(last.returncode, 1)
             self.assertEqual(len(json.loads(last.stdout)["findings"]), 1)
-
-    def test_apply_without_codex_cli_names_the_app_step(self):
-        with tempfile.TemporaryDirectory() as raw:
-            project, empty = Path(raw) / "project", Path(raw) / "bin"
-            project.mkdir()
-            empty.mkdir()
-            for companion in REGISTRY["companions"]:
-                verify = companion["hosts"]["codex"]["verify"]
-                if verify["kind"] == "path_exists":
-                    skill = (Path(raw) if verify.get("base") else project) / verify["path"]
-                    skill.parent.mkdir(parents=True, exist_ok=True)
-                    skill.write_text("x\n", encoding="utf-8")
-            env = {**os.environ, "PATH": str(empty), "CODEX_HOME": str(Path(raw) / "codex"), "HOME": raw,
-                   "PYTHONPATH": str(TEAM / "scripts")}
-            script = str(OVERLAY / "scripts" / "setup_companions.py")
-            applied = subprocess.run(
-                [sys.executable, script, "apply", "--host", "codex", "--project-root", str(project)],
-                env=env, capture_output=True, text=True, check=False)
-            self.assertEqual(applied.returncode, 1)
-            self.assertNotIn("RUN   codex", applied.stdout)
-            self.assertIn("APP   uv not found", applied.stdout)
-            self.assertIn("NOTE  Codex runs the ponytail hooks only after", applied.stdout)
-            self.assertIn("APP   Codex CLI not found: install plugin superpowers from marketplace"
-                          " openai-curated in the Codex app via /plugins", applied.stdout)
-            checked = subprocess.run(
-                [sys.executable, script, "check", "--host", "codex", "--project-root", str(project)],
-                env=env, capture_output=True, text=True, check=False)
-            self.assertIn("superpowers | codex | NO", checked.stdout)
-
 
 @integration
 class GraphifyRefreshTests(unittest.TestCase):

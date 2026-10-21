@@ -2286,6 +2286,13 @@ def proof_section(record: dict) -> str:
             f" finished {finished}.\n\n| Command | Result | Seconds |\n|---|---|---|\n{rows}\n")
 
 
+def proof_waived(root: Path, path: Path, base: str) -> bool:
+    """A knowledge task whose whole diff is Markdown changes no code a proof could cover."""
+    files = changed_files(root, base)
+    return task_props(path).get("task_kind") == "knowledge" and bool(files) \
+        and all(item.endswith(".md") for item in files)
+
+
 def cmd_open_pr(args, root: Path) -> dict:
     path = task_path(root, args.task)
     errors = lint(path)
@@ -2298,7 +2305,7 @@ def cmd_open_pr(args, root: Path) -> dict:
     if errors:
         raise Refused("task is not ready: " + "; ".join(errors))
     record = None
-    if pr_proof(root) == "local_record":
+    if pr_proof(root) == "local_record" and not proof_waived(root, path, args.base):
         # Checked before the delivered-status commit, the only change open-pr adds.
         problems, record = proof_problems(root, args.task)
         if problems:

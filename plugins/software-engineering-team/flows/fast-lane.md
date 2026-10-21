@@ -49,8 +49,8 @@ the answer with `role-check --task <id> --role <role> --verdict go|changes
 while a `require` role has no verdict.
 
 1. Request. `start --title "<short title>" --request-file <file>` with the
-   request verbatim (`--source-story ST-### --covers <numbers>`, `--epic
-   EP-###` or `--delivery DLV-###` when they apply). It pushes
+   request verbatim (`--source-story ST-### --covers <numbers>` or `--epic
+   EP-###` when they apply). It pushes
    `task/<id>-<slug>` from `origin/main` and writes the skeleton with
    `requested_at`, a proposed rigor, `risks`, `applied_skills` and `sources`
    as `path@<sha256 prefix>`.

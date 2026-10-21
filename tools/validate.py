@@ -1625,93 +1625,6 @@ def check_project_instruction_contract(
         ))
 
 
-def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
-    """Any shipped space-schema.json must be well-formed: the compiler is
-    parameterized by it, so a malformed schema is a broken product."""
-    for plugin in plugin_dirs(tree):
-        for skill in skill_dirs(plugin):
-            path = skill / "data" / "space-schema.json"
-            if not path.is_file():
-                continue
-            def err(message: str, fix: str) -> None:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "ba_schema_shape", message, fix))
-            try:
-                schema = json.loads(read_text(path))
-            except json.JSONDecodeError as exc:
-                err(f"schema is not valid JSON: {exc}", "fix the JSON syntax")
-                continue
-            if not isinstance(schema.get("schema_version"), int):
-                err("schema_version must be an integer",
-                    "version the schema so the compiler can refuse unknowns")
-            doc_types = schema.get("doc_types")
-            if not isinstance(doc_types, dict) or not doc_types:
-                err("doc_types must be a non-empty object",
-                    "declare every document type the compiler may see")
-                continue
-            statuses = schema.get("statuses", [])
-            if "approved" not in statuses:
-                err("statuses must include 'approved'",
-                    "gates hinge on the approved status")
-            try:
-                re.compile(schema.get("id_format", ""))
-            except re.error:
-                err("id_format does not compile as a regex",
-                    "id_format is the id law; it must compile")
-            row_schemas = schema.get("row_schemas", {})
-            all_columns = {c for row in row_schemas.values()
-                           if isinstance(row, dict)
-                           for c in (row.get("columns") or [])}
-            citation_columns = schema.get("id_citation_columns")
-            if not (isinstance(citation_columns, list) and citation_columns
-                    and all(isinstance(c, str) and c
-                            for c in citation_columns)):
-                err("id_citation_columns must be a non-empty list of column"
-                    " names",
-                    "the columns whose cells cite ids as wikilinks are"
-                    " schema-listed, never inferred")
-            else:
-                for column in citation_columns:
-                    if column not in all_columns:
-                        err(f"id_citation_column '{column}' appears in no"
-                            " row schema",
-                            "every citation column is a real row-schema"
-                            " column")
-            seen_prefixes: dict[str, str] = {}
-            for type_name, spec in sorted(doc_types.items()):
-                for key, expected in (("required_sections", list),
-                                      ("mints", list), ("gate_blocking", bool)):
-                    if not isinstance(spec.get(key), expected):
-                        err(f"doc type '{type_name}' key '{key}' must be"
-                            f" {expected.__name__}",
-                            "every doc type declares sections, mints and gating")
-                location = spec.get("location")
-                if isinstance(location, dict) \
-                        and location.get("kind") == "folder":
-                    suffix = location.get("filename_suffix")
-                    if not (isinstance(suffix, str) and suffix):
-                        err(f"doc type '{type_name}' folder location must"
-                            " carry a non-empty filename_suffix",
-                            "typed content files carry a -<suffix>; the"
-                            " suffix is schema data, never implied")
-                for kind in spec.get("mints", []) or []:
-                    if str(kind).lower() not in row_schemas:
-                        err(f"doc type '{type_name}' mints '{kind}' which has"
-                            " no row schema",
-                            "every minted kind carries a row schema")
-            for kind, row in sorted(row_schemas.items()):
-                columns = row.get("columns", [])
-                if not isinstance(columns, list) or "id" not in columns:
-                    err(f"row schema '{kind}' must list columns including 'id'",
-                        "rows are the only carrier of minted ids")
-                section = row.get("section", "")
-                if section in seen_prefixes:
-                    err(f"row schema '{kind}' reuses section '{section}'"
-                        f" already claimed by {seen_prefixes[section]}",
-                        "each id kind mints in its own section token")
-                seen_prefixes[section] = kind
-
-
 def _under_plugin_templates(tree: Tree, path: Path) -> bool:
     try:
         parts = path.relative_to(tree.plugins_dir).parts
@@ -2150,7 +2063,6 @@ CHECKS = {
     "template_placeholders": check_template_placeholders,
     "project_instruction_contract": check_project_instruction_contract,
     "spawn_shape_constitution": check_spawn_shape_constitution,
-    "ba_schema_shape": check_ba_schema_shape,
     "wikilink_ban": check_wikilink_ban,
     "version_sync": check_version_sync,
     "model_config_shape": check_model_config_shape,

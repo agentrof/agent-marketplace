@@ -465,9 +465,6 @@ VALIDATOR_BUILDERS = {
     "spawn_shape_constitution": lambda root: append(
         root, f"{PLUGIN_ROOT}/skill-content/deliver/references/fast-lane.md",
         "\n## Spawn Shape\n\nSpawn the reviewer with the named files.\n"),
-    "ba_schema_shape": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/business-analysis/data/space-schema.json",
-        lambda value: value.update(schema_version="one")),
     "wikilink_ban": lambda root: append(root, FLOW, "\nSee [[ghost]].\n"),
     "version_sync": lambda root: edit_json(
         root, "versions.json",

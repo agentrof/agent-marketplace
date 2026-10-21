@@ -45,9 +45,8 @@ Every implementation request runs through this script:
   opened and causes recorded with ``rework``, classified by ``rework-causes.json``; causes that
   recur become lessons (``--write-lessons``), memory candidates and process levers. Each run appends every
   merged task's cost and waits to the history once, and later runs read that
-  row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``;
-  ``--write-report`` keeps a Delivery's summary under
-  ``workspace/docs/backlog/retrospectives/``. ``file-issues`` opens one
+  row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``.
+  ``file-issues`` opens one
   issue per proposal the user approved, in the project's own repository.
 
 Nothing is written after a merge, and no file is shared between tasks: each
@@ -74,7 +73,6 @@ from urllib.parse import quote
 from vault_markdown import parse_frontmatter
 
 TASKS = Path("workspace") / "docs" / "backlog" / "tasks"
-RETROSPECTIVES = Path("workspace") / "docs" / "backlog" / "retrospectives"
 EXPORT = Path(".agentrof") / "retrospective"
 TASK_TYPE = "task"
 TASK_STATUSES = ("active", "delivered", "dropped")
@@ -90,7 +88,6 @@ EPIC_RE = re.compile(r"^EP-[0-9]{3,}$")
 STORY_RE = re.compile(r"^ST-[0-9]{3,}$")
 STORIES = Path("workspace") / "docs" / "backlog" / "epics"
 BOARD = EXPORT / "board.md"
-DELIVERY_RE = re.compile(r"^DLV-[0-9]{3,}$")
 AC_RANGE = (3, 8)
 # Every build task proves its change is wired into the running system and names its docs change.
 LIVE_WIRING = "Live wiring:"
@@ -427,12 +424,11 @@ def role_minutes(task: dict) -> dict:
     return {"checks": len(checks), "minutes": round(minutes, 1)}
 
 
-def task_text(task: str, title: str, request: str, requested_at: str, delivery: str,
+def task_text(task: str, title: str, request: str, requested_at: str,
               rigor: str, epic: str = "", source_story: str = "", covers: list[int] | None = None,
               kind: str = "build", size: str = "s", fixes: str = "", risks: list[str] = (),
               skills: list[str] = (), sources: list[str] = ()) -> str:
-    grouped = f"delivery: {delivery}\n" if delivery else ""
-    grouped += f"fixes: {fixes}\n" if fixes else ""
+    grouped = f"fixes: {fixes}\n" if fixes else ""
     facts = "".join(f"{key}:{' ' if items else ''}{', '.join(items)}\n"
                     for key, items in (("risks", risks), ("sources", sources), ("applied_skills", skills)))
     if kind == "knowledge":
@@ -492,8 +488,6 @@ def lint(path: Path) -> list[str]:
                 errors.append(f"{key} must be an ISO UTC time")
     if "requested_at" not in props:
         errors.append("requested_at is required")
-    if props.get("delivery") and not DELIVERY_RE.match(str(props["delivery"])):
-        errors.append("delivery must be DLV-<number>")
     if props.get("fixes") and not ID_RE.match(str(props["fixes"])):
         errors.append("fixes must be TK-<number>")
     if props.get("epic") and not EPIC_RE.match(str(props["epic"])):
@@ -845,7 +839,7 @@ def task_row(task: dict, pr: dict | None) -> dict:
         steps["ci"] = pr["proof_minutes"]
     known = {step: value for step, value in steps.items() if value is not None}
     return {"task_id": task["id"], "title": task.get("title", ""), "size": task.get("size", ""),
-            "rigor": task.get("rigor", "normal"), "delivery": task.get("delivery", ""),
+            "rigor": task.get("rigor", "normal"),
             "kind": task.get("task_kind", "build"), "story": task.get("source_story", ""),
             "fixes": task.get("fixes", ""), "role_checks": role_minutes(task),
             "quality": {key: (pr or {}).get(key) for key in QUALITY_KEPT},
@@ -945,12 +939,10 @@ def attach_sessions(rows: list[dict], tasks: list[dict], events: list[dict], dee
     return {"tokens": rest["tokens"], "usd": rest["usd"]}
 
 
-def select(tasks: list[dict], delivery: str | None = None, since: str | None = None,
+def select(tasks: list[dict], since: str | None = None,
            recent: int | None = None, at: datetime | None = None) -> list[dict]:
-    """The tasks in scope: one Delivery, a time window or the latest tasks."""
+    """The tasks in scope: a time window or the latest tasks."""
     chosen = [task for task in tasks if task.get("requested_at")]
-    if delivery:
-        chosen = [task for task in chosen if task.get("delivery") == delivery]
     if since:
         match = re.fullmatch(r"([0-9]+)([dh])", since)
         if not match:
@@ -959,7 +951,7 @@ def select(tasks: list[dict], delivery: str | None = None, since: str | None = N
         cutoff = (at or datetime.now(timezone.utc)).timestamp() - hours * 3600
         chosen = [task for task in chosen if parse_time(task["requested_at"]).timestamp() >= cutoff]
     chosen.sort(key=lambda task: parse_time(task["requested_at"]))
-    if recent and not (delivery or since):
+    if recent and not since:
         chosen = chosen[-recent:]
     return chosen
 
@@ -1747,7 +1739,7 @@ def export(data: dict, fmt: str) -> str:
     if fmt == "json":
         return json.dumps(data, indent=2) + "\n"
     buffer = io.StringIO()
-    fields = ["task_id", "title", "size", "rigor", "delivery", "pr", "requested_at",
+    fields = ["task_id", "title", "size", "rigor", "pr", "requested_at",
               "approved_at", "pr_opened", "ci_green", "review", "merged", "total", *STEPS, *WAITS,
               "agents", "output_tokens", "usd", "input_tokens", "cache_write_tokens", "cache_read_tokens",
               "spawns", "startup_context", "main_usd", *QUALITY_KEPT, "fixes", "fixed_by", "story",
@@ -1767,13 +1759,6 @@ def export(data: dict, fmt: str) -> str:
                          "startup_context": round(statistics.mean(spawn["startup_context"] for spawn in spawns))
                          if spawns else "", "main_usd": (cost.get("main") or {}).get("usd", "")})
     return buffer.getvalue()
-
-
-def retrospective_note(data: dict, delivery: str) -> str:
-    return (f"---\ntype: retrospective\ntitle: {json.dumps(delivery + ' retrospective')}\n"
-            f"status: final\ndelivery: {delivery}\ntags:\n  - doc/retrospective\n"
-            f"  - status/final\n---\n# {delivery} retrospective\n\n## Summary\n\n```text\n"
-            f"{render(data)}\n```\n\n<!-- sec: nav -->\n## Navigation\n")
 
 
 def history(root: Path) -> list[dict]:
@@ -1843,7 +1828,7 @@ def gather(root: Path, args) -> dict:
     for path in sorted((root / TASKS).glob("tk-*.md")):
         tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path),
                       "rework_notes": rework_notes(path)})
-    chosen = select(tasks, args.delivery, args.since, args.recent)
+    chosen = select(tasks, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
     causes = rework_causes(root)
     graded = {} if getattr(args, "rescan", False) else kept_quality(root)
@@ -1873,7 +1858,7 @@ def gather(root: Path, args) -> dict:
     for row in rows:
         if row["total"] is not None and row["task_id"] in kept:
             row.update(cost=kept[row["task_id"]]["cost"], waits=kept[row["task_id"]]["waits"])
-    scope = args.delivery or (f"since {args.since}" if args.since else f"latest {args.recent}")
+    scope = f"since {args.since}" if args.since else f"latest {args.recent}"
     return {**report(rows, scope, previous_run(root, scope), unattributed, extra, causes),
             "cost_method": cost_method(root)}
 
@@ -2027,8 +2012,6 @@ def cmd_board(args, root: Path):
 # --- commands --------------------------------------------------------------
 
 def cmd_start(args, root: Path) -> dict:
-    if args.delivery and not DELIVERY_RE.match(args.delivery):
-        raise Refused("--delivery must be DLV-<number>")
     requested_at = args.at or now()
     parse_time(requested_at)
     request = Path(args.request_file).read_text(encoding="utf-8") if args.request_file else args.request
@@ -2073,7 +2056,7 @@ def cmd_start(args, root: Path) -> dict:
     # The docs the task relies on: the ones it is given and the existing docs its request names.
     named = sorted(name for name in files if name.startswith("workspace/docs/") and (root / name).is_file())
     sources = hashed_sources(root, list(dict.fromkeys([*(getattr(args, "source", None) or []), *named])))
-    path.write_bytes((task_text(task, args.title, request, requested_at, args.delivery or "",
+    path.write_bytes((task_text(task, args.title, request, requested_at,
                               rigor, epic, args.source_story or "", covers,
                               kind, args.size, getattr(args, "fixes", None) or "",
                               risks, skills, sources)).encode("utf-8"))
@@ -2366,13 +2349,6 @@ def cmd_report(args, root: Path):
         lessons = write_lessons(root, data["rework"], rework_causes(root))
         written.append(lessons["path"])
         data = {**data, "lessons": lessons}
-    if args.write_report:
-        if not args.delivery:
-            raise Refused("--write-report needs a Delivery scope, such as DLV-007")
-        target = root / RETROSPECTIVES / f"{args.delivery.lower()}-retrospective.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(retrospective_note(data, args.delivery).encode("utf-8"))
-        written.append(str(target.relative_to(root)))
     if args.json:
         return {**data, "written": written}
     return render(data) + "".join(f"\nWrote {path}" for path in written)
@@ -2445,7 +2421,6 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--request-file")
     start.add_argument("--base", default="main")
     start.add_argument("--at")
-    start.add_argument("--delivery", help="group the task under a Delivery label, such as DLV-007")
     start.add_argument("--epic", help="the epic the task belongs to, such as EP-003")
     start.add_argument("--source-story", help="the backlog story the task delivers part of, such as ST-012")
     start.add_argument("--covers", help="comma-separated criterion numbers of the source story")
@@ -2496,7 +2471,6 @@ def main(argv: list[str] | None = None) -> int:
     retro = sub.add_parser("report")
     retro.add_argument("--json", action="store_true")
     retro.add_argument("--export", choices=("csv", "json"))
-    retro.add_argument("--write-report", action="store_true")
     retro.add_argument("--rescan", action="store_true",
                        help="price every task from the transcripts again and save the result as its newest row")
     retro.add_argument("--write-lessons", action="store_true",
@@ -2512,7 +2486,6 @@ def main(argv: list[str] | None = None) -> int:
     issues = sub.add_parser("file-issues")
     issues.add_argument("--ids", required=True, help="comma-separated proposal numbers or ids")
     for scoped in (retro, issues):
-        scoped.add_argument("--delivery")
         scoped.add_argument("--since")
         scoped.add_argument("--recent", type=int, default=20)
         scoped.add_argument("--no-sessions", action="store_true",

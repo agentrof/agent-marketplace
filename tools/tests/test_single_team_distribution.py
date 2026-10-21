@@ -185,7 +185,7 @@ class SingleTeamDistributionTests(unittest.TestCase):
 
         for relative in (
             "scripts/task_lane.py",
-            "skill-content/business-analysis/data/space-schema.json",
+            "scripts/project_config.py",
         ):
             expected = (self.root / "plugins" / fixtures.PLUGIN / relative).read_bytes()
             for host in build_distributions.HOSTS:

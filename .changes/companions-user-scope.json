@@ -1,4 +1,0 @@
-{
-  "summary": "Install companions at user level on both hosts and require an enabled user-scoped plugin record.",
-  "components": {"software-engineering-team": "patch"}
-}

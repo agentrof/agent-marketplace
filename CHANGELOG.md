@@ -200,3 +200,8 @@
 - The retrospective bounds its figures (filed at most found, shares at most 100%, merge refuses an issue number as a count), stops counting merges from main, the deliver-docs commit and the first feature commit as rework and classifies commit prefixes and role verdicts, adds an unaccounted column and reasons for missing steps and cost, proposes one lever per cause only from kinds with 5 merged tasks, calibrates per-size medians from history, flags a price-table change, and gives every duration a verdict and a baseline.
 - Role prompts gain compact Rules lists (identity source, membership filters, deadlines, idempotency, hashed tokens, secrets from files, test tiers, flaky tests, restart survival); the relational skill adds a tenant isolation reference, the environment skill covers Helm and kind with a cluster patterns reference, and the review checklists gain deadline, idempotency, docs-delta, file and browser-session checks.
 - Setup gains a companions check and apply step for optional third-party skills, driven by one registry that also generates the Companion skills routing table in the project instructions and the README section.
+
+## 2026.10.8
+
+- Verify companion skills through the active Codex catalog and host loader.
+- Install companions at user level on both hosts and require an enabled user-scoped plugin record.

@@ -213,13 +213,12 @@ class RuntimeFloorTests(unittest.TestCase):
         for path in (LAUNCHER, FLOOR):
             shutil.copy2(path, root / "scripts" / path.name)
         broken = "match = 'this file is not Python' )\n"
-        for target in ("scripts/team_guard.py", "scripts/model_fallback.py",
+        for target in ("scripts/team_guard.py",
                        "skill-content/autopilot/scripts/autopilot.py"):
             (root / target).parent.mkdir(parents=True, exist_ok=True)
             (root / target).write_text(broken, encoding="utf-8")
         launcher = str(root / "scripts/hook_launcher.py")
         cases = [(["scripts/team_guard.py", "register"], {}, 0),
-                 (["scripts/model_fallback.py"], {"tool_name": "Agent"}, 0),
                  (["skill-content/autopilot/scripts/autopilot.py", "hook", "user-prompt", "--entry", ENTRY],
                   {"prompt": f"${ENTRY} on"}, 0)]
         for arguments, payload, expected in cases:

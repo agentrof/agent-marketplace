@@ -144,7 +144,6 @@ SYSTEM_HOMES = frozenset({"runner", "node", "linuxbrew", "vscode", "ubuntu",
 # in that file.
 HOME_PATH_FIXTURES = {
     "tools/tests/test_issue_report.py": frozenset({"fixture"}),
-    "tools/tests/test_model_fallback.py": frozenset({"dev"}),
     "tools/tests/test_validator_contract.py": frozenset({"fixture"}),
 }
 
@@ -1096,7 +1095,7 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
                 "Claude",
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "model_fallback.py",
+                ("team_guard.py register",
                  "autopilot_guard.py pre", "autopilot_guard.py post", "workspace_guard.py"),
             ),
             (

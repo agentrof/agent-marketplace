@@ -171,27 +171,11 @@ stays `unverified`. A rendered role on the session's model
 carries `model: inherit` and keeps its `effort`, and its stamp keeps the
 settings the project config resolves, so the session start check finds it
 current. A model policy already substitutes the main conversation's model
-with Claude Code's own warning. For a model that Claude Code's wording names
-as not found, refused or too new for the installed Claude Code, the host
-contract has the coordinator tell the user and, when the failed run changed
-nothing, that is its task is read-only or the `task_inputs.py` invocation
-that derived its manifest still passes with `--expected-hash`, which compares
-the content of its inputs and of every modified or new source it covers,
-spawn the same role once more with `model` set to the session's family alias,
-which lands on the session's exact model, and stop if that spawn fails too; a
-writer that already changed files is never spawned again on a partly changed
-tree. `git status` cannot judge that: a further edit to an already modified
-file, or a new file in an untracked folder, leaves its output as it was, and
-a flow that commits only at its end runs its fix passes on modified files.
-The manifest every entry derives before it delegates a role is the record of
-the tree before the run, so no extra step precedes a spawn. The Claude plugin's
-hook on `Agent`, `model_fallback.py` under `PostToolUseFailure` and
-`PostToolUse`, adds the warning and that instruction to a foreground failure
-and warns when a role started on another model than its pin. It matches only
-Claude Code's model wording, since a subagent's error detail names the pin
-for any API error, and stays silent for a spawn that passes `model` and under
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so a model the user chose never triggers
-it and the re-spawn never repeats.
+with Claude Code's own warning. For a spawn whose pinned model Claude Code
+names as not found, refused or too new, the host contract has the coordinator
+tell the user and, when the failed run changed nothing, spawn the same role
+once more with `model` set to the session's family alias, and stop if that
+spawn fails too; a writer that already changed files is never spawned again.
 
 On Codex the binary is the nearest `codex` process above setup, since Codex
 exports no variable that names it, else the target of the `apply_patch`
@@ -203,17 +187,10 @@ otherwise the output of `codex debug models`, which reflects no account
 inside the command sandbox or when it equals `codex debug models --bundled`.
 The role files of an `unavailable` model omit `model` and keep
 `model_reasoning_effort`. Codex has no hook event for a failed role, so the
-run-time warning comes from the host contract: when a spawned role still
-ends in `Agent errored: ...` that names its pinned model as unknown,
-unsupported, not found or not supported with the account, the coordinator
-tells the user and, when the failed run changed nothing, runs
-`generate_codex_project.py apply --scope local --inherit-model <model>` and
-starts the same role again. That run-time record stays until
-`--restore-model <model>` or `--execution-profile auto`. When that start
-errors too, the coordinator runs it with `--restore-model <model>`, which
-renders the pin again, before it stops, so no run-time record stays that no
-successful start backs. A rate limit or another error that names the model
-moves no role. `--execution-profile auto` restores the pins and checks them
+run-time rule is the host contract's: when a spawned role ends in `Agent
+errored: ...` naming its pinned model and the failed run changed nothing, the
+coordinator applies `--execution-profile inherit` and starts the role once
+more; `--execution-profile auto` restores the pins and checks them
 again.
 
 A project may override the package per class slot and per role, never the

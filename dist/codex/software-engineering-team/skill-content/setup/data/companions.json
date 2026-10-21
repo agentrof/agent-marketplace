@@ -1,0 +1,266 @@
+{
+  "schema_version": 1,
+  "precedence": "The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.",
+  "notes": [
+    "Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph is `--graph .agentrof/graphify/docs/graph.json`); otherwise read the task file's sources and grep."
+  ],
+  "companions": [
+    {
+      "id": "superpowers",
+      "repo": "https://github.com/obra/superpowers",
+      "license": "MIT",
+      "purpose": "Debugging, self-verification, review intake and skill-writing disciplines.",
+      "why": "Four skills add method the team lacks; the rest duplicate the deliver flow and stay blocked.",
+      "skill_namespace": "superpowers",
+      "blocked_skills": [
+        "brainstorming",
+        "writing-plans",
+        "executing-plans",
+        "subagent-driven-development",
+        "using-git-worktrees",
+        "finishing-a-development-branch",
+        "test-driven-development",
+        "dispatching-parallel-agents",
+        "requesting-code-review",
+        "diagnosing-superpowers"
+      ],
+      "blocked_reason": "They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.",
+      "env": [
+        {"name": "SUPERPOWERS_DISABLE_TELEMETRY", "value": "1"}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add obra/superpowers-marketplace",
+            "claude plugin install superpowers@superpowers-marketplace --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "superpowers@superpowers-marketplace"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "codex plugin add superpowers@openai-curated"
+          ],
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "superpowers@openai-curated"}
+        }
+      },
+      "routing": [
+        {"step": "Write code, test fails or bug task", "role": "developer roles", "skill": "superpowers:systematic-debugging", "when": "a failure whose cause is not obvious"},
+        {"step": "Self-check before handoff", "role": "developer roles", "skill": "superpowers:verification-before-completion", "when": "always before reporting done"},
+        {"step": "Fix pass", "role": "same writer", "skill": "superpowers:receiving-code-review", "when": "applying review findings"},
+        {"step": "Team skill authoring", "role": "plugin maintainers", "skill": "superpowers:writing-skills", "when": "writing or changing a skill"}
+      ]
+    },
+    {
+      "id": "humanizer",
+      "repo": "https://github.com/blader/humanizer",
+      "license": "MIT",
+      "purpose": "Removes AI-writing tells from prose.",
+      "why": "Pull request bodies, documents and issues read as written by the team, without changing what they say.",
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add blader/humanizer",
+            "claude plugin install humanizer@humanizer --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "humanizer@humanizer"}
+        },
+        "codex": {
+          "scope": "project",
+          "install": [
+            "npx skills add blader/humanizer --agent codex -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md"}
+        }
+      },
+      "routing": [
+        {"step": "PR body, docs, README, upstream issue", "role": "writer, deliver", "skill": "humanizer, embedded mode", "when": "prose deliverables; not commit messages"}
+      ]
+    },
+    {
+      "id": "security-audit",
+      "repo": "https://github.com/cloudflare/security-audit-skill",
+      "license": "MIT",
+      "purpose": "Security review lens with a tenant data isolation reference.",
+      "why": "High-rigor reviews get a security method; guidance mode writes nothing.",
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".claude/skills/security-audit/SKILL.md"}
+        },
+        "codex": {
+          "scope": "project",
+          "install": [
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md"}
+        }
+      },
+      "routing": [
+        {"step": "Review, high rigor", "role": "security-reviewer", "skill": "security-audit guidance mode", "when": "auth, tenant data, secrets, money, deletion"},
+        {"step": "Full security audit", "role": "owner request only", "skill": "security-audit full mode", "when": "explicit audit request, reports outside the repo"}
+      ]
+    },
+    {
+      "id": "diagram-design",
+      "repo": "https://github.com/cathrynlavery/diagram-design",
+      "license": "MIT",
+      "purpose": "Architecture, delta, sequence and ER diagrams.",
+      "why": "Structural architecture changes get a drawn delta; no telemetry.",
+      "files": [
+        {"path": ".diagram-design", "content": "profile: default\n"}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add cathrynlavery/diagram-design",
+            "claude plugin install diagram-design@diagram-design --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "diagram-design@diagram-design"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "codex plugin marketplace add cathrynlavery/diagram-design",
+            "codex plugin add diagram-design@diagram-design"
+          ],
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "diagram-design@diagram-design"}
+        }
+      },
+      "routing": [
+        {"step": "Architecture change", "role": "software-architect", "skill": "diagram-design (architecture, architecture-delta, sequence, ER)", "when": "a structural change to system-architecture"}
+      ]
+    },
+    {
+      "id": "impeccable",
+      "repo": "https://github.com/pbakaus/impeccable",
+      "license": "Apache-2.0",
+      "purpose": "Frontend design craft and read-only UI critique.",
+      "why": "Closes the frontend design quality gap; installed without hooks and with telemetry off.",
+      "env": [
+        {"name": "IMPECCABLE_CONTEXT_DIR", "value": "workspace/experience-design"},
+        {"name": "IMPECCABLE_NO_TELEMETRY", "value": "1"}
+      ],
+      "files": [
+        {"path": ".impeccable/config.json", "content": {"telemetry": false, "hook": {"enabled": false}}}
+      ],
+      "forbidden_paths": ["DESIGN.md", "PRODUCT.md", "docs/DESIGN.md", "docs/PRODUCT.md"],
+      "forbidden_reason": "DESIGN.md and PRODUCT.md live only in workspace/experience-design.",
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "npx impeccable install --providers=claude --project --no-hooks -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".claude/skills/impeccable/SKILL.md"}
+        },
+        "codex": {
+          "scope": "project",
+          "install": [
+            "npx impeccable install --providers=codex --project --no-hooks -y"
+          ],
+          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md"}
+        }
+      },
+      "routing": [
+        {"step": "Write UI", "role": "frontend-developer", "skill": "impeccable (craft, polish, harden, adapt)", "when": "the task touches UI"},
+        {"step": "Review, UI", "role": "code-reviewer", "skill": "impeccable detect and critique, read-only", "when": "the change touches UI"}
+      ]
+    },
+    {
+      "id": "graphify",
+      "repo": "https://github.com/Graphify-Labs/graphify",
+      "license": "Apache-2.0",
+      "purpose": "Knowledge graph of the project's code and documents.",
+      "why": "Roles find context with a graph query instead of reading many files; the code graph refreshes through git hooks on commit, checkout and merge, the docs graph in the background after deliver merges a task.",
+      "steps": [
+        {
+          "name": "cli",
+          "scope": "user",
+          "install": ["uv tool install graphifyy"],
+          "requires": {"command": "uv", "hint": "uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply."},
+          "verify": {"kind": "command", "command": "graphify --version"}
+        },
+        {
+          "name": "git-hook",
+          "scope": "project",
+          "install": ["graphify hook install"],
+          "verify": {"kind": "command", "command": "graphify hook status", "contains": "post-commit: installed"},
+          "hook_env": {
+            "hooks": ["post-commit", "post-checkout", "post-merge", "post-rewrite"],
+            "marker": "graphify",
+            "line": "export GRAPHIFY_OUT=.agentrof/graphify"
+          }
+        }
+      ],
+      "env": [
+        {"name": "GRAPHIFY_OUT", "value": ".agentrof/graphify"}
+      ],
+      "files": [
+        {"path": ".agentrof/graphify/.gitignore", "content": "*\n"},
+        {"path": "workspace/docs/.graphifyignore", "content": "# The docs graph reads Markdown only.\n*\n!*/\n!*.md\n", "if_missing": true}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "user",
+          "install": [
+            "graphify install --platform claude"
+          ],
+          "verify": {"kind": "path_exists", "path": ".claude/skills/graphify/SKILL.md", "base": "home"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "graphify install --platform codex"
+          ],
+          "verify": {"kind": "path_exists", "path": ".codex/skills/graphify/SKILL.md", "base": "home"}
+        }
+      },
+      "routing": [
+        {"step": "Find context", "role": "all roles", "skill": "graphify query, path, explain", "when": "`.agentrof/graphify` holds a graph"},
+        {"step": "Docs graph refresh", "role": "deliver", "skill": "graphify_refresh.py in the background", "when": "a merged task changed Markdown under workspace/docs"}
+      ]
+    },
+    {
+      "id": "ponytail",
+      "repo": "https://github.com/DietrichGebert/ponytail",
+      "license": "MIT",
+      "purpose": "Smallest complete change, plain-language review and a shortcut debt ledger.",
+      "why": "Developer roles write less code without dropping callers, tests or safety; review and retrospective get its review and debt reports.",
+      "env": [
+        {"name": "PONYTAIL_DEFAULT_MODE", "value": "full"},
+        {"name": "PONYTAIL_SUBAGENT_MATCHER", "value": "^software-engineering-team(:|-)(backend-developer|frontend-developer|devops-engineer)(-mechanical)?$"}
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "project",
+          "install": [
+            "claude plugin marketplace add DietrichGebert/ponytail",
+            "claude plugin install ponytail@ponytail --scope project"
+          ],
+          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "ponytail@ponytail"}
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "codex plugin marketplace add DietrichGebert/ponytail",
+            "codex plugin add ponytail@ponytail"
+          ],
+          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "ponytail@ponytail"},
+          "note": "Codex runs the ponytail hooks only after the owner trusts them once in /hooks."
+        }
+      },
+      "routing": [
+        {"step": "Write code", "role": "developer roles", "skill": "ponytail, level full", "when": "always"},
+        {"step": "Review", "role": "code-reviewer", "skill": "/ponytail-review", "when": "inside its single review pass"},
+        {"step": "Retrospective", "role": "retrospective", "skill": "/ponytail-debt", "when": "report the shortcut debt ledger"}
+      ]
+    }
+  ]
+}

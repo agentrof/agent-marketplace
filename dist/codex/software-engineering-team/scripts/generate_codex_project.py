@@ -43,16 +43,9 @@ READ_ONLY_TOOLS = {"Read", "Grep", "Glob"}
 # inherit: without `model`, with their own effort, and their files record
 # why. Apply judges every pinned model against this Codex's own model list
 # and records an unavailable one, so check and inspect render it the same;
-# the next apply judges it again. A run-time record, which --inherit-model
-# writes, stays until --restore-model for that model or --execution-profile
-# auto.
+# the next apply judges it again.
 UNAVAILABLE_RE = re.compile(r"^# Model unavailable: (\S+)$")
-FALLBACK_RE = re.compile(r"^# Model fallback: (\S+)$")
 AGENTS_DIR = Path(".codex") / "agents"
-FALLBACK_REASONS = {
-    "requested": "is marked unavailable by --inherit-model",
-    "recorded": "is recorded unavailable by --inherit-model in the managed agent files",
-}
 SESSION_PHRASE = "the parent session's model"
 # Codex loads a role file each time it spawns the role, and the project
 # instructions only when a session starts.
@@ -102,13 +95,11 @@ def parse_agent(path: Path) -> tuple[dict[str, str], str]:
 def agent_toml(
     fields: dict[str, str], body: str, team: str,
     profile: str = DEFAULT_EXECUTION_PROFILE,
-    fallbacks: frozenset = frozenset(),
     unavailable: frozenset = frozenset(),
     stamp: Optional[str] = None,
 ) -> str:
-    """Render one role file; ``fallbacks`` are the models of a run-time record,
-    ``unavailable`` those a model check judged unavailable and ``stamp`` the
-    header line of the settings it renders from."""
+    """Render one role file; ``unavailable`` are the models a model check judged
+    unavailable and ``stamp`` the header line of the settings it renders from."""
     name = fields.get("name", "")
     description = fields.get("description", "")
     if not name or not description:
@@ -127,15 +118,12 @@ def agent_toml(
         + "- Return only the declared output contract and the required SELF-CHECK.\n"
     )
     model = fields.get("model")
-    fallback = profile == DEFAULT_EXECUTION_PROFILE and model in fallbacks | unavailable
+    fallback = profile == DEFAULT_EXECUTION_PROFILE and model in unavailable
     lines = [owner(team)]
     if profile != DEFAULT_EXECUTION_PROFILE:
         lines.append(f"# Execution profile: {profile}")
-    else:
-        if model in fallbacks:
-            lines.append(f"# Model fallback: {model}")
-        if model in unavailable:
-            lines.append(f"# Model unavailable: {model}")
+    elif fallback:
+        lines.append(f"# Model unavailable: {model}")
     if stamp is not None:
         lines.append(stamp)
     lines.extend((
@@ -162,7 +150,7 @@ atomic_write = atomic_file.replace_text
 
 def render_agents(
     plugin_root: Path, team: str, profile: str = DEFAULT_EXECUTION_PROFILE,
-    fallbacks: frozenset = frozenset(), settings: dict[str, dict] | None = None,
+    settings: dict[str, dict] | None = None,
     *, unavailable: frozenset = frozenset(),
 ) -> dict[str, str]:
     """Render every role; ``settings`` maps a role to its resolved model and effort.
@@ -191,7 +179,7 @@ def render_agents(
             if setting["effort"] is not None:
                 fields["model_reasoning_effort"] = setting["effort"]
         rendered[f"{name}.toml"] = agent_toml(
-            fields, body, team, profile, fallbacks, unavailable,
+            fields, body, team, profile, unavailable,
             role_settings.stamp(team, version, source, setting) if setting is not None else None)
     return rendered
 
@@ -309,13 +297,12 @@ def restart_notice(project_root: Path, written: list[Path]) -> str:
     return INSTRUCTIONS_NOTICE
 
 
-def recorded_fallbacks(agents_dir: Path, team: str) -> tuple[set[str], set[str]]:
-    """Return the models this team's managed agents record: by --inherit-model,
-    and as unavailable by the last model check."""
-    runtime: set[str] = set()
+def recorded_unavailable(agents_dir: Path, team: str) -> set[str]:
+    """Return the models this team's managed agents record as unavailable by the
+    last model check."""
     unavailable: set[str] = set()
     if not agents_dir.is_dir():
-        return runtime, unavailable
+        return unavailable
     current_owner = owner(team)
     for target in sorted(agents_dir.glob("*.toml")):
         if target.is_symlink():
@@ -327,11 +314,10 @@ def recorded_fallbacks(agents_dir: Path, team: str) -> tuple[set[str], set[str]]
         if not lines or lines[0] != current_owner:
             continue
         for line in header(lines):
-            for pattern, found in ((FALLBACK_RE, runtime), (UNAVAILABLE_RE, unavailable)):
-                match = pattern.fullmatch(line)
-                if match:
-                    found.add(match.group(1))
-    return runtime, unavailable
+            match = UNAVAILABLE_RE.fullmatch(line)
+            if match:
+                unavailable.add(match.group(1))
+    return unavailable
 
 
 def recorded_profile(agents_dir: Path, team: str) -> str | None:
@@ -385,8 +371,6 @@ def preview(
     seed_user_files: bool = False,
     scope: str = "all",
     execution_profile: str | None = None,
-    inherit_models: tuple = (),
-    restore_models: tuple = (),
     model_listing: Optional[Callable[[], dict]] = None,
 ) -> dict:
     if scope not in {"all", "tracked", "local"}:
@@ -398,13 +382,6 @@ def preview(
             raise ValueError(
                 "--execution-profile applies only to the local agent projection"
             )
-    if inherit_models and scope == "tracked":
-        raise ValueError("--inherit-model applies only to the local agent projection")
-    if restore_models and scope == "tracked":
-        raise ValueError("--restore-model applies only to the local agent projection")
-    both = sorted(set(inherit_models) & set(restore_models))
-    if both:
-        raise ValueError(f"--inherit-model and --restore-model both name {both[0]!r}")
     project_instructions.validate_workspace(workspace)
     team = plugin_name(plugin_root)
     configured = configured_team(project_root, workspace)
@@ -416,8 +393,6 @@ def preview(
     profile = None
     # Each model a role is pinned to, the project's included, with its classes and roles.
     pins: dict[str, dict] = {}
-    # Each model of a run-time record with the reason that decides its warning.
-    fallbacks: dict[str, str] = {}
     # The models a check of this Codex's own list judged unavailable.
     unavailable: set[str] = set()
     conflicts: list = []
@@ -431,20 +406,7 @@ def preview(
         class_map, config, settings = project_settings(plugin_root, project_root, workspace)
         pins = host_listing.pinned(settings, role_settings.SESSION,
                                    role_settings.class_slots(class_map, HOST))
-        unknown = sorted((set(inherit_models) | set(restore_models)) - set(pins))
-        if unknown:
-            raise ValueError(
-                f"no role is pinned to {unknown[0]!r}; the pinned models are"
-                f" {', '.join(sorted(pins))}"
-            )
     if profile == DEFAULT_EXECUTION_PROFILE:
-        recorded, judged = recorded_fallbacks(agents_dir, team)
-        # An explicit --execution-profile auto restores every pin it can,
-        # --restore-model the pins of the models it names.
-        if execution_profile is None:
-            fallbacks.update((model, "recorded")
-                             for model in sorted(recorded & set(pins) - set(restore_models)))
-        fallbacks.update((model, "requested") for model in inherit_models)
         if model_listing is not None:
             listing = model_listing()
             check = host_listing.model_check(listing, pins)
@@ -453,9 +415,9 @@ def preview(
                 listing, role_settings.slot_settings(class_map, config, HOST),
                 class_map["hosts"][HOST]["models"])
         else:
-            unavailable = judged & set(pins)
+            unavailable = recorded_unavailable(agents_dir, team) & set(pins)
     rendered = render_agents(
-        plugin_root, team, profile, frozenset(fallbacks), settings,
+        plugin_root, team, profile, settings,
         unavailable=frozenset(unavailable),
     ) if profile is not None else {}
     if class_map is not None:
@@ -516,36 +478,15 @@ def preview(
         instructions["target_surfaces"].update(target_agent_surfaces)
     instructions["changes"] = changes
     instructions["execution_profile"] = profile
-    fallen = set(fallbacks) | unavailable
     instructions["model_check"] = check
-    instructions["model_fallbacks"] = {model: pins[model]["roles"] for model in sorted(fallen)}
-    instructions["model_notes"] = model_notes(pins, fallbacks, unavailable, check, conflicts)
-    instructions["class_map"] = class_report(class_map, config, profile, fallen)
+    instructions["model_fallbacks"] = {model: pins[model]["roles"] for model in sorted(unavailable)}
+    instructions["model_notes"] = host_listing.check_notes(
+        "codex-project", check, pins, unavailable, conflicts, SESSION_PHRASE)
+    instructions["class_map"] = class_report(class_map, config, profile, unavailable)
     instructions["roles"] = {
-        role: rendered_setting(setting, profile, fallen)
+        role: rendered_setting(setting, profile, unavailable)
         for role, setting in settings.items()} if profile is not None else {}
     return instructions
-
-
-def model_notes(
-    pins: dict[str, dict], fallbacks: dict[str, str], unavailable: set[str], check: dict,
-    conflicts: list,
-) -> list[str]:
-    """The warnings and notes apply prints for each run-time record and the model check."""
-    notes = [
-        f"codex-project: warning: {model} {FALLBACK_REASONS[reason]}, so its roles"
-        f" {', '.join(pins[model]['roles'])} run on {SESSION_PHRASE} at their own reasoning"
-        f" effort. Apply with --restore-model {model} or --execution-profile auto to restore"
-        " the pin once the model runs."
-        for model, reason in sorted(fallbacks.items())
-    ]
-    # A model under a run-time record neither keeps its pin nor needs the check's word.
-    shown = {**check, "verdicts": {model: value for model, value in
-                                   check.get("verdicts", {}).items() if model not in fallbacks}}
-    notes.extend(host_listing.check_notes("codex-project", shown, pins,
-                                          unavailable - set(fallbacks), conflicts,
-                                          SESSION_PHRASE))
-    return notes
 
 
 def materialize(
@@ -558,15 +499,12 @@ def materialize(
     seed_user_files: bool = True,
     scope: str = "all",
     execution_profile: str | None = None,
-    inherit_models: tuple = (),
-    restore_models: tuple = (),
     model_listing: Optional[Callable[[], dict]] = None,
 ) -> list[Path]:
     result = preview(
         project_root, plugin_root, workspace,
         choices=choices, seed_user_files=seed_user_files, scope=scope,
-        execution_profile=execution_profile, inherit_models=inherit_models,
-        restore_models=restore_models, model_listing=model_listing,
+        execution_profile=execution_profile, model_listing=model_listing,
     )
     if result["choice_requests"]:
         raise ValueError(
@@ -622,16 +560,6 @@ def main() -> int:
         "--execution-profile", choices=EXECUTION_PROFILES, default=None,
         help="role model and reasoning effort; defaults to the recorded profile, then auto",
     )
-    parser.add_argument(
-        "--inherit-model", action="append", default=[], metavar="MODEL",
-        help="render the roles pinned to MODEL without it, so they run on the parent"
-             " session's model at their own reasoning effort; repeatable",
-    )
-    parser.add_argument(
-        "--restore-model", action="append", default=[], metavar="MODEL",
-        help="render the roles pinned to MODEL with it again and drop its recorded"
-             " fallback; repeatable",
-    )
     args = parser.parse_args()
     project_root = args.project_root.resolve()
     if not (project_root / ".git").exists():
@@ -643,15 +571,12 @@ def main() -> int:
     if args.action == "apply":
         import host_models
         listing = functools.lru_cache(maxsize=None)(host_models.list_models)
-    inherit_models = tuple(dict.fromkeys(args.inherit_model))
-    restore_models = tuple(dict.fromkeys(args.restore_model))
     try:
         choices = project_instructions.parse_choices(args.choice)
         result = preview(
             project_root, plugin_root, args.workspace,
             choices=choices, seed_user_files=args.seed_user_files,
             scope=args.scope, execution_profile=args.execution_profile,
-            inherit_models=inherit_models, restore_models=restore_models,
             model_listing=listing,
         )
         written = []
@@ -660,8 +585,7 @@ def main() -> int:
                 project_root, plugin_root, args.workspace,
                 choices=choices, seed_user_files=args.seed_user_files,
                 scope=args.scope, execution_profile=args.execution_profile,
-                inherit_models=inherit_models, restore_models=restore_models,
-                model_listing=listing,
+                    model_listing=listing,
             )
     except ValueError as exc:
         raise SystemExit(f"codex-project: {exc}") from exc

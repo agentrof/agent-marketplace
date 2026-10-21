@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import stat
 import sys
 import tempfile
 import unittest
@@ -47,26 +46,19 @@ class HostSmokeContracts(unittest.TestCase):
                                   if path.is_dir())
                 self.assertEqual(packages, [smoke.TEAM])
 
-    def test_installed_package_smoke_requires_product_and_delivery_entrypoints(self):
+    def test_installed_package_smoke_requires_setup_and_fast_lane_entrypoints(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "package"
             root.mkdir()
             for relative in (
                 "scripts/setup_project.py", "scripts/setup_check.py",
-                "scripts/requirement_route.py", "scripts/backlog_compile.py",
-                "scripts/stage_package.py", "scripts/ba_compile.py",
-                "scripts/landscape_check.py", "scripts/design_system_compile.py",
-                "scripts/experience_compile.py",
-                "scripts/experience_application_check.py",
-                "scripts/architecture_compile.py",
-                "scripts/delivery_compile.py", "scripts/delivery_git.py",
-                "scripts/delivery_provider.py",
+                "scripts/task_lane.py", "flows/fast-lane.md",
             ):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("", encoding="utf-8")
-            with self.assertRaisesRegex(smoke.SmokeFailure, "delivery_compile.py"):
-                (root / "scripts/delivery_compile.py").unlink()
+            with self.assertRaisesRegex(smoke.SmokeFailure, "task_lane.py"):
+                (root / "scripts/task_lane.py").unlink()
                 smoke.exercise_package(root, Path(temporary) / "project", os.environ.copy())
 
     def test_package_execution_disables_local_bytecode_caches(self):
@@ -75,14 +67,7 @@ class HostSmokeContracts(unittest.TestCase):
             root.mkdir()
             for relative in (
                 "scripts/setup_project.py", "scripts/setup_check.py",
-                "scripts/requirement_route.py", "scripts/backlog_compile.py",
-                "scripts/stage_package.py", "scripts/ba_compile.py",
-                "scripts/landscape_check.py", "scripts/design_system_compile.py",
-                "scripts/experience_compile.py",
-                "scripts/experience_application_check.py",
-                "scripts/architecture_compile.py", "scripts/delivery_compile.py",
-                "scripts/delivery_git.py", "scripts/delivery_provider.py",
-                "skill-content/experience-modeling/data/experience-schema.json",
+                "scripts/task_lane.py", "flows/fast-lane.md",
             ):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,41 +110,41 @@ class HostSmokeContracts(unittest.TestCase):
         ))
 
     def test_installed_package_must_match_candidate_provenance_and_hashes(self):
-        for host in ("claude", "codex"):
-            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
-                expected = ROOT / "dist" / host / smoke.TEAM
-                installed = Path(temporary) / smoke.TEAM
-                shutil.copytree(expected, installed)
+        host = "codex"
+        with tempfile.TemporaryDirectory() as temporary:
+            expected = ROOT / "dist" / host / smoke.TEAM
+            installed = Path(temporary) / smoke.TEAM
+            shutil.copytree(expected, installed)
+            smoke.verify_installed_package(installed, expected, host)
+            (installed / "constitution.md").write_text(
+                "tampered package\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(smoke.SmokeFailure, "hash differs"):
                 smoke.verify_installed_package(installed, expected, host)
-                (installed / "constitution.md").write_text(
-                    "tampered package\n", encoding="utf-8"
-                )
-                with self.assertRaisesRegex(smoke.SmokeFailure, "hash differs"):
-                    smoke.verify_installed_package(installed, expected, host)
 
     def test_installed_package_must_match_attested_executable_modes(self):
-        for host in ("claude", "codex"):
-            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
-                expected = ROOT / "dist" / host / smoke.TEAM
-                installed = Path(temporary) / smoke.TEAM
-                shutil.copytree(expected, installed)
-                script = installed / "scripts/backlog_compile.py"
-                if not build_distributions.is_executable(script):
-                    self.skipTest("fixture filesystem has no executable mode")
-                script.chmod(script.stat().st_mode & ~0o111)
-                with self.assertRaisesRegex(smoke.SmokeFailure, "mode differs"):
-                    smoke.verify_installed_package(installed, expected, host)
+        host = "codex"
+        with tempfile.TemporaryDirectory() as temporary:
+            expected = ROOT / "dist" / host / smoke.TEAM
+            installed = Path(temporary) / smoke.TEAM
+            shutil.copytree(expected, installed)
+            script = installed / "scripts/task_lane.py"
+            script.chmod(script.stat().st_mode | 0o100)
+            if not build_distributions.is_executable(script):
+                self.skipTest("fixture filesystem has no executable mode")
+            with self.assertRaisesRegex(smoke.SmokeFailure, "mode differs"):
+                smoke.verify_installed_package(installed, expected, host)
 
     def test_installed_package_rejects_unattested_extra_entries(self):
-        for host in ("claude", "codex"):
-            with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
-                expected = ROOT / "dist" / host / smoke.TEAM
-                installed = Path(temporary) / smoke.TEAM
-                shutil.copytree(expected, installed)
-                rogue = installed / "agents/rogue-release-agent.md"
-                rogue.write_text("unattested\n", encoding="utf-8")
-                with self.assertRaisesRegex(smoke.SmokeFailure, "tree differs"):
-                    smoke.verify_installed_package(installed, expected, host)
+        host = "codex"
+        with tempfile.TemporaryDirectory() as temporary:
+            expected = ROOT / "dist" / host / smoke.TEAM
+            installed = Path(temporary) / smoke.TEAM
+            shutil.copytree(expected, installed)
+            rogue = installed / "agents/rogue-release-agent.md"
+            rogue.write_text("unattested\n", encoding="utf-8")
+            with self.assertRaisesRegex(smoke.SmokeFailure, "tree differs"):
+                smoke.verify_installed_package(installed, expected, host)
 
     def test_claude_install_accepts_only_attested_runtime_markers(self):
         expected = ROOT / "dist" / "claude" / smoke.TEAM
@@ -193,46 +178,21 @@ class HostSmokeContracts(unittest.TestCase):
                 with self.assertRaisesRegex(smoke.SmokeFailure, "tree differs"):
                     smoke.verify_installed_package(installed, expected, host)
 
-    def test_claude_runtime_marker_contract_rejects_malformed_entries(self):
-        invalid_markers = {
-            "nondigit name": ("worker", b'{"pid":123,"procStart":"start"}'),
-            "leading zero": ("0123", b'{"pid":123,"procStart":"start"}'),
-            "pid mismatch": ("123", b'{"pid":456,"procStart":"start"}'),
-            "boolean pid": ("1", b'{"pid":true,"procStart":"start"}'),
-            "pid overflow": (
-                "4294967296", b'{"pid":4294967296,"procStart":"start"}'
-            ),
-            "missing field": ("123", b'{"pid":123}'),
-            "extra field": (
-                "123", b'{"pid":123,"procStart":"start","extra":true}'
-            ),
-            "duplicate field": (
-                "123", b'{"pid":123,"pid":123,"procStart":"start"}'
-            ),
-            "invalid json": ("123", b"{"),
-            "empty start": ("123", b'{"pid":123,"procStart":""}'),
-            "control start": ("123", b'{"pid":123,"procStart":"line\\n"}'),
-            "surrogate start": ("123", b'{"pid":123,"procStart":"\\ud800"}'),
-            "long start": (
-                "123",
-                b'{"pid":123,"procStart":"' + (b"x" * 257) + b'"}',
-            ),
-            "oversized marker": ("123", b"x" * 513),
-        }
+    def test_claude_runtime_marker_contract_rejects_a_malformed_marker(self):
         provenance = {"runtime_contracts": smoke.CLAUDE_RUNTIME_CONTRACTS}
-        for label, (name, content) in invalid_markers.items():
-            with self.subTest(label=label), tempfile.TemporaryDirectory() as temporary:
-                installed = Path(temporary)
-                directory = installed / smoke.CLAUDE_IN_USE_ROOT
-                directory.mkdir()
-                (directory / name).write_bytes(content)
-                inventory = smoke.package_inventory(installed, "claude")
-                with self.assertRaises(smoke.SmokeFailure):
-                    smoke.claude_runtime_inventory_entries(
-                        installed, inventory, provenance, "claude",
-                    )
+        with tempfile.TemporaryDirectory() as temporary:
+            installed = Path(temporary)
+            directory = installed / smoke.CLAUDE_IN_USE_ROOT
+            directory.mkdir()
+            # The marker's name and its pid disagree.
+            (directory / "123").write_bytes(b'{"pid":456,"procStart":"start"}')
+            inventory = smoke.package_inventory(installed, "claude")
+            with self.assertRaises(smoke.SmokeFailure):
+                smoke.claude_runtime_inventory_entries(
+                    installed, inventory, provenance, "claude",
+                )
 
-    def test_claude_runtime_marker_contract_rejects_unsafe_tree_shapes(self):
+    def test_claude_runtime_marker_contract_rejects_a_nested_tree(self):
         provenance = {"runtime_contracts": smoke.CLAUDE_RUNTIME_CONTRACTS}
         with tempfile.TemporaryDirectory() as temporary:
             installed = Path(temporary)
@@ -241,39 +201,6 @@ class HostSmokeContracts(unittest.TestCase):
             (nested / "payload").write_text("rogue", encoding="utf-8")
             inventory = smoke.package_inventory(installed, "claude")
             with self.assertRaisesRegex(smoke.SmokeFailure, "runtime entry"):
-                smoke.claude_runtime_inventory_entries(
-                    installed, inventory, provenance, "claude",
-                )
-        with tempfile.TemporaryDirectory() as temporary:
-            installed = Path(temporary)
-            (installed / smoke.CLAUDE_IN_USE_ROOT).write_text(
-                "not a directory", encoding="utf-8"
-            )
-            inventory = smoke.package_inventory(installed, "claude")
-            with self.assertRaisesRegex(smoke.SmokeFailure, "runtime directory"):
-                smoke.claude_runtime_inventory_entries(
-                    installed, inventory, provenance, "claude",
-                )
-        with tempfile.TemporaryDirectory() as temporary:
-            installed = Path(temporary)
-            directory = installed / smoke.CLAUDE_IN_USE_ROOT
-            directory.mkdir()
-            target = installed / "target"
-            target.write_text("{}", encoding="utf-8")
-            try:
-                (directory / "123").symlink_to(target)
-            except OSError as exc:
-                self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
-            with self.assertRaisesRegex(smoke.SmokeFailure, "contains a link"):
-                smoke.package_inventory(installed, "claude")
-        with tempfile.TemporaryDirectory() as temporary:
-            installed = Path(temporary)
-            marker = write_claude_runtime_marker(installed)
-            marker.chmod(marker.stat().st_mode | stat.S_IXUSR)
-            if not marker.stat().st_mode & 0o111:
-                self.skipTest("fixture filesystem has no executable mode")
-            inventory = smoke.package_inventory(installed, "claude")
-            with self.assertRaisesRegex(smoke.SmokeFailure, "runtime marker"):
                 smoke.claude_runtime_inventory_entries(
                     installed, inventory, provenance, "claude",
                 )

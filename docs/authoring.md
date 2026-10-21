@@ -20,40 +20,6 @@ are under `dist/` and are never edited by hand.
   boundary: known UTF-8 text is canonicalized, while unknown and binary paths
   are byte-exact.
 
-## Requirement Flow contract
-
-```text
-requirement -> business-analysis -> solution-design -> design-system -> experience-design -> backlog-plan -> delivery-plan -> execution-plan -> deliver
-```
-
-An exact `REQ-###` selects the Requirement-driven chain. Its impact matrix
-decides `required`, `reuse` or `not_applicable`; each applicable stage binds a
-current approved committed receipt. Without `REQ-###`, the user explicitly
-selects approved/current upstream packages and no Requirement state is created.
-
-An identical Requirement receipt retry verifies the current committed package
-and retained receipts before preserving all bytes and downstream links. A
-changed predecessor still invalidates downstream receipts. Backlog generated
-views likewise avoid rewriting identical bytes without caching validation.
-
-Backlog defaults to four pinned input families. The explicit `headless-v1`
-contract may omit genuinely absent Design System/Experience families only for
-an approved technical/defect Requirement with those stages `not_applicable`,
-current BA/Solution bindings, a CLI/worker/scheduler Solution topology, no
-authored links into the omitted family and complete Git history proving no
-previous visual package. Each new revision repeats and revalidates
-`--absent-input`; current or historical packages cannot be discarded to qualify.
-Historical Delivery consumption verifies the original approved committed
-backlog boundary, so later visual work does not invalidate that snapshot.
-
-Experience Design produces the globally current `application@rN` receipt and
-the exact current zero-or-more process receipt set. A later approved prototype
-or package-set delta makes that application receipt non-current, so consuming
-Requirement and backlog revisions must rebind before a new handoff.
-
-The complete lifecycle is defined in
-[requirement-delivery-protocol.md](requirement-delivery-protocol.md).
-
 ## Artifact policy
 
 Unless a subtree explicitly declares a closed artifact contract, files below
@@ -61,147 +27,6 @@ an `artifacts/` directory under a policy-valid vault folder are opaque local
 artifacts, not Markdown notes. Names and extensions are unconstrained,
 symlinks are rejected, and authored Markdown may link or embed a real local
 artifact.
-
-Design System is a closed exception: contract-v3 pairs `MASTER.md` with its
-offline `design-system/artifacts/standalone.html` catalog.
-
-Experience Design is intentionally not a closed exception. The complete
-`workspace/docs/experience-design/artifacts/` tree is a UX author's prototype
-workspace. It may include any directories, file names, page topology, HTML,
-CSS, JS, framework build output, dependencies and assets. `index.html`,
-multiple linked pages and `css/`, `js/` or media folders are useful optional
-conventions. They are never compiler requirements.
-
-The Experience compiler does not parse, lint, execute, sandbox, normalize or
-rewrite prototype contents. Its only artifact checks are safety and lifecycle
-boundaries: snapshot files are regular non-symlink files within the artifact
-tree, and an approved snapshot still matches its recorded bytes and paths. It
-writes lifecycle data only below `experience-design/_generated/` and
-`experience-design/_ledger/`.
-
-Prototype implementation is an exploratory acceptance artifact. Delivery later
-implements the product according to its own architecture, engineering and
-quality standards. A reviewer can recommend practices for the prototype but
-those recommendations cannot become hidden compiler rules.
-
-The compiler reserves `application` from Experience process slugs and aliases.
-Its approval transaction covers create, update, rename and retire actions,
-prototype receipt state and compiler-owned open-revision state. An
-application-only revision changes no process revision but creates a new current
-`application@rN`. The durable history is
-`experience-design/_ledger/application-revisions.json`; the current projection
-is `experience-design/_generated/application-registry.json`.
-
-After an approved source handoff, synchronize the local checkout in a separate
-direct shell call using the resolved absolute Git executable from the checkout
-root. The Experience guard attests only `merge --no-edit <committed-source>` or
-`restore --source=<committed-source> --worktree -- workspace/docs/experience-design`.
-Fetch required target and Fence objects separately before synchronization. The immutable source
-must contain the current remote target and its exact Experience tree, and the
-remote protocol-2 Fence must be open and target that same commit, or an ancestor
-whose Experience tree is identical to the current target's. A local commit
-alone does not establish this authority. Wrapped scripts, mixed shell commands,
-bare executable names, PowerShell and unknown shell identities receive no Git
-writer exemption. Native cmd commands retain canonical quoting requirements.
-
-Synchronization verifies exact committed protected bytes and the owning
-application gate, preserves existing local history and the restore's index,
-and publishes the accepted postimage through the same serialized authority as
-compiler writers. A shell reader that began earlier then recognizes that
-postimage instead of restoring its older snapshot. Authoring new approval
-receipts continues through the owning compiler lifecycle.
-
-Protected writers acquire their lock before reading the recovery preimage.
-Every snapshot captures and rechecks the authority generation around its tree;
-a concurrent transition rejects capture before any capsule is published.
-Every accepted publication advances that transient generation even when its
-content is unchanged. Durable approval receipts and revisions are unaffected.
-
-Reviewers, not the snapshot compiler, judge prototype fidelity, usability,
-accessibility, visual quality, behavior and design coherence. Approval requires
-a fresh transient schema-v4 attestation bound to proposal, artifact-tree,
-package-set and application hashes. Its advisory notes are never an approval
-condition or compiler rule.
-
-## Backlog contract
-
-The canonical tree is:
-
-```text
-workspace/docs/backlog/
-├── backlog.md
-├── reviews/
-│   └── round-<n>-backlog-review.md
-├── epics/<epic-slug>/
-│   ├── epic.md
-│   ├── reviews/round-<n>-epic-review.md
-│   └── stories/<story-slug>/
-│       ├── story.md
-│       └── test-plan.md
-└── _generated/
-    ├── registry.json
-    ├── board.md
-    ├── dependency-map.md
-    └── test-coverage.md
-```
-
-`backlog_compile.py` creates deterministic stubs, validates front matter and
-paths, resolves upstream and dependency links, requires each story's test plan
-and renders disposable views. `experience_refs` use exact values such as
-`checkout:SCR-001@r2`; they resolve through an approved process registry or
-ledger and are bound to the pinned application and process receipt set.
-
-Every story contains User Value, Scope, Non-Goals, Implementation
-Responsibilities, Acceptance, Dependencies and Delivery Notes. Criterion and
-rule links are vault-absolute links to stable headings. Delivery execution
-consumes an approved backlog without rewriting source.
-
-### Package schema repairs
-
-At process switch `backlog_schema_migration` `receipt_only`, the packaged
-backlog compiler can plan and apply the closed `test-plan-level-v1` repair.
-Owner approval names the exact receipt hash. The receipt binds an ancestor's
-complete committed approval, package versions and every canonical note's
-before/after byte and source hashes. Only unambiguous scenario level splits
-and compiler hash stamps change; review documents, product revisions and
-approval timestamps remain exact. The default retains reviewed revisions.
-
-Receipts live under `backlog/artifacts/schema-migrations/` and are tracked
-compatibility evidence. Every Delivery source check that accepts a migrated
-pin replays the receipt from the committed predecessor and proves the complete
-current postimage. It preserves the execution plan and gate A; every other
-source and Operation binding stays strict. Any non-schema edit uses the
-normal revision. Apply serializes with project maintenance, compares each
-replacement and permits an interrupted exact before/after mixture to resume
-with the same source commit and owner-approved hash. Setup never applies it
-automatically.
-
-### Source rebind receipts
-
-At process switch `source_rebind` `receipt_when_unchanged`,
-`plan-source-rebind --source-commit <approved-commit>` derives the
-`backlog-source-rebind-v1` receipt of a revision whose root changes only its
-bindings, Requirement and lifecycle fields: each changed binding with its
-before and after approval commits, changed documents and row ids (a Solution
-binding also says whether it only adds notes and landscape rows), every
-story, test plan and epic note's content hash, and each epic as `reviewed`
-with its reasons or `reused` with its approved review. `owner_approval` is
-the hash of the receipt without that field and the sealed
-`after_package_hash`. `record-source-rebind-root-review` writes the root
-round's `Source Rebind` section naming that hash, which scopes every reader
-manifest; `apply-source-rebind --approve-receipt <hash>` writes the receipt
-below `backlog/artifacts/source-rebinds/`, runs the ordinary atomic approval
-and seals the approved package hash. Plain `approve` refuses such a round.
-
-`backlog_migration.pin_chain` is the one helper that accepts a Delivery's old
-backlog pin: it walks migration receipts and the source-rebind receipts HEAD
-holds from the pinned to the current package hash, skips a malformed or
-uncommitted file with a named diagnostic, refuses two chains that reach the
-same hash, replays each hop from Git and returns the Test Plan aliases and
-the impacted notes. The
-relation closure an approval read cannot be rebuilt later, so a later replay
-requires every reason it can rebuild from Git and accepts the recorded ones
-beyond them; the approved root review binds the receipt hash.
 
 ## Host and runtime contract
 
@@ -240,9 +65,7 @@ rigor `high` or a declared risk flag (`auth`, `secrets`, `data_placement`,
 `migration`, `irreversible`) runs; `security_review` and `orchestration`
 never move. Every step that spawns an agent resolves its spawn through
 `scripts/model_class.py resolve`, by the role's class or the class the step
-names. A process switch value may declare generated agent variants on
-another class: the review-panel readers run on `routine_review` and the
-writers' fix passes on `mechanical` (see Process switches).
+names.
 
 Each host keeps two tables under `platforms/<host>/`:
 
@@ -271,16 +94,21 @@ omitted `effort` follows the session. Codex dist agents carry the resolved
 The package defaults follow the owner's decision of 16 Oct 2026: small
 models for mechanical work, large ones only for critical decisions, security
 and data-loss review and large build work. On Claude Code `mechanical` runs
-Haiku 5.5 at `high`, `routine_authoring` and `routine_review` Sonnet 5.5 at
-`high`, `complex_authoring` Sonnet 5.5 at `xhigh`, `critical_decision` Opus
-5.5 at `high`, `security_review` Opus 5.5 at `xhigh` and `orchestration`
-Sonnet 5.5 at `medium`; each escalated slot moves one effort or model up.
+Haiku 5.5 at `high`, `routine_authoring` Sonnet 5.5 at `high`,
+`routine_review` Sonnet 5.5 at `medium`, `complex_authoring` Sonnet 5.5 at
+`xhigh`, `critical_decision` and `security_review` Opus 5.5 at `high` and
+`orchestration` Sonnet 5.5 at `medium`; each escalated slot moves one effort
+or model up. The 21 Oct 2026 cost decision lowered routine and security review
+one effort each, because in one measured project the orchestrating session on
+the top model was over half the delivery cost: `deliver` runs in a fresh
+session started on Sonnet, one per task.
 Haiku 5.5 takes `low` to `max` and needs Claude Code 2.1.293
 ([models](https://platform.claude.com/docs/en/about-claude/models/overview),
 [model config](https://code.claude.com/docs/en/model-config)); its `haiku`
 alias still resolves to Haiku 4.5 on Bedrock, Vertex and Foundry. On Codex
 `mechanical` runs GPT-6 Luna at `high` and every other slot GPT-6.1 Sol,
-from `low` for `orchestration` to `xhigh` for `security_review`. Every slot
+from `low` for `orchestration` to `high` for `security_review` and
+`xhigh` for the escalated authoring and decision slots. Every slot
 pins an effort, because a Claude Code subagent without `effort` follows the
 session's level, `max` included
 ([subagents](https://code.claude.com/docs/en/sub-agents)). No slot defaults
@@ -291,11 +119,8 @@ further subagents.
 A Claude Code spawn passes the `model` alias and `effort` the resolver
 returns, which override the role file's pins for that spawn (a per-spawn
 `effort` needs Claude Code 2.1.292). A Codex role file's `model` wins over a
-spawn request, so the builder renders, for a host adapter whose
-`SPAWN_MODEL` is `None`, an `<agent>-escalated` variant per role on a class
-that escalates and the purpose variants of
-`skill-content/configure/data/purpose-variants.json`, such as
-`code-reviewer-security`, and the resolver names the agent to start.
+spawn request, so a Codex role always runs its own class pins and the
+resolver returns a note instead of another agent.
 Rendered Claude role agents also set `omitClaudeMd: true` and the
 `disallowedTools` of `platforms/claude/agent-tools.json`; the subagents page
 documents both keys and the `mcp__<server>` and `mcp__*` patterns.
@@ -346,27 +171,11 @@ stays `unverified`. A rendered role on the session's model
 carries `model: inherit` and keeps its `effort`, and its stamp keeps the
 settings the project config resolves, so the session start check finds it
 current. A model policy already substitutes the main conversation's model
-with Claude Code's own warning. For a model that Claude Code's wording names
-as not found, refused or too new for the installed Claude Code, the host
-contract has the coordinator tell the user and, when the failed run changed
-nothing, that is its task is read-only or the `task_inputs.py` invocation
-that derived its manifest still passes with `--expected-hash`, which compares
-the content of its inputs and of every modified or new source it covers,
-spawn the same role once more with `model` set to the session's family alias,
-which lands on the session's exact model, and stop if that spawn fails too; a
-writer that already changed files is never spawned again on a partly changed
-tree. `git status` cannot judge that: a further edit to an already modified
-file, or a new file in an untracked folder, leaves its output as it was, and
-a flow that commits only at its end runs its fix passes on modified files.
-The manifest every entry derives before it delegates a role is the record of
-the tree before the run, so no extra step precedes a spawn. The Claude plugin's
-hook on `Agent`, `model_fallback.py` under `PostToolUseFailure` and
-`PostToolUse`, adds the warning and that instruction to a foreground failure
-and warns when a role started on another model than its pin. It matches only
-Claude Code's model wording, since a subagent's error detail names the pin
-for any API error, and stays silent for a spawn that passes `model` and under
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so a model the user chose never triggers
-it and the re-spawn never repeats.
+with Claude Code's own warning. For a spawn whose pinned model Claude Code
+names as not found, refused or too new, the host contract has the coordinator
+tell the user and, when the failed run changed nothing, spawn the same role
+once more with `model` set to the session's family alias, and stop if that
+spawn fails too; a writer that already changed files is never spawned again.
 
 On Codex the binary is the nearest `codex` process above setup, since Codex
 exports no variable that names it, else the target of the `apply_patch`
@@ -378,22 +187,15 @@ otherwise the output of `codex debug models`, which reflects no account
 inside the command sandbox or when it equals `codex debug models --bundled`.
 The role files of an `unavailable` model omit `model` and keep
 `model_reasoning_effort`. Codex has no hook event for a failed role, so the
-run-time warning comes from the host contract: when a spawned role still
-ends in `Agent errored: ...` that names its pinned model as unknown,
-unsupported, not found or not supported with the account, the coordinator
-tells the user and, when the failed run changed nothing, runs
-`generate_codex_project.py apply --scope local --inherit-model <model>` and
-starts the same role again. That run-time record stays until
-`--restore-model <model>` or `--execution-profile auto`. When that start
-errors too, the coordinator runs it with `--restore-model <model>`, which
-renders the pin again, before it stops, so no run-time record stays that no
-successful start backs. A rate limit or another error that names the model
-moves no role. `--execution-profile auto` restores the pins and checks them
+run-time rule is the host contract's: when a spawned role ends in `Agent
+errored: ...` naming its pinned model and the failed run changed nothing, the
+coordinator applies `--execution-profile inherit` and starts the role once
+more; `--execution-profile auto` restores the pins and checks them
 again.
 
 A project may override the package per class slot and per role, never the
 catalog. Every build ships `templates/model-classes.json`, which names each
-role's class, generated variants included, and per host each slot's pinned
+role's class, and per host each slot's pinned
 model, package effort and the efforts its model takes, the host's model
 catalog with the efforts each model takes, the host's effort vocabulary and the shape of a model ID of
 its list (`MODEL_ID_SHAPE` in the host adapter, which the builder checks
@@ -477,227 +279,10 @@ session's model at its own class effort:
   reach every subagent in the session, not only this team. Claude Code's
   permission modes do not select a model or effort.
 
-## Process switches
+## Process choices
 
-Every new process behaviour ships behind a switch whose default is today's
-behaviour. `plugins/software-engineering-team/skill-content/configure/data/process-switches.json`
-declares each switch; a project's values live in
-`workspace/docs/delivery/process-policy.md`, changed only through
-`/configure process` and never in `workspace/config.json`. A switch without a
-policy row follows its package default.
-
-To add a switch:
-
-1. Declare it in the registry: its `summary`, owning `flows`, at least two
-   `values` with their `tradeoffs`, which the choice gate shows, the `default`
-   that keeps today's behaviour, its component `metric` and `promotion` with
-   its `unit` and `threshold`; `issue` names its idea issue. A value that runs
-   a role on another class declares `agent_variants` (`suffix`, `class`,
-   `description`, `agents`), and every build then ships `<agent>-<suffix>`
-   with the base agent's body. A value that needs owner-set numbers declares
-   `parameters` (`summary`, the `values` that take them, `declared_by` naming
-   the package data file and key that declare their ids, `type` and
-   `min_count`). `type` is `positive_integer` or `glob_list`, comma-separated
-   path globs; a declared parameter may name its own `type`, and only a
-   `positive_integer` takes a package limit. The package sets no parameter value: the owner sets each one
-   in the policy's Parameters table through `/configure process`, a parameter
-   exists only while its switch is at a value that takes it, and
-   `process_policy.py value` reports the typed values beside the switch's. A
-   value whose instructions read package data that no default path reads
-   declares it in `value_data`, a list of
-   `skill-content/<skill>/data/<file>.json` paths per value; a task binds that
-   data only together with the value's switch references. Data that several
-   values read, of one switch or of several, is listed under each of them and
-   bound when any of them is chosen. A switch whose instructions every task of
-   its owning flows follows, whichever skills the task selects, declares
-   `reference_scope: owning_flows`, as `owner_gates` does.
-2. Anchor it as switch `<id>` at each step it changes in its owning flows.
-   The anchor names the switch reference that the other value follows and
-   adds nothing else to the flow.
-3. Write each non-default value's instructions in
-   `skill-content/<skill>/references/switch-<switch>-<value>.md`, in the skill
-   that the tasks needing them select. `task_inputs.py` binds the file only
-   when the project's policy selects that value, and only for a task whose
-   entry runs one of the switch's owning flows. Never link it from SKILL.md
-   and never write one for the default value.
-4. Keep the default path unchanged: with the switch at its default, its only
-   trace in a flow is the anchor of step 2, and skills, agents, manifests and
-   compiler outputs stay byte-identical.
-   `tools/tests/test_default_equivalence.py` compares every compiler output
-   and every shipped task's bound paths on frozen inputs with the release base
-   e47dbe0 and fails on any difference its `EXPECTED_DIFFERENCES` list does not
-   name with the issue whose fix made it. Extend it when the switch touches a
-   compiler, and test each value with every other switch at its default.
-5. Inside a Delivery, read the value with
-   `process_policy.py value --switch <id> --delivery DLV-###` and derive its
-   tasks with `task_inputs.py --delivery DLV-###`; both follow the values the
-   Delivery pinned, and until its Review they refuse an approved policy that
-   changed one of them.
-
-The `process_switches` validator check rejects a default outside the values,
-a switch that an owning flow does not name, a flow that names an undeclared
-switch or one it does not own, a switch without a metric or promotion rule,
-malformed agent variants or parameters, a `reference_scope` other than
-`owning_flows`, value data that is missing, listed twice for one value,
-declared for the default or bound by no reference of its value, and a switch
-reference that names an undeclared switch or value or the default, that no
-owning flow names, or that a SKILL.md links. The `finding_code_references`
-check rejects a Delivery finding code that authored Markdown names, the host
-contracts and overlays under `platforms/` included, but the Delivery result
-contract does not declare, so a switch reference, flow or host contract that
-tells a role which refusal to expect names one the result envelope carries.
-
-### Promotion rule
-
-A default flips only when the switch's component metric meets its threshold
-over its promotion unit; when every shared quality guard holds: valid critical
-or major findings found after an approval, Item reopens, code review cycles
-and QA rounds per Item, Delivery Review deviations and defects reported after
-merge; and when the owner approves the flip. The unit is at least 3
-Deliveries. Another unit needs the switch's idea issue or an owner decision to
-declare it: `review_manifest_scope` counts 5 epic review passes across 2
-backlog revisions because the owner confirmed that unit on 1 Oct 2026, the
-switch acting only in backlog planning, outside any Delivery, and
-`code_review_panel` counts 5 code-review passes across 2 Deliveries, the
-measurement criterion its idea issue #347 states. One default
-flips per release, so the following Deliveries attribute a change to one flip.
-A flipped default that later breaks a quality guard flips back in the next
-release. A flip changes `default`, keeps every value, moves the promoted
-value's instructions into the default path and moves the previous default's
-path into its own switch reference.
-
-Only a non-default choice survives a flip. The Process Policy keeps a row only
-for a value other than the default, so a project whose row names the promoted
-value keeps it, now as the default, while every switch without a row follows
-the promoted default, also one whose owner answered the previous default at
-the choice gate. A project that wants the previous default back sets it
-through `/configure process`, where it is then a non-default choice.
-
-A value that takes owner-set parameters stays non-default, since only a value
-the owner chooses takes parameters. Its promotion ships package limits
-instead: the switch's `parameters` gain `package_limits`, one positive value
-per declared parameter id it covers, which a project at that value applies to
-each parameter its Parameters table leaves unset and which count towards
-`min_count`. `process_policy.py` and the validator accept that form, and
-`story_size_budget`'s promotion text says so.
-
-## Review panels
-
-`plugins/software-engineering-team/skill-content/challenge-review/data/review-panels.json`
-declares each review step's reader role, its lenses (`id`, `focus` and, for a
-step whose writer records a review note, the note sections each lens
-`covers`) and `default_panel`, the list of lens assignments whose length is
-the default panel size. A flow anchors its step as review panel `<step>`, and
-prose names a lens as lens `<id>`. The `review_panels` validator check rejects
-unknown readers, steps no flow anchors, anchors to undeclared steps, unknown,
-duplicate or unassigned lens ids, empty panels or assignments, and review-note
-sections that no lens or more than one owner covers. Adding a lens or a
-review step needs only a data change plus its anchor.
-
-Process switch `review_panels` selects between each step's single reviewer,
-the default `single_reader`, and its review panel, `lens_panel`. Every flow
-that anchors a review panel names the switch, and the validator rejects one
-that does not. The panel instructions live in
-`challenge-review/references/switch-review_panels-lens_panel.md`, which a
-task binds only at `lens_panel`, so the single-reviewer path keeps its
-released instructions. The switch's `agent_variants` make every build ship
-`backlog-reviewer-lens`, `solution-reviewer-lens` and
-`design-system-reviewer-lens` on `routine_review`; the reviewers themselves
-keep their own class, and the validator requires a variant for every
-read-only panel reader. The switch's flip rule is the owner's condition for
-#312: at least 5 panel passes across at least 2 flows, panel valid-major
-recall at least equal to the official review's, and panel wall time at most
-50% of the official one.
-
-## Code review panel
-
-Process switch `code_review_panel` selects who reads a Delivery Item's frozen
-candidate in code review: the official code reviewer alone at the default,
-`single_reader`, or at `beside_official` a lens panel beside it.
-`plugins/software-engineering-team/skill-content/code-review/data/code-review-panel.json`
-declares the panel in the review-panel shape: its one review step
-`code_review`, the reader role, the lenses and the lens assignments, one
-reader each. Only `beside_official` binds that data, as its `value_data`,
-together with `code-review/references/switch-code_review_panel-beside_official.md`,
-and the switch's `agent_variants` make every build ship `code-reviewer-lens`
-on `routine_review`; `code-reviewer` keeps its own class, as every calibration
-reader does. `delivery_verification.py panel-result` registers the official
-result and each lens result, `calibrate` rules every panel claim, and
-`merge-panel` registers the one code review result with each finding's source
-and the pass's panel record. The `code_review_panel` validator check rejects
-data without the review-panel shape or with a step other than `code_review`, a
-reader without the value's variant, a variant without a reader and data the
-value does not bind. A new lens or a regrouped panel is a data change.
-
-At `risk_scoped` the same panel reads, but a lens reader joins the official
-reviewer only when the frozen change fires its lens trigger.
-`plugins/software-engineering-team/skill-content/code-review/data/lens-triggers.json`
-declares each lens's trigger, `changed_path_matches` or
-`changed_lines_above`, and the switch parameter it reads, which the owner
-sets: the `risk_paths` glob list for the security lens and the
-`lens_changed_lines` threshold for the correctness and conformance lenses.
-With no lens triggered the official reviewer reads alone. A new trigger for a
-lens is a data change; a new trigger kind is a code change in
-`delivery_verification.py`.
-
-## Mechanical passes
-
-Process switch `mechanical_pass_tier` selects who runs the writer side of
-backlog, Operation contract and Solution Design reviews. At `role_tier`, the
-default, every writer pass runs on its role's own class. At `mechanical`, a
-pass whose returned findings each name their exact fix (`apply_findings`)
-runs on the owning writer's `-mechanical` variant, and `render`, `stamp` and
-`check` steps run as direct entry commands with no role pass.
-`templates/task-input-policy.json` declares the pass kinds under `pass_kinds`,
-with the documents each writer's `apply_findings` pass may change, and
-`task_inputs.py --pass-kind` refuses a mechanical kind for a review, re-check,
-calibration, triage or repair task, for a role without a writer variant and
-outside that value, binds the verdict's findings with their exact repairs and
-narrows the write scope to the owning writer's documents among the inputs.
-Their eligibility and the measurement of the class's host values
-live in
-`challenge-review/references/switch-mechanical_pass_tier-mechanical.md`.
-The switch's `agent_variants` make every build ship `product-owner-mechanical`,
-`qa-engineer-mechanical`, `devops-engineer-mechanical` and
-`solution-architect-mechanical` on the `mechanical` class; each keeps its
-writer's body, boundaries and identity, so writer ownership is unchanged. The
-validator requires a switch value to declare every variant its switch
-reference names, so a build never stops shipping a variant a pass spawns, and
-rejects a mechanical variant for a read-only reviewer or challenger, so every
-review, re-check and calibration keeps its class under both values.
-
-A variant runs on the `mechanical` class: Haiku 5.5 at `high` on Claude
-Code and GPT-6 Luna at `high` on Codex, so every fix pass moves to the
-smaller model; the pass record says which ran with its model and effort.
-
-## Story size budget
-
-`plugins/software-engineering-team/skill-content/product-planning/data/story-size-measures.json`
-declares each story size measure: its `summary` and the `derivation` that the
-backlog compiler implements in `STORY_SIZE_DERIVATIONS`. The
-`story_size_measures` validator check rejects a measure whose derivation the
-compiler does not implement, a derivation two measures share and a malformed
-measure. Process switch `story_size_budget` declares its parameters
-`declared_by` that file, so a new measure is a data change plus its
-derivation, and the owner can set a limit for it at once.
-
-At `off`, the default, nothing is measured or shown. At `propose_split`,
-`backlog_compile.py check --json`, the review manifests and
-`delivery_compile.py init` report each story's measures against the owner's
-limits, and the Product Owner proposes a split for a story over budget before
-its epic review, as
-`product-planning/references/switch-story_size_budget-propose_split.md`
-defines. The budget is advisory and adds no story field. The switch's flip
-rule: at least 3 backlog revisions and 3 Deliveries, the owner accepting at
-least half of the split proposals, and stories within budget reaching
-integration with a median cycle time at most half that of stories over budget.
-
-`contract_deltas` counts an expected Operation contract revision only through
-a story's optional `operation_impact: required|not_applicable` classification
-with its `operation_reason`. The vault policy declares it under
-`backlog_contract.optional_story_classifications`, `backlog_compile.py check`
-validates it whenever a story carries it, and the `vault_policy_shape`
-validator check requires each declared classification and its reason to be
-vault-wide text properties. A story without it is unknown for it and counts no
-Operation delta. Switch `delivery_path` at `light_when_eligible` reads
-`required` as the failed condition `no_operation_impact`.
+A process behaviour change ships as the new default. A choice a project may
+make differently is one optional key of `workspace/config.json`, added to
+`project_config.py` (`CONFIG_FIELDS`, `ORDINARY_FIELDS` and its value check),
+kept by setup when present and changed through `/configure`. Today the only
+one is `pr_proof`.

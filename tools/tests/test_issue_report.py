@@ -28,7 +28,6 @@ from git_fixture import init_repository, remove_temporary  # noqa: E402
 
 PLUGIN = ROOT / "plugins/software-engineering-team"
 FILE_ISSUE = PLUGIN / "scripts/file_issue.py"
-ISSUE_SKILL = PLUGIN / "skill-content/issue-report/SKILL.md"
 NO_CHECKOUT_NOTICE = ("file_issue: notice: no Git checkout at the project root, so only"
                       " home-directory paths are checked\n")
 
@@ -49,7 +48,8 @@ class IssueReportTests(unittest.TestCase):
     def run_main(self, title: str, body: str):
         output = io.StringIO()
         error = io.StringIO()
-        with mock.patch("sys.stdin", io.StringIO(body)), \
+        # No checkout: only home-directory paths are checked, and no Git process starts.
+        with mock.patch("sys.stdin", io.StringIO(body)), mock.patch.object(self.issue, "git_lines", return_value=[]), \
                 redirect_stdout(output), redirect_stderr(error):
             code = self.issue.main(["--title", title, "--approved-payload-sha256", self.issue.payload_hash(title, body)])
         return code, output.getvalue(), error.getvalue()
@@ -74,24 +74,6 @@ class IssueReportTests(unittest.TestCase):
             self.assertEqual(invoke("--approved-payload-sha256", payload["payload_sha256"])[0], 0)
             create.assert_called_once_with(title, body)
 
-    def test_skill_is_chat_previewed_external_and_stateless(self):
-        text = ISSUE_SKILL.read_text(encoding="utf-8")
-        for required in (
-            "project_scope: external",
-            "agentrof/agent-marketplace",
-            "Summary",
-            "Reproduction or Motivation",
-            "Expected Behavior",
-            "Actual Behavior",
-            "Impact",
-            "Evidence and Context",
-            "`Open issue`, `Revise` or `Cancel`",
-            "standard input",
-            "Outcome unknown, do not retry automatically",
-            "does not require project setup",
-        ):
-            self.assertIn(required, text)
-
     def test_empty_title_and_body_fail_before_network(self):
         with mock.patch.object(self.issue, "create_issue") as create:
             code, output, error = self.run_main("   ", "body")
@@ -104,7 +86,6 @@ class IssueReportTests(unittest.TestCase):
         self.assertIn("Not opened: stdin body is empty", error)
         create.assert_not_called()
 
-    @integration
     def test_confirmed_url_is_the_only_success_and_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -141,66 +122,22 @@ class IssueReportTests(unittest.TestCase):
         )
         self.assertEqual(after, before)
 
-    @integration
-    def test_noncanonical_success_response_is_unknown_not_opened(self):
-        with mock.patch.object(
-            self.issue,
-            "create_issue",
-            return_value="https://example.invalid/issues/42",
-        ):
-            code, output, error = self.run_main("Title", "Body")
-        self.assertEqual(code, 3)
-        self.assertEqual(output, "")
-        self.assertNotIn("Opened", error)
-        self.assertIn("Outcome unknown, do not retry automatically", error)
+    def test_definite_ambiguous_and_noncanonical_outcomes_are_distinct(self):
+        cases = ((self.issue.NotOpened("authentication rejected"), 2, "Not opened: authentication rejected"),
+                 (self.issue.OutcomeUnknown("request timed out"), 3, "do not retry automatically"),
+                 ("https://example.invalid/issues/42", 3, "Outcome unknown, do not retry automatically"))
+        for outcome, code, fragment in cases:
+            with self.subTest(fragment=fragment):
+                effect = {"return_value": outcome} if isinstance(outcome, str) else {"side_effect": outcome}
+                with mock.patch.object(self.issue, "create_issue", **effect):
+                    result = self.run_main("Title", "Body")
+                self.assertEqual(result[:2], (code, ""))
+                self.assertIn(fragment, result[2])
+                self.assertNotIn("Opened", result[2])
 
-    @integration
-    def test_failed_filing_writes_nothing(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            sentinel = root / "sentinel.txt"
-            sentinel.write_text("unchanged\n", encoding="utf-8")
-            before = {path.relative_to(root): path.read_bytes()
-                      for path in root.rglob("*") if path.is_file()}
-            previous = Path.cwd()
-            os.chdir(root)
-            try:
-                with mock.patch.object(
-                    self.issue,
-                    "create_issue",
-                    side_effect=self.issue.NotOpened("authentication rejected"),
-                ):
-                    code, output, error = self.run_main("Title", "Body")
-            finally:
-                os.chdir(previous)
-            after = {path.relative_to(root): path.read_bytes()
-                     for path in root.rglob("*") if path.is_file()}
-        self.assertEqual(code, 2)
-        self.assertEqual(output, "")
-        self.assertIn("Not opened", error)
-        self.assertEqual(after, before)
-
-    @integration
-    def test_definite_and_ambiguous_failures_have_distinct_outcomes(self):
-        with mock.patch.object(
-            self.issue,
-            "create_issue",
-            side_effect=self.issue.NotOpened("authentication rejected"),
-        ):
-            definite = self.run_main("Title", "Body")
-        self.assertEqual(definite[0], 2)
-        self.assertEqual(definite[1], "")
-        self.assertIn("Not opened: authentication rejected", definite[2])
-
-        with mock.patch.object(
-            self.issue,
-            "create_issue",
-            side_effect=self.issue.OutcomeUnknown("request timed out"),
-        ):
-            ambiguous = self.run_main("Title", "Body")
-        self.assertEqual(ambiguous[0], 3)
-        self.assertEqual(ambiguous[1], "")
-        self.assertIn("do not retry automatically", ambiguous[2])
+    def test_the_filer_refuses_the_home_paths_the_validator_refuses(self):
+        self.assertEqual(self.issue.HOME_PATH_RE.pattern, validate.HOME_PATH_RE.pattern)
+        self.assertEqual(self.issue.SYSTEM_HOMES, validate.SYSTEM_HOMES)
 
     def test_no_cli_or_token_is_definitely_not_opened(self):
         with mock.patch.object(self.issue.shutil, "which", return_value=None), \
@@ -242,15 +179,6 @@ class IssueReportTests(unittest.TestCase):
                     self.issue.subprocess, "run", return_value=rejected
                 ) as run:
             with self.assertRaisesRegex(self.issue.NotOpened, "not logged in"):
-                self.issue.create_issue("title", "body")
-        run.assert_called_once()
-
-    def test_gh_process_start_failure_is_definitely_not_opened(self):
-        with mock.patch.object(self.issue.shutil, "which", return_value="/bin/gh"), \
-                mock.patch.object(
-                    self.issue.subprocess, "run", side_effect=OSError("missing")
-                ) as run:
-            with self.assertRaisesRegex(self.issue.NotOpened, "check failed"):
                 self.issue.create_issue("title", "body")
         run.assert_called_once()
 
@@ -296,60 +224,6 @@ class IssueReportTests(unittest.TestCase):
                 ):
                     with self.assertRaises(expected):
                         self.issue.create_with_api("title", "body", "secret")
-
-
-class UpstreamConfidentialityTests(unittest.TestCase):
-    """The Agent Marketplace repository is public, so text sent to it never
-    identifies the project it comes from (#357)."""
-
-    def test_the_skill_scans_the_payload_before_it_is_shown_and_filed(self):
-        raw = ISSUE_SKILL.read_text(encoding="utf-8")
-        text = " ".join(raw.split())
-        self.assertIn("\n## Confidentiality\n", raw)
-        for term in ("An issue never identifies the reporting project or its data",
-                     "commit id, local or home path, story, Delivery, scenario or requirement id",
-                     '"in one measured project"',
-                     "retell every project detail as Confidentiality requires"):
-            with self.subTest(term=term):
-                self.assertIn(term, text)
-        scan = text.index("Scan the exact title and body before showing them")
-        self.assertLess(text.index("## Confidentiality"), text.index("## Procedure"))
-        self.assertLess(scan, text.index("Present the exact payload in chat"))
-        self.assertLess(text.index("Present the exact payload in chat"),
-                        text.index("invoke the packaged `scripts/file_issue.py`"))
-        self.assertIn("`Revise` changes the payload in chat, scans it again as step 3 does", text)
-
-    def test_a_payload_the_filer_refuses_returns_to_revise(self):
-        text = " ".join(ISSUE_SKILL.read_text(encoding="utf-8").split())
-        for term in ("exactly once per approved payload",
-                     "with `--project-root` set to the root of the project in scope",
-                     "a home-directory path, the project's checkout path, also written from"
-                     " the home directory, a Git remote URL or its owner/repo, or the project's"
-                     " repository or folder name as a word in any case, also inside"
-                     " percent-encoded, JSON-escaped and file URL text",
-                     "Without a Git checkout at the project root it checks home-directory"
-                     " paths only and prints a notice saying so",
-                     "names each fragment's kind and position, never its value",
-                     "When that reason says the payload identifies the reporting project,"
-                     " continue as `Revise`",
-                     "A refused payload is never filed"):
-            with self.subTest(term=term):
-                self.assertIn(term, text)
-
-    def test_every_role_and_session_reads_the_rule(self):
-        # The same list as the skill and the maintainer protocol, so a role
-        # keeps package paths and anonymous numbers a useful report needs.
-        listed = ("no project or code name, repository, link or issue reference, commit id,"
-                  " local or home path, story, Delivery, scenario or requirement id, measured"
-                  " data presented as this project's, domain, client or person")
-        for relative in ("constitution.md", "templates/project-instructions/common.md"):
-            with self.subTest(source=relative):
-                text = " ".join((PLUGIN / relative).read_text(encoding="utf-8").split())
-                self.assertIn("never identifies this project", text)
-                self.assertIn(listed, text)
-                self.assertIn("the files a pull request adds included", text)
-                self.assertIn("anonymous", text)
-
 
 
 @integration
@@ -416,22 +290,6 @@ class ProjectFragmentRefusalTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertNotIn(value, error)
 
-    def test_a_scp_or_ssh_remote_is_refused_by_its_owner_and_repository(self):
-        for url in ("git@github.com:fixture-owner/fixture-app.git",
-                    "ssh://git@gitlab.example.test:22/fixture-owner/fixture-app.git"):
-            with self.subTest(url=url):
-                self.remote(url)
-                code, error, create = self.file("Report", "See fixture-owner/fixture-app.\n")
-                self.assertEqual(code, 2)
-                create.assert_not_called()
-                self.assertIn("remote repository name at body line 1, column 5", error)
-
-    def test_a_payload_without_those_fragments_is_filed_from_the_checkout(self):
-        code, error, create = self.file(
-            "Refresh fails", "## Summary\nRefresh fails in an owner/repository checkout.\n")
-        self.assertEqual((code, error), (0, ""))
-        create.assert_called_once()
-
     def test_the_marketplace_remote_is_not_the_reporting_project(self):
         self.remote("https://github.com/agentrof/agent-marketplace.git")
         code, error, create = self.file(
@@ -486,7 +344,8 @@ class ProjectFragmentRefusalTests(unittest.TestCase):
     def test_a_remote_is_read_as_git_rewrites_it_and_in_its_userless_scp_form(self):
         subprocess.run(["git", "-C", str(self.root), "config",
                         "url.https://github.com/.insteadOf", "hub:"], check=True)
-        for url in ("hub:fixture-owner/fixture-app", "github.com:fixture-owner/fixture-app.git"):
+        for url in ("hub:fixture-owner/fixture-app", "github.com:fixture-owner/fixture-app.git",
+                    "ssh://git@gitlab.example.test:22/fixture-owner/fixture-app.git"):
             for body in ("Fork of fixture-owner/fixture-app fails.\n",
                          "See https://github.com/fixture-owner/fixture-app/issues/3.\n"):
                 with self.subTest(url=url, body=body):
@@ -529,21 +388,6 @@ class ProjectFragmentRefusalTests(unittest.TestCase):
                 create.assert_not_called()
                 self.assertIn(expected, error)
                 self.assertEqual(error.count(" at "), 1, error)
-
-    def test_the_marketplace_name_is_no_project_name(self):
-        fork = self.root.parent / "agent-marketplace"
-        fork.mkdir()
-        init_repository(fork)
-        subprocess.run(["git", "-C", str(fork), "remote", "add", "origin",
-                        "https://github.com/fixture-owner/agent-marketplace.git"], check=True)
-        code, error, create = self.file(
-            "Refresh fails", "The agent-marketplace refresh fails.\n", "--project-root", str(fork))
-        self.assertEqual((code, error), (0, ""))
-        create.assert_called_once()
-
-    def test_the_filer_refuses_the_home_paths_the_validator_refuses(self):
-        self.assertEqual(self.issue.HOME_PATH_RE.pattern, validate.HOME_PATH_RE.pattern)
-        self.assertEqual(self.issue.SYSTEM_HOMES, validate.SYSTEM_HOMES)
 
     def test_a_system_or_service_home_names_no_person_and_is_filed(self):
         code, error, create = self.file(

@@ -3,7 +3,7 @@
 
 The team has no shared state service.  This hook only announces the active
 team at session start and leaves mutation policy to the owning document
-compiler and the project-local vault hook.  It also reports the project's
+compiler.  It also reports the project's
 rendered role files whose stamp does not match the installed package and the
 project's settings: in the Claude Code package the session then spawns the
 plugin's roles until a refresh, and in the Codex package, which has no other

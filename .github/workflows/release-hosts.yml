@@ -3,8 +3,6 @@ name: release-hosts
 on:
   workflow_dispatch:
   pull_request:
-  merge_group:
-    types: [checks_requested]
   schedule:
     - cron: "17 4 * * 1"
 
@@ -16,41 +14,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  host-plan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      runner_os: ${{ steps.policy.outputs.runner_os }}
-      python: ${{ steps.policy.outputs.python }}
-      node: ${{ steps.policy.outputs.node }}
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-      - name: Read the host runtime policy
-        id: policy
-        run: python3 tools/ci_host_policy.py --github-output "$GITHUB_OUTPUT"
-
-  fresh-host-lifecycle:
-    name: Fresh checkout lifecycle
-    needs: host-plan
-    runs-on: ${{ needs.host-plan.outputs.runner_os }}
+  native-host-lifecycle:
+    name: Claude Code and Codex lifecycle
+    runs-on: macos-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          fetch-depth: 2
           persist-credentials: false
+      # A pull request that touches no package, host or install path skips the
+      # host install; the required check still reports. Every other event runs it.
+      - name: Decide whether the change reaches a host
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          hosts=true
+          if [ "$EVENT_NAME" = pull_request ]; then
+            changed="$(git diff --name-only HEAD^1 HEAD)"
+            if ! grep -Eq '^(plugins|dist|platforms|\.claude-plugin|\.agents)/|^(product|package-modes|versions)\.json$|^tools/(smoke_plugin_installs|native_recovery_smoke|build_distributions)\.py$|^tools/data/host-cli-versions\.json$|^\.github/workflows/release-hosts\.yml$' <<<"$changed"; then
+              hosts=false
+            fi
+          fi
+          echo "hosts=$hosts" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.scope.outputs.hosts == 'true'
         with:
-          python-version: ${{ needs.host-plan.outputs.python }}
+          python-version: "3.14"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: steps.scope.outputs.hosts == 'true'
         with:
-          node-version: ${{ needs.host-plan.outputs.node }}
+          node-version: "24"
           package-manager-cache: false
       - name: Install pinned host CLIs
+        if: steps.scope.outputs.hosts == 'true'
         run: |
           set -euo pipefail
           claude_version="$(python3 -c 'import json; print(json.load(open("tools/data/host-cli-versions.json"))["claude_code"])')"
@@ -58,25 +57,6 @@ jobs:
           npm install --global "@anthropic-ai/claude-code@${claude_version}" "@openai/codex@${codex_version}"
           claude --version | grep -F "${claude_version}"
           codex --version | grep -F "${codex_version}"
-      - name: Record host versions
-        run: |
-          claude --version
-          codex --version
       - name: Exercise both hosts against the exact checkout
+        if: steps.scope.outputs.hosts == 'true'
         run: python3 tools/smoke_plugin_installs.py --channel checkout
-
-  native-host-lifecycle:
-    name: Claude Code and Codex lifecycle
-    if: always()
-    needs: [host-plan, fresh-host-lifecycle]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Require the plan and a fresh lifecycle success
-        env:
-          PLAN_RESULT: ${{ needs.host-plan.result }}
-          FRESH_RESULT: ${{ needs.fresh-host-lifecycle.result }}
-        run: |
-          set -euo pipefail
-          test "$PLAN_RESULT" = success
-          test "$FRESH_RESULT" = success

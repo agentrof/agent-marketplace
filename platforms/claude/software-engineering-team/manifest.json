@@ -1,7 +1,7 @@
 {
   "name": "software-engineering-team",
-  "version": "2026.10.6",
-  "description": "Software Engineering Team for Requirement Flow, approved backlog planning and coordinated Delivery execution.",
+  "version": "2026.10.7",
+  "description": "Software Engineering Team for fast-lane delivery: task, branch, pull request, review and merge.",
   "author": {
     "name": "Agentrof",
     "url": "https://github.com/agentrof"

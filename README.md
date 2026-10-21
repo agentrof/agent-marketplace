@@ -1,16 +1,15 @@
 # Agent Marketplace
 
 Agent Marketplace ships one standalone, host-neutral Software Engineering Team
-for Claude Code and Codex. The team takes a user Requirement through the
-applicable analysis, design and backlog gates, then hands the approved backlog
-to the Delivery Flow.
+for Claude Code and Codex. The team turns each request into one task, one
+branch and one pull request, verified by the project's CI and one reviewer.
 
 ## Catalog
 
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 17 | 18 | 15 |
+| 1 | 11 | 6 | 10 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.
@@ -31,47 +30,153 @@ The hooks run `python3` from PATH and need Python 3.14 (macOS: `brew install pyt
 
 Start `software-engineering-team:setup` in the project. The setup entry uses
 `scripts/setup_project.py inspect|apply|check` to converge the workspace,
-tracked vault contract, ignored local Obsidian plugin projection, closed
-configuration, managed ignore and checkout-attribute blocks and portable gate.
+closed configuration and the managed ignore and checkout-attribute blocks.
 Claude Code and Codex use the same canonical workflows and project-local files.
 
-## Requirement and Delivery path
+## Companions
+
+Setup can add optional third-party skills through their own official install
+paths; none is copied into the package and none is required. Run
+`scripts/setup_project.py companions check --project-root <root>` for a status
+table and `companions apply` to install, write the deny rules, environment and
+marker files, and print any command the owner must run by hand. Blocked
+skills become `Skill(<plugin>:<skill>)` deny rules in `.claude/settings.json`
+and `[[skills.config]]` entries with `enabled = false` in the user Codex
+config; the environment is written to the Claude project settings.
+
+### Setup
+
+1. Run `scripts/setup_project.py companions apply --project-root <root>`
+   (add `--host claude` or `--host codex` for one host). It installs every
+   missing companion: the Claude plugins and project skills, the Codex
+   plugins and skills when the `codex` CLI is present, the graphify CLI
+   through `uv`, its skill for each host and its git hooks.
+2. Run what it prints. `RUN` lines are install commands that did not
+   succeed; `APP` lines are steps for the owner, once: without the `codex`
+   CLI, add the listed plugins in the Codex app via `/plugins`, and install
+   `uv` if it is missing. `NOTE` lines are one-time owner steps the check
+   cannot see, such as trusting the ponytail hooks in Codex `/hooks`.
+3. Run `scripts/setup_project.py companions check --project-root <root>`.
+   It exits 0 when every row reads `yes` or `-` and nothing is printed below
+   the table.
+
+The docs graph is built once by the owner
+(`GRAPHIFY_OUT=.agentrof/graphify/docs graphify extract workspace/docs --backend claude-cli`);
+after that, deliver refreshes it in the background for each merged task
+that changed Markdown under `workspace/docs`, logging to
+`.agentrof/graphify/refresh.log`.
+
+<!-- companions:start -->
+
+The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.
+
+### superpowers
+
+Debugging, self-verification, review intake and skill-writing disciplines. Four skills add method the team lacks; the rest duplicate the deliver flow and stay blocked. [https://github.com/obra/superpowers](https://github.com/obra/superpowers), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add obra/superpowers-marketplace`<br>`claude plugin install superpowers@superpowers-marketplace --scope project` | `claude plugin list --json` lists `superpowers@superpowers-marketplace` |
+| codex | user | `codex plugin add superpowers@openai-curated` | `codex plugin list --json` lists `superpowers@openai-curated` |
+
+Blocked: `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `using-git-worktrees`, `finishing-a-development-branch`, `test-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `diagnosing-superpowers`. They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.
+
+Environment: `SUPERPOWERS_DISABLE_TELEMETRY=1`.
+
+### humanizer
+
+Removes AI-writing tells from prose. Pull request bodies, documents and issues read as written by the team, without changing what they say. [https://github.com/blader/humanizer](https://github.com/blader/humanizer), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add blader/humanizer`<br>`claude plugin install humanizer@humanizer --scope project` | `claude plugin list --json` lists `humanizer@humanizer` |
+| codex | project | `npx skills add blader/humanizer --agent codex -y` | `.agents/skills/humanizer/SKILL.md` exists |
+
+### security-audit
+
+Security review lens with a tenant data isolation reference. High-rigor reviews get a security method; guidance mode writes nothing. [https://github.com/cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -y` | `.claude/skills/security-audit/SKILL.md` exists |
+| codex | project | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y` | `.agents/skills/security-audit/SKILL.md` exists |
+
+### diagram-design
+
+Architecture, delta, sequence and ER diagrams. Structural architecture changes get a drawn delta; no telemetry. [https://github.com/cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add cathrynlavery/diagram-design`<br>`claude plugin install diagram-design@diagram-design --scope project` | `claude plugin list --json` lists `diagram-design@diagram-design` |
+| codex | user | `codex plugin marketplace add cathrynlavery/diagram-design`<br>`codex plugin add diagram-design@diagram-design` | `codex plugin list --json` lists `diagram-design@diagram-design` |
+
+Setup writes `.diagram-design`.
+
+### impeccable
+
+Frontend design craft and read-only UI critique. Closes the frontend design quality gap; installed without hooks and with telemetry off. [https://github.com/pbakaus/impeccable](https://github.com/pbakaus/impeccable), Apache-2.0.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `npx impeccable install --providers=claude --project --no-hooks -y` | `.claude/skills/impeccable/SKILL.md` exists |
+| codex | project | `npx impeccable install --providers=codex --project --no-hooks -y` | `.agents/skills/impeccable/SKILL.md` exists |
+
+Environment: `IMPECCABLE_CONTEXT_DIR=workspace/experience-design`, `IMPECCABLE_NO_TELEMETRY=1`.
+
+Setup writes `.impeccable/config.json`.
+
+Check fails on `DESIGN.md`, `PRODUCT.md`, `docs/DESIGN.md`, `docs/PRODUCT.md`. DESIGN.md and PRODUCT.md live only in workspace/experience-design.
+
+### graphify
+
+Knowledge graph of the project's code and documents. Roles find context with a graph query instead of reading many files; the code graph refreshes through git hooks on commit, checkout and merge, the docs graph in the background after deliver merges a task. [https://github.com/Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify), Apache-2.0.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| cli | user | `uv tool install graphifyy` | `graphify --version` succeeds |
+| git-hook | project | `graphify hook install` | `graphify hook status` succeeds and prints `post-commit: installed` |
+| claude | user | `graphify install --platform claude` | `.claude/skills/graphify/SKILL.md` exists in the home directory |
+| codex | user | `graphify install --platform codex` | `.codex/skills/graphify/SKILL.md` exists in the home directory |
+
+uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply.
+
+Environment: `GRAPHIFY_OUT=.agentrof/graphify`.
+
+Setup writes `.agentrof/graphify/.gitignore`, `workspace/docs/.graphifyignore`.
+
+### ponytail
+
+Smallest complete change, plain-language review and a shortcut debt ledger. Developer roles write less code without dropping callers, tests or safety; review and retrospective get its review and debt reports. [https://github.com/DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail), MIT.
+
+| Host | Scope | Install | Verify |
+|---|---|---|---|
+| claude | project | `claude plugin marketplace add DietrichGebert/ponytail`<br>`claude plugin install ponytail@ponytail --scope project` | `claude plugin list --json` lists `ponytail@ponytail` |
+| codex | user | `codex plugin marketplace add DietrichGebert/ponytail`<br>`codex plugin add ponytail@ponytail` | `codex plugin list --json` lists `ponytail@ponytail` |
+
+Codex runs the ponytail hooks only after the owner trusts them once in /hooks.
+
+Environment: `PONYTAIL_DEFAULT_MODE=full`, `PONYTAIL_SUBAGENT_MATCHER=^software-engineering-team(:|-)(backend-developer|frontend-developer|devops-engineer)(-mechanical)?$`.
+
+<!-- companions:end -->
+
+## Fast lane
 
 ```text
-/setup -> /requirement -> required stages -> /backlog-plan
-        -> /delivery-plan -> /execution-plan -> /deliver
+/setup -> /deliver -> task -> branch -> pull request -> review -> merge
 ```
 
-The Requirement record owns the impact matrix. Only required stages run, reuse
-must cite an approved current package, and `not_applicable` requires a concrete
-rationale. The approved backlog is the handoff to Delivery; no timebox,
-velocity or release state is created.
+`/deliver` turns a request into one task under
+`workspace/docs/backlog/tasks/` with its acceptance criteria and tests, the
+owner approves it, and the owning developer role writes the change on its own
+branch. The project's CI and the routed reviewers verify the pull request,
+with the read-only `security-reviewer` in parallel on a risky change; it
+merges with 0 critical and 0 major findings. The flow is defined in
+`plugins/software-engineering-team/flows/fast-lane.md`.
 
-The current lifecycle and Git coordination contract is documented in
-[docs/requirement-delivery-protocol.md](docs/requirement-delivery-protocol.md).
+Start each `/deliver` task, parallel ones included, in its own fresh session
+on Sonnet: Claude `claude --model sonnet` (or `/model` in the app), Codex
+`codex -m gpt-6.1-sol -c model_reasoning_effort=medium`.
 
-## Backlog layout
-
-```text
-workspace/docs/backlog/
-  backlog.md
-  reviews/round-1-backlog-review.md
-  epics/<epic-slug>/
-    epic.md
-    reviews/round-1-epic-review.md
-    stories/<story-slug>/
-      story.md
-      test-plan.md
-  _generated/{registry.json,board.md,dependency-map.md,test-coverage.md}
-```
-
-Each story names one accountable implementation role and any supporting roles
-with concrete contributions. The epic review derives from its epic and
-verifies its exact child story/test-plan set. The root review derives from the
-backlog and relates to the exact epic set while covering cross-epic overlap,
-dependency direction, ordering and global coverage. Test plans map acceptance
-criteria and business rules to stable Given/When/Then scenarios and required
-automation targets. Test execution remains a later delivery gate.
 `/issue-report` is a stateless support path for Agent Marketplace defects and
 improvements. It previews the exact GitHub payload in chat, files only after
 explicit approval and never stores issue state in the consuming project.
@@ -86,9 +191,8 @@ standalone plugin.
 
 Marketplace package upgrades inspect one deterministic refresh plan, apply it
 with closing-gate rollback, then prove that no operation remains. Authored
-files, unknown project configuration and user-owned Obsidian knobs are
-preserved. Policy-owned keys and package-local plugin files converge before the
-tracked diff is committed. Release Management is deliberately a later scope.
+files and unknown project configuration are preserved; the package-owned
+surfaces converge before the tracked diff is committed. Release Management is deliberately a later scope.
 
 ## Quality
 

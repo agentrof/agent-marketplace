@@ -3,6 +3,8 @@
   "files": [
     "{{user_companion}}",
     "{{workspace}}/memory/agent-marketplace.md",
+    "{{workspace}}/memory/current-plan.md",
+    "{{workspace}}/memory/product-decisions.md",
     "{{workspace}}/memory/me.md",
     "{{workspace}}/memory/profile.md"
   ]

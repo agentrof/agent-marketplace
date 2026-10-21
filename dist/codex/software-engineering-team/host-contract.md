@@ -1,352 +1,51 @@
 # Host Contract
 
-- Run state-changing entries only in Codex Code or Default mode. In Plan mode,
-  stop before mutation and ask the user to switch modes.
-- `team_guard.py` announces the installed team and the exact absolute Python
-  and scripts-directory invocation binding at session start, and reports the
-  project's role files in `.codex/agents/` whose stamp is not the installed
-  plugin's. It never registers global state or blocks project work.
-  `vault_hook.py` protects only compiler-owned fields and immediately checks
-  changed vault documents.
-- Every hook runs through `hook_launcher.py`, which first checks the plugin's
-  Python runtime floor. Below it the launcher denies only a write to a path the
-  vault hook governs and a command that runs one of the plugin's scripts; a raw
-  shell write to a governed file goes unchecked, since the plugin's own flows
-  are halted. When the session context reports
-  `AGENT_MARKETPLACE_PYTHON: unsupported`, stop the entry and tell the user the
-  reason and the fix that context gives.
-- One Software Engineering Team owns a project. There is no shared project
-  state service or cross-project work key.
-- Resolve every canonical "packaged script" reference relative to the installed
-  plugin root. Invoke a machine-owned writer by passing that absolute script
-  path to the active hook runtime's exact absolute Python executable. Bare
-  interpreter names receive no pre-authorized writer grant. For backward
-  compatibility, direct bare-Python `init` and `render-application` commands
-  may retain their exact command-specific output only when PATH resolves to the
-  trusted hook runtime and the owning compiler validates the final application;
-  otherwise the hook restores it. Environment indirection and direct shebang
-  execution are guard-only. No shared dispatcher or second plugin is involved.
-- Native Windows lifecycle writer preservation is not claimed until Codex
-  supplies an attested shell-family contract. Shared hook logic is portable to
-  Windows and fails closed there; real lifecycle parity remains a host gate.
-- Bring an approved source handoff into the local checkout with Git itself,
-  never a pull or a wrapped script: fetch it first, then run one direct shell
-  command from the checkout root with Git's absolute path, `<git> merge
-  --no-edit <source>`, or, when `HEAD` already holds that source, `<git>
-  restore --source=<source> --worktree -- workspace/docs/experience-design`.
-  `<source>` is a committed source holding the current remote target. The
-  vault hook attests only these two forms, against the open project Fence and
-  its target; another merge, pull or checkout that changes compiler-owned
-  Experience state is restored, and the hook's message names the form to run.
-- Vault hooks are workflow-integrity controls for host-dispatched tool effects,
-  not a same-user operating-system sandbox. A process deliberately targeting
-  hook scratch or recovery files has the user's filesystem authority; host
-  sandboxing and OS permissions remain the security boundary.
-- A canonical entry with `project_scope: external` does not require project
-  setup, workspace configuration or a Git repository.
-- Use `request_user_input` only at declared choice gates, preserving options,
-  recommendation and tradeoffs. `request_user_input` takes at most three
-  questions per call and two to three options per question, and Codex adds a
-  free-form `Other` option itself.
-- Under switch `owner_gates` at `two_fixed_gates`, ask the owner inside a
-  Delivery only at gate A, gate B, an early gate or for an at-once class, and
-  queue every other question in the Delivery's `User Decisions`. Present each
-  gate through `request_user_input` in calls of at most three questions, with
-  the recommended option first and the tradeoffs in the option descriptions.
-- When the canonical workflow says `spawn`, use the matching project-scoped
-  custom agent from `.codex/agents/` and wait for every required agent before
-  synthesis. Never run overlapping writers concurrently.
-- Under switch `review_panels` at `lens_panel`, run a review panel's lens
-  readers in parallel: start every reader of the panel before waiting on any
-  of them, then wait for all of them before triage.
-- Under switch `code_review_panel` at `beside_official`, or at `risk_scoped`
-  when its manifest carries a panel, run the code review
-  panel beside the official reviewer: start the official `code-reviewer`,
-  every `code-reviewer-lens` reader of the panel and QA before waiting on any
-  of them, then wait for all of them before the calibration and `merge-panel`.
-- Under switch `implementation_schedule` at `parallel_lanes_v1`, writers
-  run at the same time only when their approved lane scopes are disjoint.
-  Start every lane that waits for no producer before waiting on any of them,
-  start each consumer lane as soon as every producer it waits for has
-  finished, and wait for every lane before the coordinator's commit.
-- Under switch `execution_planning` at `single_source_bundle`, start every
-  reader of an execution-plan bundle before waiting on any of them, then wait
-  for all of them before triage.
-- Under switch `reader_waves` at `all_at_once`, start a review or recheck
-  wave only after closing every finished agent thread with `close_agent`, a
-  writer between its passes included: Codex counts every open spawned thread,
-  finished or not, against the session's thread cap,
-  `agents.max_concurrent_threads_per_session` or its older alias
-  `agents.max_threads`. Then start every reader of the wave before waiting on
-  any of them, and wait for all of them before triage. When fewer threads are free than the wave has readers, start
-  the readers with the largest inputs first, say so in the progress message,
-  and start each remaining reader as soon as a reader finishes and is closed.
-  Every wave's progress message names the wave size and how many of its
-  readers run at once. A closed writer's next pass starts fresh from its task
-  manifest and the returned findings.
-- Under switch `review_scope` at `impact_closure`, run the owning
-  compiler's structural check the flow names before starting any reader, so
-  no reader is spent on a package the compiler refuses, and give each reader
-  its impact closure in full and every approved, unchanged note outside it as
-  its hash-bound summary.
-- Under switch `review_fanout` at `per_unit`, start one reader per changed
-  unit of a review before waiting on any of them, wait for all of them, then
-  start the one aggregator with their findings and the compilers' cross-unit
-  facts, and wait for it before triage.
-- Under switch `review_levels` at `concurrent_when_independent`, start the
-  readers of every review level the flow declares independent before waiting
-  on any of them, then wait for all of them before triage; approval still
-  waits for every level.
-- Under switch `context_pack` at `role_digest`, give each started role the
-  pack `context_pack.py build` returns for its entry, role and mode in place
-  of the full required reads.
-- Depending on the model, the provider's prompt cache can drop a role's
-  context five minutes after the model call that last used it, and a model
-  call after that pays the full price for the whole context again. So a role
-  that waits inside its turn never blocks one tool call longer than the
-  Delivery runner's 240-second `wait` bound: it runs `delivery_verification.py
-  wait` with a shell timeout above that bound, starts a verification command
-  that can run longer as a background process that keeps its output in a
-  file, and never waits through `sleep`, a polling loop or a longer timeout.
-- During setup or a package refresh, regenerate the host projection, run the
-  generated project check and preserve authored vault files. The generator owns
-  only portable instruction roots, local project memory and the role files it
-  renders into `.codex/agents/`, each with its generated header. The last line
-  of that header stamps the package version and source agent the file was
-  rendered from and the digest of the model and effort the project config
-  resolves for the role. When `team_guard.py` reports at session start that a
-  stamp does not match the installed plugin or the project's
-  `workspace/config.json`, as after a plugin update or a config change, such
-  as a pull, that setup has not rendered yet, those roles still run the role
-  definition, model and effort they were rendered with: the hook tells the
-  user once per session to run setup, which renders them again, and the next
-  start of a role reads its new file.
-- Role agents use the package's `auto` execution profile by purpose class:
-  each class slot runs one model of the package's model catalog, named by its
-  exact model ID, at the slot's reasoning effort, and every role file carries
-  both `model` and `model_reasoning_effort`. A class that escalates has a
-  second slot, `<class>_escalated`, for a task of size `l`, rigor `high` or a
-  risk flag. `mechanical` runs `gpt-6-luna` at `high`; every other slot runs
-  `gpt-6.1-sol`, from `low` for `orchestration` to `xhigh` for
-  `security_review`. A role file's `model` takes precedence over a spawn
-  request, so every build renders, besides each role on its own class, an
-  `<agent>-escalated` variant for every role on a class that escalates and
-  the purpose variant `code-reviewer-security` on `security_review`;
-  `model_class.py resolve` names the agent to start, and the spawn passes no
-  model. Every build also ships the `-lens` variants of the read-only
-  document reviewers and `code-reviewer-lens` on `routine_review`; only
-  review panels under switch `review_panels` at `lens_panel` and the code
-  review panel under switch `code_review_panel` at `beside_official` or
-  `risk_scoped` start them, and the reviewers themselves keep their own
-  class.
-  The pinned models need Codex 0.159.1 or later, the first release whose
-  bundled model catalog lists `gpt-6.1-sol`; `gpt-6-luna` is bundled from
-  0.157.0.
-  To make every role
-  follow the parent session's model, run `<absolute-python>
+- Run state-changing entries only in Code or Default mode; in Plan mode stop
+  before mutation and ask the user to switch.
+- One Software Engineering Team owns a project. Packaged scripts resolve
+  relative to the installed plugin root. An entry with `project_scope:
+  external` needs no setup, workspace config or Git repository.
+- At session start `team_guard.py` reports the absolute Python and scripts
+  binding and any role file in `.codex/agents/` whose stamp no longer matches
+  the installed plugin or `workspace/config.json`; it never blocks. Every hook
+  runs through `hook_launcher.py`; when the context reports
+  `AGENT_MARKETPLACE_PYTHON: unsupported`, stop the entry and give the user
+  the stated fix.
+- Choice gates use `request_user_input`, only at declared gates: at most three
+  questions per call, two to three options each, recommendation first; Codex
+  adds `Other` itself.
+- `spawn` uses the matching project-scoped custom agent from `.codex/agents/`.
+  Wait for every required agent; never run overlapping writers.
+- Setup and refresh regenerate the host projection, run the
+  generated project check and preserve authored files. The generator owns only the instruction
+  roots, local memory and the header-stamped role files in `.codex/agents/`. A
+  stale stamp means the role still runs what it was rendered with until setup
+  renders it again; the next start reads the new file.
+- Workhorse model: `deliver` runs in a fresh session per task started with
+  `codex -m gpt-6.1-sol -c model_reasoning_effort=medium`.
+- Models: a role file's `model` and `model_reasoning_effort` win over a spawn
+  request, so the spawn passes no model; the pinned models need Codex 0.159.1
+  or later. `/configure models` records
+  `class_models` and `role_classes` overrides and renders the role files
+  again; never edit them by hand; `ultra` is refused. `<absolute-python>
   <absolute-package-scripts>/generate_codex_project.py apply --project-root
-  <root> --scope local --execution-profile inherit`, which omits `model` from
-  every role file and keeps `model_reasoning_effort`; `--execution-profile
-  auto` restores the pins and checks them again. The managed agent files
-  record the choice and later refreshes keep it.
-- A project sets a class slot's model and effort and a role's class through
-  `/configure models`, which records only overrides in
-  `workspace/config.json`: `class_models`, per host and slot a `model`, an
-  exact model ID of this host's model list or `session`, and an `effort`,
-  either one optional, and `role_classes`, which moves any role, the
-  generated variants included, to another class on every host. Setup writes
-  neither key and drops the retired `tier_models` and `role_tiers`. A role's
-  class comes from `role_classes`, else the package; the slot's model and
-  effort come from `class_models`, else the package's `auto` profile, and a
-  missing key keeps the package value. `session` renders the role file
-  without a `model` key, so the role runs on the parent session's model at
-  the slot's `model_reasoning_effort`. Setup and refresh render each role's
-  resolved model and effort into its role file under the `auto` profile,
-  keep its effort under `inherit` and a model fallback, and report each
-  role's class, model, effort and source; `project_config.py classes` prints
-  the config-level effective map. Generated role files are never edited by
-  hand: `/configure models` renders them again. A role file's `model` and
-  `model_reasoning_effort` take precedence over a spawn request and the
-  `[agents]` defaults; `ultra` is refused for every slot, because a role at
-  `ultra` starts subagents of its own.
-- A role whose pinned model cannot run falls back to this session's model
-  with a visible warning, by one strategy on both hosts:
-  - Setup and refresh read this host's own model list from the binary that
-    runs this session, without a model request, and judge each model a role
-    is pinned to, the project's `class_models` included: `available` when the
-    list holds it and reflects the signed-in account,
-    `unavailable` when the list does not hold it, since this binary cannot
-    run it, and `unverified` when no list could be read or the list reflects
-    no account. Every probe has a time limit, and one that fails gives
-    `unverified`, never an error that stops setup.
-  - The roles of an `unavailable` model run on this session's model at their
-    own effort, and setup prints a warning that names the model, its class slots
-    and its roles; every setup or refresh judges the model again. An
-    `unverified` model keeps its pin with a note, and the run-time rule
-    covers it.
-  - At run time a role whose pinned model fails gets a warning that never
-    blocks work and at most one start again on this session's model, only
-    when the failed run changed nothing.
-  - On Codex the binary is the nearest `codex` process above setup, since
-    Codex exports no variable that names it, else the target of the
-    `apply_patch` alias on PATH, `CODEX_CLI_PATH` when the environment
-    carries it, `codex` on PATH or the ChatGPT app's bundled CLI, and its
-    version must equal `CODEX_VERSION` when that is set. The list is the
-    account catalog Codex caches in `models_cache.json` in its home when the
-    cache comes from this binary's version and is at most 24 hours old,
-    otherwise the output of `codex debug models`, which reflects no account
-    when it can only have printed the catalog bundled with the binary:
-    inside the command sandbox, with a `CODEX_SANDBOX` variable set, or when
-    it equals `codex debug models --bundled`. The role files of an
-    `unavailable` model omit `model` and keep `model_reasoning_effort`.
-    Codex has no hook event for a failed role, so the run-time warning comes
-    from the coordinator rule below.
-- When a role's spawn ends in `Agent errored: ...` and the error names its
-  pinned model as unknown, unsupported, not found or not supported with this
-  account, such as `Model not found <model>` or `The '<model>' model is not
-  supported when using Codex with a ChatGPT account.`, tell the user which
-  role, which model and why. Any other error, such as a rate limit whose text
-  names the model, moves no role: report it as it is. Start it again only
-  when the failed run changed nothing: its task manifest's `write_boundary`
-  is `read_only`, as a reader's is, or the `task_inputs.py` invocation that
-  derived that manifest, run again with `--expected-hash <source_hash>`,
-  still passes, since the manifest binds the content of its inputs and of
-  every modified or new source it covers; otherwise stop and report, and
-  record no fallback.
-  To start it again, run `<absolute-python>
-  <absolute-package-scripts>/generate_codex_project.py apply --project-root
-  <root> --scope local --inherit-model <model>`, which renders every role
-  pinned to that model the same way and records it, and start the same
-  `agent_type` again: Codex reads a role file each time it starts the role,
-  so the new file applies without a restart. If it errors again, run that
-  command with `--restore-model <model>` in place of `--inherit-model
-  <model>`, which renders those roles with their pin again and drops the
-  record, then stop and report both errors.
-- Every build also ships the `-mechanical` variants of the document writers
-  `product-owner`, `qa-engineer`, `devops-engineer` and `solution-architect`
-  on the `mechanical` class, `gpt-6-luna` at effort `high`. Only switch
-  `mechanical_pass_tier` at `mechanical` starts them, for a pass that applies
-  the fixes a review names; the writers themselves keep their own class, and
-  no review, re-check or calibration runs on a variant. Start the variant for
-  every `apply_findings` pass; never resume the base writer for one, so the
-  pass record shows the variant's class. To measure another model, apply
-  `--execution-profile inherit` in a scratch copy of the project, set the
-  candidate model as the session's `model`, and set a candidate effort as
-  `model_reasoning_effort` in that copy's `-mechanical` role files.
-- Under switch `delivery_path` at `light_when_eligible`, an eligible Delivery
-  is planned inside `/delivery-plan` with one owner gate, presented through
-  `request_user_input`, and handed over to `/deliver-governed DLV-###`; `/execution-plan
-  DLV-###` stays for a plan revision and for a Delivery that left the light
-  path, so the public entries do not change.
-- Delivery execution is available only through the exact public entries
-  `/delivery-plan`, `/execution-plan DLV-###` and `/deliver-governed DLV-###`.
+  <root> --scope local --execution-profile inherit` omits `model` from every
+  role file and keeps `model_reasoning_effort`; `--execution-profile auto`
+  restores the pins.
+- A spawn whose pinned model errors as unknown or unsupported (`Agent
+  errored: ...`) is started once more only if it changed nothing, after the
+  command above with `--execution-profile inherit`; tell the user which role
+  and model, and stop if it fails again.
 
 ## Autopilot
 
-- `$software-engineering-team:autopilot` is the user-invoked autopilot entry.
-  Picking it from the skill menu inserts
-  `$software-engineering-team:autopilot on`, a prompt that arms as it stands
-  or with options such as `--for 9h` added.
-  Only the user arms a grant: the plugin's `UserPromptSubmit` hook records a
-  prompt that starts with that mention and an `on` command as a short-lived
-  arming record, never a subagent's prompt, and `autopilot.py on`, run
-  without options, refuses without that record and takes the grant's options
-  only from it. Codex runs each plugin hook only after the user trusts it in
-  `/hooks`: both the `UserPromptSubmit` arming hook and the `PreToolUse`
-  question hook need that trust, again after an update changes them. Until
-  the arming hook is trusted `on` refuses; until the question hook is, nothing
-  denies `request_user_input`, and `status` still shows both as declared.
-  Never start, extend or widen a grant, and never retry a refused `on` with
-  options of your own. `off` and `complete`
-  may end a grant at any time. `autopilot.py` is the packaged
-  `skill-content/autopilot/scripts/autopilot.py`.
-- The guard stops an agent that runs the packaged script, not a process that
-  writes the runtime files with the user's filesystem authority. `vault_hook.py`
-  narrows the gap: it denies `apply_patch` into
-  `.agentrof/agent-marketplace/.runtime/autopilot/` and puts back what a shell
-  command adds to the grant or the arming record there, while a command may
-  still end the grant or delete the files. It keeps a grant or arming record
-  whose bytes `autopilot.py` or its prompt hook marked as their latest write,
-  so a long command that overlaps an `on` no longer undoes it.
-- A grant governs only the Codex session whose user typed it: the hook
-  records its session id, the question hook denies only that session, and
-  `on`, `record` and `queue` refuse when `CODEX_THREAD_ID` differs, as it does
-  in a subagent thread. Every other session, and every Claude Code session on
-  the same checkout, asks as usual; `status` and the denial name the bound
-  session.
-- While a grant is active, the plugin's `PreToolUse` hook on
-  `request_user_input` denies the call and states this procedure. Once the
-  user started a grant or a question is denied that way, run
-  `autopilot.py check` before every choice gate. While it exits 0, present no
-  question; when it exits 1, ask the user as usual:
-  - Classify the question by every effect of its recommended option: any
-    never effect makes it never, an excluded effect the grant does not allow
-    queues it, and doubt queues it with `--hold "<reason>"`. `check` and the denial list each allowed
-    class with its description.
-  - For a question whose every class is allowed, take the recommended option,
-    or for an open question the recommendation you would offer, run
-    `autopilot.py record` first, then apply it and write the decision into the
-    governing document where the flow records the user's answer, marked with
-    the grant id. Give `record` `--class` once per class it touches; it
-    refuses one that is not allowed, and refuses once the grant has ended, its
-    goal included; then ask as usual.
-  - Otherwise run `autopilot.py queue` and continue the work that does not
-    depend on it. If it returns `decided`, write the logged decision into the
-    governing document and apply it. Keep independent excluded effects in
-    separate questions so they do not hold an allowed decision. An at-once owner decision and the Software
-    Architect's escalation clause are never taken: queue them as
-    `scope_or_rule` or as the never class they touch.
-  - Stop only when every remaining task waits on a queued question, then end
-    with the queued list of `autopilot.py report`.
-- An entry that ends by naming the next entry asks no question, and without
-  a grant it still stops there. Under a grant, running that next entry is a
-  question of class `phase_start` whose recommended option is to run it. Run
-  `autopilot.py record --class phase_start --entry <next entry> --after
-  <kind>:<id>` naming the Requirement or Delivery whose phase just closed. It
-  refuses unless the grant allows `phase_start`, the entry is listed in the
-  policy's `phase_starts`, and the owning compiler reads that phase in a
-  ready state: `backlog-plan` after an `approved` Requirement,
-  `delivery-plan` after an `incorporated` Requirement or a `merged` or
-  `cancelled` Delivery, `execution-plan` after a `scope_approved` Delivery
-  and `deliver` after an `execution_approved` one. Before `delivery-plan`
-  after a Delivery, `closure-audit` must also have returned `closed`. Only
-  after `record` succeeds, invoke the next entry as the user would and run
-  its gates under the same grant; otherwise queue it and stop as before. A
-  grant never starts a new Requirement: that needs the user's request.
-- A grant, broad delegation or time pressure authorizes running the
-  prescribed flow and never waives its evidence, integration, PR record or
-  closure. The `merge` class takes only the flow's own `merge-pr` on the
-  recorded PR head, never a provider or Git merge of another head, and a
-  Delivery is complete only when `closure-audit` returns `closed`. A quality
-  exception is taken only at its explicit flow gate, never under a grant
-  alone.
-- When `check` reports the grant inactive, expired or completed, ask through
-  `request_user_input` again, queued questions first. Roles never ask the user
-  and never read the grant.
-- Inside a Delivery that keeps a `User Decisions` table, write an autopilot
-  decision as an `answered` row whose answer states the choice and is marked
-  with the grant id: `blocks` names the Items that waited by Story id,
-  `wait_minutes` records how long they waited, and an approval between the
-  gates names its document as `<document> revision N` in the answer. Write
-  every queued question there too, as a `pending` row of class `queued` or its
-  at-once class with the Items it holds in `blocks`, so the Delivery's
-  refusals apply.
-- The question matcher covers `request_user_input` and
-  `request_user_input_async`. In Codex 0.159.x, `send_user_message_async`,
-  which persistent-mode instructions name, is an older model-catalog name that
-  only switches on `request_user_input_async`; no tool of that name runs.
-  `send_message_to_user_async` sends the user a message without waiting for an
-  answer and is not guarded: never ask a question through it under a grant.
-
-When all remaining work waits on queued owner decisions, call the packaged
-`autopilot.py waiting` before ending the turn. It submits one desktop notice
-per queue. Report an unavailable notification backend; never claim delivery
-when the command failed. The decision still belongs to the owner.
-
-When the user arms `--recover-transport`, complete the native heartbeat enrollment
-emitted by `autopilot.py on` using the app's existing automation tool, then record
-its id with `native-bind`. This requires no separate app-server, SDK or service.
-A heartbeat keeps this thread's context and uses `native-plan` to resume only
-registered failed child threads; a running or cancelled thread is never resumed.
-When the grant ends, pause its heartbeat. Do not use CLI resume for native app
-threads, and report unsupported hosts explicitly.
+`$software-engineering-team:autopilot` is the entry; its skill holds the
+procedure. Codex facts: the `UserPromptSubmit` hook records the user's typed
+`on` as the arming record, and both it and the `PreToolUse` question hook work
+only after the user trusts them in `/hooks`, again after an update. The
+question hook denies `request_user_input` and `request_user_input_async` only
+in the thread whose `CODEX_THREAD_ID` armed the grant;
+`send_message_to_user_async` is not guarded, so never ask through it under a
+grant. `autopilot_guard.py` denies `apply_patch` into
+`.agentrof/agent-marketplace/.runtime/autopilot/`. `--recover-transport` binds
+a native heartbeat with the app's automation tool and `native-bind`.

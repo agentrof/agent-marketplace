@@ -12,7 +12,7 @@ Every rule in this repository is machine-enforced or it is not a rule.
 `tools/validate.py` is the rulebook; `make check` runs it together with
 the count-drift gate and the complete test suite. CI runs fresh static gates
 and independently selects and verifies the required platform test matrix on
-push, pull request and merge queue groups. One finding is red. There are no
+push and pull request. One finding is red. There are no
 exception files, no allowlists, no temporary waivers. If you believe a rule is
 wrong, change the rule in `tools/validate.py` in your PR and update its
 fixture; do not work around it.
@@ -38,8 +38,8 @@ system's own tests on macOS and Windows; `python3 tools/ci_local.py check
 before pushing, run `make check-pr`, the confidentiality and release-impact
 scan of the committed branch. Partial staging and worktree/index mismatches are rejected. Identical successful local results can be reused for
 at most 24 hours; a changed or failed candidate invalidates them. Verify the
-exact staged candidate again immediately before commit. `make check` remains
-the exhaustive local gate. Independent remote platform checks and release
+exact staged candidate again immediately before commit. `make check` runs the
+static checks and the change's own unit tests. Independent remote platform checks and release
 validation remain required; no Git hooks are installed. See
 [CI validation](docs/ci.md) for the commands and evidence boundaries.
 
@@ -89,15 +89,11 @@ claiming readiness.
 
 The full contracts, caps and templates live in [docs/authoring.md](docs/authoring.md);
 the invariants behind them in [docs/architecture.md](docs/architecture.md); the
-orchestration model in [docs/orchestration.md](docs/orchestration.md); and the
-current lifecycle and Git protocol in
-[docs/requirement-delivery-protocol.md](docs/requirement-delivery-protocol.md).
+orchestration model in [docs/orchestration.md](docs/orchestration.md).
 Repository maintainers use the separate, manually invoked
 [issue and release operations protocol](docs/maintainer-operations-protocol.md);
 an issue event never starts an agent and issue text never grants merge or
-release authority. When `main` requires the merge queue, a green PR need not be
-brought up to date before merging: the queue runs the required checks again on
-the exact commit it merges. The protocol lists the
+release authority. The protocol lists the
 [repository settings](docs/maintainer-operations-protocol.md#repository-settings)
 the owner enables for it.
 

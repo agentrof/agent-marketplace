@@ -8,11 +8,11 @@
       "routine_authoring_escalated": {"model": "claude-sonnet-5-5", "effort": "xhigh"},
       "complex_authoring": {"model": "claude-sonnet-5-5", "effort": "xhigh"},
       "complex_authoring_escalated": {"model": "claude-opus-5-5", "effort": "high"},
-      "routine_review": {"model": "claude-sonnet-5-5", "effort": "high"},
+      "routine_review": {"model": "claude-sonnet-5-5", "effort": "medium"},
       "routine_review_escalated": {"model": "claude-sonnet-5-5", "effort": "xhigh"},
       "critical_decision": {"model": "claude-opus-5-5", "effort": "high"},
       "critical_decision_escalated": {"model": "claude-opus-5-5", "effort": "xhigh"},
-      "security_review": {"model": "claude-opus-5-5", "effort": "xhigh"},
+      "security_review": {"model": "claude-opus-5-5", "effort": "high"},
       "orchestration": {"model": "claude-sonnet-5-5", "effort": "medium"}
     }
   }

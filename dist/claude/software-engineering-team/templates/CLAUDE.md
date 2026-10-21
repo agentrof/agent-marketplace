@@ -3,14 +3,11 @@
 # Agent Marketplace project contract
 
 - The project root is the Git checkout and `workspace/` is the only project
-  workspace for this team. A second managed vault is invalid.
-- Durable truth is kept in tracked project files. Generated indexes are
-  reproducible and disposable; no shared database is required.
-- Before mutation, inspect `workspace/config.json`, the project-local
-  `.agentrof/agent-marketplace/.runtime/` scratch directory if present, and
-  `workspace/docs/`. Keep durable state inside the selected Git checkout.
-- User decisions are explicit. A workflow pauses at its named gate instead of
-  silently changing an approved document.
+  workspace for this team. Durable truth is kept in tracked project files;
+  `.agentrof/agent-marketplace/.runtime/` is disposable local scratch.
+- User decisions are explicit: a workflow pauses at its named gate, recommended
+  option first. Do exactly what was asked; a need found on the way is named and
+  asked, never built silently.
 - Authored Markdown body prose follows `output_language`; project terminology
   follows `terminology_language`. Machine keys, ids, paths and CLI output stay
   English. User-facing conversation may use the user's language.
@@ -20,7 +17,7 @@
   link or issue reference, commit id, local or home path, story, Delivery,
   scenario or requirement id, measured data presented as this project's,
   domain, client or person. Retell evidence as an anonymous case, such as
-  "in one measured project".
+  "in one measured project", and scan the text before every write.
 
 # Software Engineering Team
 
@@ -28,41 +25,57 @@
 
 - `{{workspace}}/config.json`: project declaration, changed only through the
   configure entry.
-- `{{workspace}}/docs/`: the governed project knowledge vault. Open this
-  directory as the vault root. Its maps, generated views, document-type
-  graph policy, citations, and navigation follow the
-  `obsidian-vault` skill and the owning validation commands.
-- `{{workspace}}/docs/experience-design/artifacts/`: the author-owned
-  Experience prototype workspace. Its structure, files, technologies, assets
-  and behavior are free; the compiler snapshots bytes and paths only.
-- `{{workspace}}/docs/experience-design/experiences/`: living approved
-  Experience packages, one active package per primary BA process. `application`
-  is a reserved slug. Prototype files are review evidence, not delivery code.
-- `{{workspace}}/apps/`: application code, one directory per application.
-- `{{workspace}}/docs/operation/`: approved verification and environment
-  contracts used when Delivery turns stories into executable Items.
-- `{{workspace}}/demos/` and `{{workspace}}/sketches/`: outward demos and
-  design exploration previews.
-- `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime
-  scratch and generated caches. It is never a shared or global database.
-- `{{workspace}}/docs/backlog/`: tracked Obsidian backlog source. The nested
-  epic, story, review and test-plan files are the durable Requirement state.
+- `{{workspace}}/docs/`: the project documents. A role reads the sources its
+  task file lists and greps this tree for anything missing.
+- `{{workspace}}/apps/`: one folder per application with its own Dockerfile,
+  lock file, a README stating its contract, and its tests and migrations.
+- `{{workspace}}/tests/`, or the folder `tests_root` names: shared environment
+  and harness suites.
+- `{{workspace}}/experience-design/`: `DESIGN.md` and one
+  `<feature-slug>/design.md` with `exports/` per designed feature.
+- `{{workspace}}/project/<name>/`: project-specific data. A hook refuses any
+  top-level folder under `{{workspace}}/` or `{{workspace}}/docs/` that
+  `workspace_layout` in the config does not allow.
+- `{{workspace}}/memory/`, all loaded below: `current-plan.md` is read first
+  and updated at every step (done, next step, open decisions; history is
+  archived out of it); `product-decisions.md` holds the owner's binding
+  decisions, read before product work, and overrides the docs; `me.md` and
+  `profile.md` hold the owner's own working rules.
+- `{{workspace}}/docs/backlog/tasks/`: tracked fast-lane task records.
 
-Requirement Flow evaluates the request impact matrix, runs only the required
-Requirement stages, validates reused or not-applicable stages, and ends at
-backlog-plan unless the request resolves with no change. Delivery then starts
-only through its explicit Delivery Flow entry. Release Management remains out
-of scope for this package.
+Work runs through the `deliver` entry: task, branch, pull request, review and
+merge. Release Management is out of scope for this package.
 
-Experience handoff binds the globally current `application@rN` and the exact
-current process receipts together. Every approved package-set or
-application-only delta advances that application receipt; older Requirement and
-backlog bindings must revise and rebind before further handoff.
+## Companion skills
+
+The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.
+
+| Step | Role | Skill | When |
+|---|---|---|---|
+| Write code, test fails or bug task | developer roles | superpowers:systematic-debugging | a failure whose cause is not obvious |
+| Self-check before handoff | developer roles | superpowers:verification-before-completion | always before reporting done |
+| Fix pass | same writer | superpowers:receiving-code-review | applying review findings |
+| Team skill authoring | plugin maintainers | superpowers:writing-skills | writing or changing a skill |
+| PR body, docs, README, upstream issue | writer, deliver | humanizer, embedded mode | prose deliverables; not commit messages |
+| Review, high rigor | security-reviewer | security-audit guidance mode | auth, tenant data, secrets, money, deletion |
+| Full security audit | owner request only | security-audit full mode | explicit audit request, reports outside the repo |
+| Architecture change | software-architect | diagram-design (architecture, architecture-delta, sequence, ER) | a structural change to system-architecture |
+| Write UI | frontend-developer | impeccable (craft, polish, harden, adapt) | the task touches UI |
+| Review, UI | code-reviewer | impeccable detect and critique, read-only | the change touches UI |
+| Find context | all roles | graphify query, path, explain | `.agentrof/graphify` holds a graph |
+| Docs graph refresh | deliver | graphify_refresh.py in the background | a merged task changed Markdown under workspace/docs |
+| Write code | developer roles | ponytail, level full | always |
+| Review | code-reviewer | /ponytail-review | inside its single review pass |
+| Retrospective | retrospective | /ponytail-debt | report the shortcut debt ledger |
+
+Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph is `--graph .agentrof/graphify/docs/graph.json`); otherwise read the task file's sources and grep.
 
 # Load user context
 
 @CLAUDE.user.md
 @{{workspace}}/memory/agent-marketplace.md
+@{{workspace}}/memory/current-plan.md
+@{{workspace}}/memory/product-decisions.md
 @{{workspace}}/memory/me.md
 @{{workspace}}/memory/profile.md
 

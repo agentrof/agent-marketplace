@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "parameters": {
-    "environment_paths": {
-      "summary": "Comma-separated path globs of the project's environment code: the environment command, image recipes, deployment manifests and seed scenarios. A glob matches a repository path as fnmatch does, so * also crosses a directory separator; a candidate whose matching paths differ from every earlier candidate with fresh runtime evidence takes the fresh down/up path.",
-      "type": "glob_list"
-    }
-  }
-}

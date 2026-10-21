@@ -1,74 +1,35 @@
 ---
 name: solution-design
-description: Interactive, file-first solution landscape and decision workflow after approved Business Analysis and before Design System, Experience Design and backlog planning.
-exposure: entry
+description: Solution landscape knowledge for the team's solution roles. Loaded by software-engineering-team flows; not user-facing.
+exposure: internal
 ---
 
 # Solution Design
 
-Maintain one project-level solution landscape under
-`workspace/docs/solution-design/`. Every accepted technology, boundary,
-integration, method and sustainability verdict becomes a linked Markdown
-decision. Nothing decided remains only in conversation.
-
-Before delegating a role, follow the packaged `templates/task-input-contract.md`
-and derive its inputs with `scripts/task_inputs.py --entry solution-design`.
-Use the owning compiler's exact scope and source bindings.
+The project keeps one solution landscape under
+`workspace/docs/solution-design/`: components, engagements and decisions.
+Every accepted technology, boundary, integration, method and sustainability
+verdict is a linked Markdown decision; nothing decided stays only in
+conversation.
 
 ## When to Use
 
-- Business Analysis has an approved scope and the project needs landscape or
-  architecture decisions.
-- A later product change revisits an existing solution decision.
+- A task adds or changes a component, integration, technology or method
+  decision.
+- A build task's pre-check compares a change with the landscape.
 
-## Procedure
+## Rules
 
-1. Read `flows/solution-design.md` completely and resolve mode. Requirement
-   mode accepts only the router-bound BA receipt. Manual mode requires one
-   explicitly selected strict-current BA package; a legacy-readonly package
-   can only be reused by Requirement, not used to author a new landscape.
-   Multiple candidates stop
-   for selection before any file is created.
-2. Read `references/engagement-session.md`, the team constitution, the
-   `solution-architecture` skill and the `obsidian-vault` skill. Confirm the
-   local workspace config belongs to the Software Engineering Team.
-3. Run the shared BA package resolver for every cited scope, then run:
+An update to these documents is a knowledge task of the `deliver` entry and
+runs the fast lane: branch, change, pull request, review, merge.
 
-   ```text
-   landscape_check.py --tree workspace/docs/solution-design
-   vault_check.py check --vault workspace/docs --scope solution-design --json
-   ```
-
-   Run the packaged scripts.
-
-   A missing or failing predecessor routes back to Business Analysis. The
-   approved documents are the complete stage state.
-4. `solution-architect` is the sole writer. Work one kebab-case engagement
-   topic at a time. First allocate every active BA process to a topology
-   component, or list it in the landscape's `not_technical_allocations` as
-   `<canonical-process-ref>|<rationale>`. Record the owner-approved topology, app/component names,
-   responsibility and dependency boundaries in `components/<component-id>/`.
-   A `build` component is the only kind that declares an `app_kind` and exact
-   future `workspace/apps/<component-id>` path; external, managed and
-   self-hosted dependencies remain components without project source trees.
-5. Record framing, constraints, options, rejected alternatives, verdict,
-   accepted technology/data-store/environment/integration decisions and exact
-   traceability links in `engagements/` and `decisions/`. Component stacks may
-   differ; no config-derived global stack is assumed.
-6. Before the project decision gate, use the single review plan in
-   `solution-architecture/references/challenge-lenses.md`: one independent
-   primary `solution-reviewer` covers all four required lenses and the role's
-   package checks, with additional specialists only for the stated risks.
-   Wait for all selected readers, apply accepted resolutions to canonical
-   documents, then re-run only affected readers until no blocking evidence
-   gap remains. Reviewer replies are transient input, not files. Render the
-   decision index, relations and navigation after each accepted change.
-7. Ask the owner to Approve, Request changes or Pause through the host choice
-   gate. On approval, close the engagement, run
-   `landscape_check.py confirm-topology --tree workspace/docs/solution-design`,
-   then `landscape_check.py approve --tree workspace/docs/solution-design` to
-   stamp the package. The confirmation records the complete topology, naming
-   and allocation set. An approved package first uses `begin-revision` before edits.
-8. When the landscape package is approved, bind it in Requirement mode or
-   report its exact receipt and `design-system` in manual mode.
-   This skill never creates implementation tasks or delivery state.
+- `solution-architect` writes. Allocate every active business process to a
+  topology component, or record why it needs none.
+- A `build` component names its `app_kind` and its `workspace/apps/<component-id>`
+  path; external, managed and self-hosted dependencies stay components without
+  a source tree.
+- Record framing, constraints, options, rejected alternatives and the verdict
+  of each decision, with links to the analysis it serves. Component stacks may
+  differ; no global stack is assumed.
+- `solution-reviewer` reviews read-only and returns findings; the architect
+  applies accepted ones to the owning documents.

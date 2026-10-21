@@ -4,7 +4,8 @@
 ``inspect`` produces the exact managed-surface plan without changing the
 project, ``check`` verifies the installed project contract, and ``apply``
 executes the inspected plan with rollback when the closing check does not pass.
-Omitting the command runs ``apply``.
+Omitting the command runs ``apply``. ``companions [check|apply]`` checks or
+installs the optional third-party companion skills.
 """
 
 from __future__ import annotations
@@ -20,36 +21,24 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 import atomic_file
 import marketplace_paths
-import delivery_governance
 import file_lock
-import operation_compile
 import project_config
 import role_settings
 import setup_check
-import vault_check
 
 
 TEAM = "software-engineering-team"
 WORKSPACE = "workspace"
 START = "# agent-marketplace:software-engineering-team:gitignore:start"
 END = "# agent-marketplace:software-engineering-team:gitignore:end"
-REQUIRED_DIRS = (
-    "apps", "demos", "sketches",
-    "docs/business-analysis", "docs/solution-design",
-    "docs/system-architecture", "docs/design-system/pages",
-    "docs/experience-design", "docs/requirements", "docs/operation",
-    "docs/delivery", "docs/delivery/governance", "docs/backlog",
-)
 RUNTIME_PARTS = ("agent-marketplace", ".runtime")
-JSON_PAYLOAD_FILES = (
-    "app.json", "appearance.json", "core-plugins.json", "graph.json",
-    "types.json", "community-plugins.json",
-)
+# Workspace files setup writes only when absent; the project owns them after.
+SEED_FILES = ("experience-design/DESIGN.md", "experience-design/README.md")
+SEED_ROOT = Path(__file__).resolve().parents[1] / "templates"
 LONG_PATHS_CHOICE = "git.core_longpaths"
 # Each declared choice lists its options with the recommended one first.
 CHOICES = {LONG_PATHS_CHOICE: ("set", "leave")}
@@ -95,17 +84,7 @@ def legacy_topology_blockers(vault_root: Path) -> list[str]:
             " it before setup"
         )
     elif experience.is_dir():
-        legacy_experience = experience / "baselines"
-        if legacy_experience.exists():
-            blockers.append("legacy Experience baseline tree exists at docs/experience-design/baselines; no migration is available")
-        for name in ("artifact-registry.json", "artifact-manifest.md"):
-            path = experience / name
-            if path.exists():
-                blockers.append(
-                    f"legacy Experience artifact index exists at {path.relative_to(vault_root)}; no migration is available"
-                )
-        entries = sorted(experience.rglob("*"))
-        for path in entries:
+        for path in sorted(experience.rglob("*")):
             relative = path.relative_to(vault_root)
             if path.is_symlink():
                 blockers.append(
@@ -117,33 +96,6 @@ def legacy_topology_blockers(vault_root: Path) -> list[str]:
                     "Experience Design file has a hard-link alias at "
                     f"{relative.as_posix()}; remove every alias before setup"
                 )
-            if (path.name == "artifact-registry.json"
-                    and "_generated" in relative.parts):
-                blockers.append(
-                    "legacy Experience artifact index exists at "
-                    f"{relative.as_posix()}; no migration is available"
-                )
-        experiences = experience / "experiences"
-        for path in experiences.glob("exp-*") \
-                if experiences.is_dir() and not experiences.is_symlink() \
-                else []:
-            if path.is_dir() and not path.is_symlink():
-                blockers.append(f"retired exp- Experience slug exists at {path.relative_to(vault_root)}; rename it deliberately before setup")
-        for path in experience.rglob("*.md"):
-            if path.is_symlink():
-                continue
-            text = path.read_text(encoding="utf-8", errors="ignore")
-            if any(marker in text for marker in ("baseline_id:", "program_id:", "release_id:", "type: experience-baseline", "type: experience-space", "type: experience-domain")):
-                blockers.append(f"legacy Experience metadata exists at {path.relative_to(vault_root)}; no migration is available")
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        for path in entries:
-            if not (path.is_file() or path.is_symlink()):
-                continue
-            relative = path.relative_to(vault_root).as_posix()
-            violation = vault_check.artifact_hard_cut_violation(
-                policy, relative)
-            if violation:
-                blockers.append(violation + "; remove it before setup")
     architecture = vault_root / "system-architecture"
     for name in ("api-contract.md", "data-model.md", "threat-model.md", "environment.md"):
         if (architecture / name).exists():
@@ -251,24 +203,7 @@ def refresh_guard(root: Path, timeout_seconds: float = 3.0):
 
 
 def managed_block(workspace: str) -> str:
-    roots = local_roots()
-    return "\n".join((
-        START,
-        *(f"/{value}/" for value in roots),
-        f"{workspace}/junit-*.xml",
-        f"{workspace}/docs/.obsidian/*",
-        f"!{workspace}/docs/.obsidian/app.json",
-        f"!{workspace}/docs/.obsidian/appearance.json",
-        f"!{workspace}/docs/.obsidian/core-plugins.json",
-        f"!{workspace}/docs/.obsidian/graph.json",
-        f"!{workspace}/docs/.obsidian/types.json",
-        f"!{workspace}/docs/.obsidian/snippets/",
-        f"!{workspace}/docs/.obsidian/snippets/**",
-        f"{workspace}/docs/.obsidian/workspace.json",
-        f"{workspace}/docs/.obsidian/workspace-mobile.json",
-        f"{workspace}/docs/.trash/",
-        END,
-    ))
+    return setup_check.managed_block(workspace)
 
 
 def proposed_managed_file(root: Path, name: str, start: str, end: str,
@@ -332,63 +267,6 @@ def run_checked(argv: list[str], label: str) -> str:
     return result.stdout
 
 
-def package_surfaces() -> tuple[Path, Path, dict]:
-    package_root = Path(__file__).resolve().parents[1]
-    policy_path = (
-        package_root / "skill-content" / "obsidian-vault" / "data"
-        / "vault-policy.json"
-    )
-    payload_root = package_root / "templates" / "vault" / ".obsidian"
-    return payload_root, policy_path, vault_check.load_policy(policy_path)
-
-
-def payload_sources(policy: dict, payload_root: Path,
-                    vault_root: Path) -> list[tuple[Path, Path]]:
-    values: list[tuple[Path, Path]] = []
-    home_rel = Path(str(policy.get("home_file", "home.md")))
-    home_source = payload_root.parent / home_rel
-    if home_source.is_file():
-        values.append((home_source, vault_root / home_rel))
-    for source in sorted(path for path in payload_root.rglob("*")
-                         if path.is_file()):
-        values.append((source, vault_root / ".obsidian"
-                       / source.relative_to(payload_root)))
-    return values
-
-
-def relation_report_updates(vault_root: Path, policy: dict) -> dict[Path, str]:
-    """Plan only compiler-owned relation reports, never authored note blocks."""
-    effective = vault_check.effective_policy(policy, vault_root)
-    vault = vault_check.build_vault(vault_root, effective)
-    updates: dict[Path, str] = {}
-    for relative, content in vault_check.relation_reports(vault).items():
-        target = vault_root / relative
-        current = target.read_text(encoding="utf-8") \
-            if target.is_file() else ""
-        if current != content:
-            updates[target] = content
-    return updates
-
-
-def projection_ownership(target: Path, vault_root: Path) -> str:
-    relative = target.relative_to(vault_root).as_posix()
-    if relative == ".obsidian/community-plugins.json" \
-            or relative.startswith(".obsidian/plugins/"):
-        return "package_local"
-    return "tracked_managed"
-
-
-def expected_gate_bytes() -> bytes:
-    installer = Path(__file__).with_name("vault_gate.py")
-    with tempfile.TemporaryDirectory(prefix="setup-gate-plan.") as temporary:
-        root = Path(temporary)
-        run_checked([
-            sys.executable, str(installer), "install", "--project-root",
-            str(root),
-        ], "portable gate planning")
-        return (root / ".github" / "agentrof" / "vault-gate.pyz").read_bytes()
-
-
 def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
     current = load_json(config_path)
     if current:
@@ -407,6 +285,9 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             "terminology_language": current.get(
                 "terminology_language", args.terminology_language
             ),
+            **{field: current.get(field, default)
+               for field, default in project_config.DEFAULTS.items()},
+            **{field: current[field] for field in project_config.PROJECT_FIELDS if field in current},
         }
         # The owner's class and role overrides survive a refresh, and setup
         # writes none of its own; one the installed class map no longer takes
@@ -418,6 +299,7 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             "team_id": TEAM,
             "output_language": args.output_language,
             "terminology_language": args.terminology_language,
+            **project_config.DEFAULTS,
         }
 
     errors = project_config.check(config)
@@ -428,78 +310,6 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
         if current.get(key) != config.get(key) or (key in current) != (key in config)
     )
     return config, changed_fields
-
-
-def legacy_operation_updates(workspace_root: Path, config: dict) -> tuple[dict[Path, str], list[Path], list[str]]:
-    """Translate retired command fields into draft vault contracts.
-
-    No stack value becomes a Solution decision. A legacy command becomes a
-    transparent, still-draft operational proposal until a user binds it to an
-    accepted Solution decision and approves the contract.
-    """
-    docs = workspace_root / "docs"
-    updates: dict[Path, str] = {}
-    deletions: list[Path] = []
-    blockers: list[str] = []
-    verification = docs / "operation" / "verification-contract.md"
-    environment = docs / "operation" / "environment-contract.md"
-    legacy_test = config.get("test_command")
-    legacy_mutation = config.get("mutation_command")
-    legacy_env = config.get("env_command")
-    if not verification.exists() and (isinstance(legacy_test, str) or isinstance(legacy_mutation, str)):
-        props = operation_compile.initial_props("verification", [])
-        # A value with nothing to migrate stays absent: the vault rejects an empty text property.
-        if isinstance(legacy_test, str) and legacy_test.strip():
-            props["test_command"] = legacy_test
-        if isinstance(legacy_mutation, str) and legacy_mutation.strip():
-            props["mutation_disposition"] = "required"
-            props["mutation_command"] = legacy_mutation
-            props.pop("mutation_rationale", None)
-        body = "# Verification Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
-        updates[verification] = operation_compile.render(props, body)
-    legacy_environment = workspace_root / "environment" / "contract.md"
-    if not environment.exists() and legacy_environment.exists():
-        text = legacy_environment.read_text(encoding="utf-8")
-        try:
-            props, _body_line, error = operation_compile.parse_frontmatter(text)
-        except ValueError:
-            props, error = {}, "invalid frontmatter"
-        if error or props.get("type") not in {"environment-contract", "environment-reference"}:
-            blockers.append(
-                "legacy workspace/environment/contract.md is not a recognized environment contract; preserve it and migrate manually"
-            )
-        else:
-            updates[environment] = text
-            # A recognized legacy document has a lossless canonical successor.
-            # Keep this removal in the same refresh transaction as the create,
-            # so a failed closing gate restores the original file.
-            deletions.append(legacy_environment)
-    elif not environment.exists() and isinstance(legacy_env, str):
-        props = operation_compile.initial_props("environment", [])
-        if legacy_env.strip():
-            props["env_command"] = legacy_env
-        body = "# Environment Contract\n\n## Contract\n\nMigrated from retired workspace config. Bind this draft to accepted Solution decisions before approval.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/operation|Operation]]"
-        updates[environment] = operation_compile.render(props, body)
-    return updates, deletions, blockers
-
-
-def legacy_governance_update(workspace_root: Path, config: dict) -> dict[Path, str]:
-    value = config.get("max_parallel")
-    target = workspace_root / "docs" / "delivery" / "governance" / "governance.md"
-    if target.exists() or not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        return {}
-    props = {
-        "type": "delivery-governance", "title": "Delivery Governance",
-        "status": "approved", "revision": 1, "max_parallel": value,
-        "governance_hash": "", "source_hash": "",
-        "approved_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        "tags": ["doc/delivery-governance", "status/approved"],
-    }
-    body = "# Delivery Governance\n\n## Coordination\n\nMigrated from retired workspace config. This is the hard maximum number of active Delivery slots.\n\n## Navigation <!-- sec: nav -->\n\n[[maps/delivery|Delivery]]"
-    digest = delivery_governance.governance_hash(props, body)
-    props["governance_hash"] = digest
-    props["source_hash"] = digest
-    return {target: delivery_governance.render(props, body)}
 
 
 def alternate_workspaces(root: Path) -> list[str]:
@@ -625,37 +435,6 @@ def windows_length(path: str) -> int:
     return len(path.encode("utf-16-le")) // 2
 
 
-def deepest_delivery_worktree(root: Path, workspace: str) -> Path:
-    """Return the deepest Item or Integration worktree root Delivery would use.
-
-    The next Delivery always has an Integration worktree, and each Story of
-    the backlog gets an Item worktree below it, at the paths the Delivery code
-    itself builds.
-    """
-    import backlog_compile
-    import delivery_compile
-    import delivery_git
-
-    docs = root / workspace / "docs"
-    try:
-        main_worktree = delivery_git.main_worktree(root)
-    except RuntimeError as exc:
-        raise SetupError(f"main worktree cannot be resolved: {exc}") from exc
-    delivery_id = delivery_compile.next_delivery_id(docs)
-    roots = [delivery_git.worktree_paths(main_worktree, delivery_id)["integration"]]
-    try:
-        record, _findings = backlog_compile.collect(docs)
-    except (OSError, RuntimeError, ValueError):
-        record = {}
-    for story in record.get("stories", []):
-        try:
-            roots.append(delivery_git.worktree_paths(
-                main_worktree, delivery_id, str(story["id"]))["item"])
-        except ValueError:
-            continue
-    return max(roots, key=lambda path: windows_length(str(path)))
-
-
 def long_tracked_paths(root: Path, worktree: Path) -> list[dict]:
     """List each tracked file Git for Windows leaves out of *worktree*, and why.
 
@@ -687,10 +466,9 @@ def long_paths_plan(root: Path, workspace: str,
                     choices: dict[str, str]) -> dict:
     """Plan the native Windows core.longpaths choice.
 
-    Item and Integration worktrees share the project repository's local
-    config, and the owner's own Git commands in them must see the files
-    Delivery sees, so the setting belongs there and only with consent. Git on
-    other hosts has no path limit to lift.
+    Task worktrees share the project repository's local config, so the
+    setting belongs there and only with consent. Git on other hosts has no
+    path limit to lift.
     """
     plan = {"choice_requests": [], "operations": [], "warnings": [],
             "before": None}
@@ -708,13 +486,13 @@ def long_paths_plan(root: Path, workspace: str,
                          "after": "true"}],
         })
         return plan
-    worktree = deepest_delivery_worktree(root, workspace)
+    worktree = root
     paths = long_tracked_paths(root, worktree)
     if selected == "leave":
         if paths:
             plan["warnings"].append(
                 "core.longpaths stays off, so Git for Windows leaves these"
-                " tracked paths out of Item and Integration worktrees under"
+                " tracked paths out of the checkout under"
                 f" {worktree}: " + ", ".join(
                     f"{item['path']} ({item['reason'].replace('_', ' ')}"
                     f" {item['length']} >= {WINDOWS_PATH_LIMITS[item['reason']]})"
@@ -748,8 +526,6 @@ def restore_long_paths(root: Path, before: str | None) -> bool:
 
 
 def build_plan(args) -> dict:
-    import vault_index
-    vault_index.capabilities()
     root = git_root(Path(args.project_root).resolve())
     workspace = args.workspace
     workspace_root = root / workspace
@@ -757,7 +533,7 @@ def build_plan(args) -> dict:
     vault_root = workspace_root / "docs"
     for target, label in (
         (workspace_root, "workspace"), (config_path, "workspace config"),
-        (vault_root, "vault root"), (vault_root / ".obsidian", "Obsidian payload"),
+        (vault_root, "docs root"),
     ):
         assert_not_symlinked(root, target, label)
     alternate = alternate_workspaces(root)
@@ -768,9 +544,7 @@ def build_plan(args) -> dict:
             + f"; move its durable content under {WORKSPACE}/"
         )
 
-    legacy_config = load_json(config_path)
     config, changed_fields = desired_config(args, config_path)
-    payload_root, policy_path, policy = package_surfaces()
     operations: list[dict] = []
     blockers: list[str] = legacy_topology_blockers(vault_root)
     target_config = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
@@ -791,50 +565,12 @@ def build_plan(args) -> dict:
             "removed_fields": sorted(
                 key for key in current_value if key not in project_config.CONFIG_FIELDS
             ),
-            "migrated_fields": sorted(
-                key for key in ("test_command", "mutation_command", "env_command", "max_parallel")
-                if key in current_value
-            ),
             "fields": changed_fields,
             "changes": value_deltas(current_value, config),
             "ownership": "tracked_managed",
         })
 
-    operation_updates, operation_deletions, migration_blockers = legacy_operation_updates(
-        workspace_root, legacy_config
-    )
-    governance_updates = legacy_governance_update(workspace_root, legacy_config)
-    blockers.extend(migration_blockers)
-    if operation_updates:
-        operation_map = vault_root / "maps" / "operation.md"
-        if not operation_map.exists():
-            source = payload_root.parent / "maps" / "operation.md"
-            operation_updates[operation_map] = source.read_text(encoding="utf-8")
-    if governance_updates:
-        delivery_map = vault_root / "maps" / "delivery.md"
-        if not delivery_map.exists():
-            source = payload_root.parent / "maps" / "delivery.md"
-            governance_updates[delivery_map] = source.read_text(encoding="utf-8")
-    for target, content in sorted(
-        {**operation_updates, **governance_updates}.items(), key=lambda item: str(item[0])
-    ):
-        assert_not_symlinked(root, target, "legacy contract migration")
-        operations.append({
-            "action": "create", "surface": "legacy_contract_migration",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "tracked_migration",
-            "after_hash": bytes_hash(content.encode("utf-8")),
-        })
-    for target in operation_deletions:
-        assert_not_symlinked(root, target, "legacy contract migration")
-        operations.append({
-            "action": "delete", "surface": "legacy_contract_migration",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "tracked_migration",
-            "before_hash": bytes_hash(target.read_bytes()),
-        })
-
-    for relative in REQUIRED_DIRS:
+    for relative in project_config.required_dirs(config):
         target = workspace_root / relative
         assert_not_symlinked(root, target, f"managed target {workspace}/{relative}")
         if not target.is_dir():
@@ -842,6 +578,16 @@ def build_plan(args) -> dict:
                 "action": "create", "surface": "directory",
                 "path": f"{workspace}/{relative}",
                 "ownership": "tracked_container",
+            })
+
+    for relative in seed_files(config):
+        target = workspace_root / relative
+        assert_not_symlinked(root, target, f"seed target {workspace}/{relative}")
+        if not target.exists():
+            operations.append({
+                "action": "create", "surface": "seed_file",
+                "path": f"{workspace}/{relative}",
+                "ownership": "tracked_user_seed",
             })
 
     runtime = runtime_root(root)
@@ -858,111 +604,6 @@ def build_plan(args) -> dict:
         if not finding.startswith("missing project-local runtime:")
     )
 
-    seen_payload: set[Path] = set()
-    materializations: dict[Path, tuple[bytes, int]] = {}
-    for source, target in payload_sources(policy, payload_root, vault_root):
-        assert_not_symlinked(root, target, "vault payload target")
-        if not target.exists():
-            seen_payload.add(target)
-            content = source.read_bytes()
-            materializations[target] = (
-                content, source.stat().st_mode & 0o777,
-            )
-            operation = {
-                "action": "create", "surface": "vault_payload",
-                "path": target.relative_to(root).as_posix(),
-                "ownership": projection_ownership(target, vault_root),
-            }
-            if target.suffix == ".json":
-                try:
-                    after_value = json.loads(content.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    after_value = None
-                if isinstance(after_value, dict):
-                    operation["changes"] = value_deltas({}, after_value)
-                elif after_value is not None:
-                    operation["changes"] = [{
-                        "key": "$", "before": None, "after": after_value,
-                    }]
-            if "changes" not in operation:
-                operation["after_hash"] = bytes_hash(content)
-            operations.append(operation)
-    obsidian = vault_root / ".obsidian"
-    for name in JSON_PAYLOAD_FILES:
-        target = obsidian / name
-        if not target.is_file():
-            continue
-        try:
-            json.loads(target.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            blockers.append(
-                f"{target.relative_to(root).as_posix()} is not valid JSON: {exc}"
-            )
-    planned_updates = vault_check.payload_reconcile_updates(
-        vault_root, policy, payload_root
-    )
-    for target in sorted(planned_updates, key=lambda value: str(value)):
-        if target in seen_payload:
-            continue
-        assert_not_symlinked(root, target, "vault payload target")
-        operation = {
-            "action": "update", "surface": "vault_payload",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": projection_ownership(target, vault_root),
-        }
-        content = planned_updates[target]
-        if target.suffix == ".json":
-            try:
-                before_value = json.loads(target.read_text(encoding="utf-8"))
-                after_value = json.loads(content.decode("utf-8"))
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-                before_value, after_value = None, None
-            if before_value is not None and after_value is not None:
-                operation["changes"] = value_deltas(
-                    before_value, after_value
-                )
-        if "changes" not in operation:
-            operation["before_hash"] = (
-                bytes_hash(target.read_bytes()) if target.is_file() else None
-            )
-            operation["after_hash"] = bytes_hash(content)
-        operations.append(operation)
-    planned_deletions = vault_check.payload_reconcile_deletions(
-        vault_root, policy, payload_root
-    )
-    for target in planned_deletions:
-        if not target.is_symlink():
-            assert_not_symlinked(root, target, "vault payload target")
-        operation = {
-            "action": "delete", "surface": "vault_payload",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "package_local",
-            "before_kind": (
-                "symlink" if target.is_symlink() else
-                "directory" if target.is_dir() else
-                "file" if target.is_file() else "missing"
-            ),
-        }
-        if target.is_file() and not target.is_symlink():
-            operation["before_hash"] = bytes_hash(target.read_bytes())
-        operations.append(operation)
-
-    relation_updates = relation_report_updates(vault_root, policy)
-    for target, content in sorted(
-        relation_updates.items(), key=lambda item: str(item[0])
-    ):
-        assert_not_symlinked(root, target, "generated relation report")
-        operations.append({
-            "action": "create" if not target.exists() else "update",
-            "surface": "generated_relation_report",
-            "path": target.relative_to(root).as_posix(),
-            "ownership": "tracked_generated",
-            "before_hash": (
-                bytes_hash(target.read_bytes()) if target.is_file() else None
-            ),
-            "after_hash": bytes_hash(content.encode("utf-8")),
-        })
-
     current_ignore, target_ignore = proposed_gitignore(root, workspace)
     operations.extend(managed_block_operations(
         "gitignore", ".gitignore", (root / ".gitignore").exists(),
@@ -975,22 +616,6 @@ def build_plan(args) -> dict:
         "gitattributes", ".gitattributes", (root / ".gitattributes").exists(),
         current_attributes, target_attributes,
     ))
-
-    gate_path = root / ".github" / "agentrof" / "vault-gate.pyz"
-    assert_not_symlinked(root, gate_path, "portable gate")
-    gate_bytes = expected_gate_bytes()
-    if not gate_path.is_file() or gate_path.read_bytes() != gate_bytes:
-        operations.append({
-            "action": "create" if not gate_path.exists() else "update",
-            "surface": "portable_gate",
-            "path": gate_path.relative_to(root).as_posix(),
-            "ownership": "tracked_generated",
-            "before_hash": (
-                bytes_hash(gate_path.read_bytes())
-                if gate_path.is_file() else None
-            ),
-            "after_hash": bytes_hash(gate_bytes),
-        })
 
     mode_repairs = owner_only_repairs(root, workspace)
     for target, mode in sorted(mode_repairs.items(), key=lambda item: str(item[0])):
@@ -1020,20 +645,16 @@ def build_plan(args) -> dict:
         "warnings": long_paths["warnings"],
         "_long_paths_before": long_paths["before"],
         "_config": config,
-        "_policy": policy,
-        "_policy_path": policy_path,
-        "_payload_root": payload_root,
-        "_payload_materializations": materializations,
-        "_payload_updates": planned_updates,
-        "_payload_deletions": planned_deletions,
-        "_gate_bytes": gate_bytes,
-        "_relation_reports": relation_updates,
-        "_legacy_contract_updates": {**operation_updates, **governance_updates},
-        "_legacy_contract_deletions": operation_deletions,
         "_gitignore_content": target_ignore,
         "_gitattributes_content": target_attributes,
         "_mode_repairs": mode_repairs,
     }
+
+
+def seed_files(config: dict) -> tuple[str, ...]:
+    """The seed files whose top-level folder the workspace layout allows."""
+    allowed = project_config.setting(config, "workspace_layout")["workspace"]
+    return tuple(value for value in SEED_FILES if value.split("/")[0] in allowed)
 
 
 def path_fingerprint(path: Path) -> str:
@@ -1068,9 +689,8 @@ def rollback_targets(root: Path, plan: dict) -> list[Path]:
     exclusively from planned file and payload operations.
     """
     mutable_surfaces = {
-        "workspace_config", "vault_payload", "generated_relation_report",
-        "legacy_contract_migration",
-        "gitignore", "gitattributes", "portable_gate", "file_mode",
+        "workspace_config", "gitignore", "gitattributes", "file_mode",
+        "seed_file",
     }
     targets = {
         root / item["path"] for item in plan["operations"]
@@ -1113,7 +733,8 @@ class RefreshSnapshot:
             self.existed[path] = self.copy(path, backup)
             self.copy(path, expected)
         candidates = [root / workspace]
-        candidates.extend(root / workspace / relative for relative in REQUIRED_DIRS)
+        candidates.extend(root / workspace / relative
+                          for relative in project_config.required_dirs(plan["_config"]))
         runtime = runtime_root(root)
         current = runtime
         while current != root:
@@ -1252,27 +873,10 @@ class RefreshSnapshot:
         self.temporary.cleanup()
 
 
-def next_entry(root: Path) -> str:
-    result = subprocess.run([
-        sys.executable, str(Path(__file__).with_name("requirement_route.py")),
-        "--project-root", str(root), "--json",
-    ], capture_output=True, text=True, check=False)
-    try:
-        routed = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        routed = {}
-    entry = routed.get("next_entry") if isinstance(routed, dict) else None
-    if isinstance(entry, str) and entry:
-        return entry
-    return "requirement"
-
-
 def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
     root = Path(plan["project_root"])
     workspace_root = root / args.workspace
     snapshot = RefreshSnapshot(root, args.workspace, plan)
-    copied = 0
-    reconciled = 0
     ignore_changed = False
     long_paths_set = False
     rollback_conflicts: list[str] = []
@@ -1290,38 +894,16 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
         if not config_path.is_file() \
                 or config_path.read_text(encoding="utf-8") != desired:
             snapshot.write_text(config_path, desired)
-        for relative in REQUIRED_DIRS:
+        for relative in project_config.required_dirs(plan["_config"]):
             target = workspace_root / relative
             assert_not_symlinked(root, target, "managed target")
             target.mkdir(parents=True, exist_ok=True)
+        for item in plan["operations"]:
+            if item["surface"] == "seed_file":
+                relative = Path(item["path"]).relative_to(args.workspace)
+                snapshot.write_text(root / item["path"],
+                                    (SEED_ROOT / relative).read_text(encoding="utf-8"))
         runtime = create_runtime(root)
-        # Execute the exact inspected payload plan one path at a time. Each
-        # mutation is mirrored into the private expected tree, so rollback can
-        # distinguish setup's postimage from a concurrent user edit.
-        for target in plan["_payload_deletions"]:
-            snapshot.delete(target)
-        for target, (content, mode) in sorted(
-            plan["_payload_materializations"].items(),
-            key=lambda item: str(item[0]),
-        ):
-            snapshot.write_bytes(target, content, mode)
-        for target, content in sorted(
-            plan["_payload_updates"].items(), key=lambda item: str(item[0])
-        ):
-            snapshot.write_bytes(target, content)
-        copied = len(plan["_payload_materializations"])
-        reconciled = (
-            len(plan["_payload_deletions"])
-            + len(plan["_payload_updates"])
-        )
-        for target, content in plan["_relation_reports"].items():
-            snapshot.write_text(target, content)
-        for target, content in sorted(
-            plan["_legacy_contract_updates"].items(), key=lambda item: str(item[0])
-        ):
-            snapshot.write_text(target, content)
-        for target in plan["_legacy_contract_deletions"]:
-            snapshot.delete(target)
         current_ignore, _target_ignore = proposed_gitignore(
             root, args.workspace
         )
@@ -1336,12 +918,6 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
         if current_attributes != plan["_gitattributes_content"]:
             snapshot.write_text(
                 root / ".gitattributes", plan["_gitattributes_content"]
-            )
-        if any(item["surface"] == "portable_gate"
-               for item in plan["operations"]):
-            snapshot.write_bytes(
-                root / ".github" / "agentrof" / "vault-gate.pyz",
-                plan["_gate_bytes"], 0o755,
             )
         # Writes above keep an existing file's mode, so the repair comes last.
         for target, mode in sorted(
@@ -1390,11 +966,9 @@ def _apply_plan_locked(args, plan: dict) -> tuple[int, dict]:
             "workspace": args.workspace,
             "plan": public_plan(plan),
             "applied_operations": plan["operations"],
-            "payload_files_copied": copied,
-            "payload_files_reconciled": reconciled,
             "gitignore_changed": ignore_changed,
             "runtime_root": str(runtime),
-            "next_entry": next_entry(root),
+            "next_entry": "deliver",
             "warnings": plan["warnings"],
             "rolled_back": False,
         }
@@ -1477,6 +1051,10 @@ def emit(result: dict, as_json: bool) -> None:
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv[:1] == ["companions"]:
+        import setup_companions  # host-shared overlay, present in the built package
+        return setup_companions.main(argv[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command", nargs="?", choices=("inspect", "check", "apply"),

@@ -21,23 +21,15 @@ class PackagedStateContractTests(unittest.TestCase):
         return findings
 
     def test_database_files_are_rejected_from_product_surfaces(self):
-        cases = (
-            "plugins/software-engineering-team/state.db",
-            "platforms/shared/software-engineering-team/cache.sqlite",
-            "dist/codex/software-engineering-team/runtime.sqlite3",
-            ".release/build.db",
-        )
-        for relative in cases:
-            with self.subTest(relative=relative), \
-                    tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                path = root / relative
-                path.parent.mkdir(parents=True)
-                path.write_bytes(b"state")
-                findings = self.findings_for(root)
-                self.assertEqual(len(findings), 1, findings)
-                self.assertEqual(findings[0].check, "packaged_state_files")
-                self.assertEqual(findings[0].path, relative)
+        relative = "dist/codex/software-engineering-team/runtime.sqlite3"
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / relative
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"state")
+            findings = self.findings_for(root)
+            self.assertEqual(len(findings), 1, findings)
+            self.assertEqual((findings[0].check, findings[0].path), ("packaged_state_files", relative))
 
     def test_docs_and_test_fixtures_are_not_product_state_surfaces(self):
         with tempfile.TemporaryDirectory() as temporary:

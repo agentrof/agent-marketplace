@@ -7,13 +7,11 @@ exposure: entry
 # Setup
 
 Setup never writes executable test or environment placeholders into a consuming
-project. Approved Operation Contracts supply those commands at Delivery time.
-Delivery activation replaces `{{test_command}}`, `{{dependency_audit_job}}`
-and `{{environment_smoke_job}}` in its private CI template, while setup alone
+project. The project copies the CI template, replacing `{{test_command}}` and
+`{{tests_root}}` and dropping or replacing `{{dependency_audit_job}}` and `{{environment_smoke_job}}`,
+as [ci-bootstrap](references/ci-bootstrap.md) describes, while setup alone
 replaces `{{project_local_ignores}}` in its managed gitignore block. No
 placeholder is allowed to reach a consuming repository.
-
-Before delegation, follow `templates/task-input-contract.md` using `scripts/task_inputs.py --entry setup` and the compiler's exact scope and bindings.
 
 ## When to Use
 
@@ -24,14 +22,13 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
 ## Procedure
 
 1. Resolve the Git root. The only workspace is `workspace/`; never ask for or
-   create an alternate vault location. One team owns one project. Run:
+   create an alternate docs location. One team owns one project. Run:
 
    ```text
    <absolute-python> <absolute-package-scripts>/setup_project.py inspect --project-root <root> --json
    ```
 
-   Present its pre-mutation operation list. Requirement Flow determines which
-   stages apply for each request; setup does not infer request routing.
+   Present its pre-mutation operation list.
 2. Resolve any reported blocker and the Windows-only `git.core_longpaths` choice that `references/windows-long-paths.md` defines, then run:
 
    ```text
@@ -39,8 +36,10 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    ```
 
    Apply creates the project-local
-   `.agentrof/agent-marketplace/.runtime/` scratch directory, reconciles the
-   managed workspace surfaces and runs its closing gate. A disposable OS guard
+   `.agentrof/agent-marketplace/.runtime/` scratch directory, creates the
+   folders `workspace_layout` in `workspace/config.json` allows, seeds
+   `workspace/experience-design/DESIGN.md` and its `README.md` when absent,
+   reconciles the managed workspace surfaces and runs its closing gate. A disposable OS guard
    serializes mutating setup apply processes. Apply rebuilds its authoritative
    plan under that guard, and each target is rechecked immediately before its
    atomic replacement. If the gate fails, setup restores only exact unchanged
@@ -60,38 +59,24 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    it before execution.
 3. Run `<absolute-python> <absolute-package-scripts>/setup_project.py check
    --project-root <root> --json`. Check
-   uses the same convergence planner as inspect and apply. A stale portable
-   gate, payload key or package projection fails even when the file exists.
+   uses the same convergence planner as inspect and apply. A stale package
+   projection fails even when the file exists.
 4. Run the generated host project `inspect`, resolve every declared
    preserve/discard choice for user-owned instruction companions, then run its
    `apply` and `check`. Never overwrite companions silently. This host adapter
    projection is no project truth. Present the `roles` table: role, class,
    model, effort and source, any `kept` file and the `notice` it reports.
-5. Read the `obsidian-vault` skill completely. Refresh materializes its vault
-   payload under `workspace/docs/`, rebuilds the closed `workspace/config.json`
-   shape, preserves valid language values and the `class_models` and
-   `role_classes` overrides, and converges compiler-owned relation reports.
-   Retired command fields migrate to draft `docs/operation/` contracts and a
-   valid legacy `max_parallel` becomes Governance revision 1; authored notes
-   are never edited. The policy includes the fixed backlog keys `backlog`,
-   `backlog-review`, `epic`, `epic-review`, `story` and `test-plan`, plus all
-   analysis/design types. Issue reporting is external and stateless, so setup
-   never creates an issue type, tree, map or runtime record. Type keys and
-   graph colors stay stable; taxonomy changes do not expand project config.
-6. Policy-owned keys in `app.json`, `core-plugins.json`, `graph.json` and
-   `types.json` converge while unrelated user knobs remain untouched. The
-   vetted community-plugin enable list and the policy-owned plugin directories
-   are ignored, package-projected local files. Refresh replaces changed files
-   and removes assets retired by the package while preserving unrelated plugin
-   directories. Never commit this local projection to the consuming project.
-7. Ensure the managed root `.gitignore` block ignores only project-local
-   runtime, host projections, local Obsidian UI state and the community-plugin
-   projection. The contract JSON files and CSS snippet remain tracked,
-   reviewable project changes.
-8. Ensure the managed root `.gitattributes` block holds
+5. Refresh rebuilds the closed `workspace/config.json` shape, preserves valid
+   language values and the `class_models` and `role_classes` overrides, and
+   never edits authored notes. Retired command fields are dropped. Issue
+   reporting is external and stateless, so setup never creates an issue type,
+   tree or runtime record.
+6. Ensure the managed root `.gitignore` block ignores only project-local
+   runtime and host projections.
+7. Ensure the managed root `.gitattributes` block holds
    `workspace/docs/** -text`. Governed files then check out byte-identical to
-   the repository on every OS, which the byte-exact backlog, Experience and
-   stage-package checks need under Git for Windows' default
+   the repository on every OS, which the byte-exact checks need under Git for
+   Windows' default
    `core.autocrlf=true`. Project lines outside the block stay as written;
    check fails when a later line, a nested `.gitattributes` or
    `.git/info/attributes` turns conversion back on for a governed file. A
@@ -100,21 +85,16 @@ Before delegation, follow `templates/task-input-contract.md` using `scripts/task
    `git rm -r --cached --quiet -- workspace/docs` and
    `git checkout HEAD -- workspace/docs` once. Never use
    `git add --renormalize` here; it would stage those CRLF copies.
-9. Return tracked files that package writers before v0.4.0 left owner-only
+8. Return tracked files that package writers before v0.4.0 left owner-only
    to the mode a checkout gives them. A tracked non-executable file at exactly
    0600 in `workspace/config.json`, `workspace/docs/`, `.gitignore` or
    `.gitattributes` gains the group and other read bits the umask allows,
    0644 under a 022 or 002 umask, and no write bit; `inspect` lists it as a
-   `file_mode` operation and `check` reports it as drift. The vault guard
-   accepts that widening because it changes no byte; every other mode change
-   to compiler-owned Experience state is still restored.
-10. Run the portable vault gate and relevant Requirement compilers. Delivery
-    execution owns its own test and provider gates; setup never emits a
-    template with unresolved command placeholders.
-    Read [ci-bootstrap](references/ci-bootstrap.md) before a Delivery's
-    execution approval, whose pull request check precondition it defines.
+   `file_mode` operation and `check` reports it as drift.
+9. Setup never emits a template with unresolved command placeholders.
+10. Run `setup_project.py companions check`; optional third-party skills, and
+    `companions apply` installs them only on the owner's go (README Companions).
 11. Review and commit the exact tracked refresh diff before a workflow handoff.
-    Report `requirement` as the next entry. `/requirement` evaluates the
-    request-specific impact matrix and routes only the required stages and
-    backlog handoff; setup never infers routing from repository history.
+    Report `deliver` as the next entry, run in a fresh session per task
+    started with the workhorse-model command the host contract names.
     Start a fresh host session after setup.

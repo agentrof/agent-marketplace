@@ -1,24 +1,18 @@
-# The Three Passes in Depth
+# The Two Passes in Depth
 
-Fixed order on every cycle: correctness, then conformance, then security.
-Before any pass, build the complete changed-file inventory (no file skipped)
-and plan the order: security-critical files first (auth, middleware, config
-with secrets), then core business logic, then the interface layer, then
+Fixed order on every cycle: correctness, then conformance. Security belongs
+to the `security-reviewer` (see the review skill). Before any pass, build
+the complete changed-file inventory (no file skipped) and plan the order:
+core business logic first, then the interface layer, then
 infrastructure and configuration, then tests, then documentation. Stack
 checklists loaded from the bound stack skills extend each pass; they never
 replace it.
 
 ## Verification
 
-DO use the project's approved Operation Contracts and existing verification
-evidence. Keep verification read-only; never stage or change another role's
-candidate. In a Delivery the code reviewer starts no test, diagnostic or other
-verification command and no `regression-run`: a run holds the Item's
-environment lock that QA's commands need. It reads the freeze record's
-pre-handoff run and QA's recorded runs, which the verification manifest's
-`verification_evidence` names, with `status --summary` and `status --run
-<kind>`; a test result it needs that no record holds is a finding or a
-question for QA, never a run of its own. For Agent Marketplace package PRs, use `make check-local` and
+DO use the project's operation documents and existing verification
+evidence, such as the pull request's CI results. Keep verification read-only;
+never stage or change another role's candidate. For Agent Marketplace package PRs, use `make check-local` and
 `make verify-local` against the owner's exact staged candidate, plus at most
 the single test named in a finding. If that candidate is unavailable, report
 missing evidence. Run a full test module, `make check`, or a `--full` local gate
@@ -51,6 +45,16 @@ The change does what it claims, for all inputs, on all paths.
 - [ ] Collections: behavior defined for zero, one, and many elements
 - [ ] Time and encoding: timezone-aware timestamps, unicode-safe string
       handling, no naive date arithmetic
+- [ ] Identity source: tenant, user and actor read from the server-side
+      session, never from the request body or client-set headers
+- [ ] Membership filter: list and read paths filter by the caller's
+      membership or role, not only by the tenant boundary
+- [ ] Bounds: page sizes, upload sizes, counts and loops over input have
+      an upper limit
+- [ ] Deadline: one deadline, set at request arrival, bounds every
+      outbound call the request makes
+- [ ] Idempotency: every re-runnable step is idempotent; a create takes a
+      client idempotency key (same body replays, different body is 409)
 
 ### Error Propagation
 
@@ -104,6 +108,12 @@ ad hoc structural terms cannot.
 - [ ] Recorded decisions honored; a change that contradicts a decision is
       a finding even when the code works
 
+### Docs Delta
+
+- [ ] The README and the interface and architecture records the change
+      makes stale are updated in the same pull request
+- [ ] No new helper duplicates an existing one the change could have used
+
 ### Ownership Map
 
 - [ ] Every write in the diff targets data the writing module owns per the
@@ -132,68 +142,11 @@ Every conformance finding carries one rating:
   correctable locally without touching any contract.
 - **Low:** cosmetic drift from conventions; MINOR severity, never blocks.
 
-## Pass 3: Security
-
-Runs on every cycle, even when the diff looks unrelated to security.
-
-### Authentication and Authorization
-
-- [ ] Authentication required on every non-public entry point; the
-      protected-by-default stance holds
-- [ ] Authorization checked before every action, not just at login;
-      object-level access verified (no ID-guessing across tenants or users)
-- [ ] Token validation complete: signature, expiry, audience; no trust in
-      client-supplied identity claims
-- [ ] Role and permission checks server-side; no privilege decision made
-      from client input
-- [ ] Session and logout semantics: state cleared, tokens invalidated
-
-### Input Validation
-
-- [ ] All user input validated at the boundary: type, length, range,
-      format; allowlist over blocklist
-- [ ] Database queries parameterized; no string-built queries anywhere
-- [ ] Output encoded for its context; no raw interpolation into markup,
-      shell, or query languages
-- [ ] File uploads restricted by size and type; path traversal blocked on
-      any user-influenced path
-- [ ] Deserialization of untrusted data constrained to expected shapes
-
-### Data Protection
-
-- [ ] No hardcoded secrets, keys, or credentials; secrets come from the
-      environment or a secret store
-- [ ] Passwords hashed with a modern adaptive algorithm; never logged,
-      never returned
-- [ ] Sensitive data and personal information absent from logs, error
-      messages, and URLs
-- [ ] Transport encryption enforced for sensitive flows; request size
-      limits present
-
-### Common Vulnerability Classes
-
-- [ ] Injection (query, command, template) ruled out at every sink
-- [ ] Cross-site scripting: output escaping and content-type headers
-- [ ] Cross-site request forgery protection on state-changing operations
-- [ ] No dynamic code execution on user-influenced input
-- [ ] Rate limiting on public and authentication endpoints
-- [ ] Error responses terse in production; no stack traces or internal
-      paths to callers
-- [ ] New dependencies checked for known vulnerabilities
-
-### Security Pass Closure
-
-End the pass with a short attack-surface summary: entry points touched by
-the change, which are protected versus public, and the data entry points
-introduced. A security finding that implicates the approved auth design
-follows the escalation route, same as conformance.
 
 ## Production reachability
 
-Read the frozen manifest's `production_reachability` before judging a new
-function, command or record reader. Trace each reported symbol from a real
-production entry point and each record to its producer. A test-only caller is
-not wiring. The scan reports clues, not a pass: resolve callbacks, imports,
-dynamic paths, external producers and every `unassessed` path explicitly.
-Report missing wiring in the current Item so it does not become a later
-Item's unplanned work. Apply this check in a single-verifier pass as well.
+Before judging a new function, command or record reader, trace each new
+symbol from a real production entry point and each record to its producer. A
+test-only caller is not wiring. Resolve callbacks, imports, dynamic paths and
+external producers explicitly. Report missing wiring in the current task so it
+does not become later unplanned work.

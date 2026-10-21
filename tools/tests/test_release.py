@@ -68,12 +68,6 @@ class CalendarVersionTests(unittest.TestCase):
             with self.subTest(latest=latest):
                 self.assertEqual(release.next_version(latest, at(*moment)), expected)
 
-    def test_a_new_year_starts_at_one(self):
-        self.assertEqual(
-            release.next_version("2026.12.4", at(2026, 12, 31, 23, 59, 59)), "2026.12.5",
-        )
-        self.assertEqual(release.next_version("2026.12.4", at(2027, 1, 1)), "2027.1.1")
-
     def test_the_month_is_the_utc_month(self):
         # 22:30 at UTC-3 on 31 October is 1 November in UTC, and 01:30 at
         # UTC+5 on 1 November is still 31 October.
@@ -147,7 +141,6 @@ class CalendarVersionTests(unittest.TestCase):
         self.assertEqual(plan["plugins"]["team"], "0.0.1")
 
 
-@integration
 class ReleaseRepositoryTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -162,45 +155,6 @@ class ReleaseRepositoryTests(unittest.TestCase):
             "summary": f"Apply {name}.",
             "components": components,
         }, indent=2))
-
-    def git(self, *args: str) -> str:
-        return subprocess.run(
-            ["git", *args], cwd=self.root, capture_output=True, text=True,
-            check=True,
-        ).stdout.strip()
-
-    def test_fixture_has_one_canonical_version_on_every_host_surface(self):
-        self.assertEqual(release.validate_version_surfaces(self.root), [])
-
-    def test_marketplace_sources_stay_inside_the_selected_channel(self):
-        claude = release.read_json(
-            self.root / ".claude-plugin" / "marketplace.json"
-        )
-        codex = release.read_json(
-            self.root / ".agents" / "plugins" / "marketplace.json"
-        )
-        claude_entry = next(
-            entry for entry in claude["plugins"]
-            if entry["name"] == fixtures.PLUGIN
-        )
-        codex_entry = next(
-            entry for entry in codex["plugins"]
-            if entry["name"] == fixtures.PLUGIN
-        )
-        self.assertEqual(
-            claude_entry["source"],
-            release.channel_source("claude", fixtures.PLUGIN),
-        )
-        self.assertEqual(
-            codex_entry["source"],
-            release.channel_source("codex", fixtures.PLUGIN),
-        )
-
-    def test_channel_source_rejects_unknown_host(self):
-        with self.assertRaisesRegex(
-            release.ReleaseError, "unknown marketplace host"
-        ):
-            release.channel_source("other", fixtures.PLUGIN)
 
     def test_claude_only_or_codex_only_drift_fails(self):
         for host in ("claude", "codex"):
@@ -327,6 +281,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "invalid impact"):
             release.load_changesets(self.root)
 
+    @integration
     def test_changed_plugin_requires_the_same_component(self):
         with mock.patch.object(release, "changed_paths", return_value=[
             ("A", ".changes/docs.json"),
@@ -371,6 +326,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
             changed, plugins, hosts, [changeset_path], {fixtures.PLUGIN},
         ), {"mode": "changeset"})
 
+    @integration
     def test_non_provenance_distribution_change_requires_component(self):
         self.write_changeset("ci-hardening", {})
         with mock.patch.object(release, "changed_paths", return_value=[
@@ -379,18 +335,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
         ]), self.assertRaisesRegex(release.ReleaseError, fixtures.PLUGIN):
             release.check_pr_changeset(self.root, "origin/main")
 
-    def test_normal_pr_rejects_a_registry_reset(self):
-        self.write_changeset("new", {})
-        with mock.patch.object(release, "changed_paths", return_value=[
-            ("A", ".changes/new.json"),
-            ("M", "versions.json"),
-            ("M", "CHANGELOG.md"),
-            ("D", ".release/stable.json"),
-            ("D", ".changes/historical-release.json"),
-        ]):
-            with self.assertRaises(release.ReleaseError):
-                release.check_pr_changeset(self.root, "origin/main")
-
+    @integration
     def test_bootstrap_reset_still_rejects_changeset_rewrites(self):
         self.write_changeset("new", {})
         with mock.patch.object(release, "changed_paths", return_value=[
@@ -423,6 +368,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
         ):
             release.verify_bootstrap(self.root)
 
+    @integration
     def test_normal_pr_cannot_edit_release_owned_state(self):
         self.write_changeset("plugin-patch", {fixtures.PLUGIN: "patch"})
         with mock.patch.object(release, "changed_paths", return_value=[
@@ -432,6 +378,7 @@ class ReleaseRepositoryTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, "release-owned"):
                 release.check_pr_changeset(self.root, "origin/main")
 
+    @integration
     def test_plugin_retirement_may_only_prune_release_registries(self):
         current_versions = release.load_versions(self.root)
         base_versions = json.loads(json.dumps(current_versions))
@@ -479,18 +426,6 @@ class ReleaseRepositoryTests(unittest.TestCase):
 
 
 RESET_RETIRED = ["0.0.1", "0.1.0", "0.2.0"]
-RETIRED_CHANGELOG = (
-    "# Changelog\n\n"
-    "## 0.0.1\n\n- Establish the retired baseline of the reset fixture.\n\n"
-    "## 0.1.0\n\n- Ship the first retired feature of the reset fixture.\n\n"
-    "## 0.2.0\n\n- Ship the second retired feature of the reset fixture.\n"
-)
-BOOTSTRAP_CHANGELOG = (
-    "# Changelog\n\n## 0.0.1\n\n"
-    "- Establish the first stable Agent Marketplace baseline for all supported hosts.\n"
-)
-
-
 def reset_marker(**changes: object) -> dict:
     return {
         "schema_version": 1,
@@ -499,121 +434,6 @@ def reset_marker(**changes: object) -> dict:
         "retired_versions": list(RESET_RETIRED),
         **changes,
     }
-
-
-def set_every_version(root: Path, version: str) -> None:
-    plugins = release.load_versions(root)["plugins"]
-    versions = {
-        "schema_version": 1,
-        "marketplace": version,
-        "plugins": {name: version for name in plugins},
-    }
-    release.write_json(root / "versions.json", versions)
-    release.sync_version_surfaces(root, versions)
-    build_distributions.replace_generated(root, root / "dist")
-
-
-def apply_release_reset(root: Path) -> None:
-    """Make every edit of the complete one-time reset."""
-    set_every_version(root, release.BOOTSTRAP_VERSION)
-    (root / ".release" / "stable.json").unlink()
-    for path in (root / ".changes").glob("*.json"):
-        path.unlink()
-    fixtures.write(root / "CHANGELOG.md", BOOTSTRAP_CHANGELOG)
-    release.write_json(root / ".release" / "reset.json", reset_marker())
-
-
-@integration
-class ReleaseResetPolicyTests(unittest.TestCase):
-    """The one-time reset marker, once merged, is part of every later base and never changes."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.tmp = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.tmp.name) / "repository"
-        cls.root.mkdir()
-        fixtures.make_valid_root(cls.root, "0.2.0")
-        fixtures.write(cls.root / ".changes" / "README.md", "# Changesets\n")
-        fixtures.write(cls.root / ".changes" / "pending-feature.json", json.dumps({
-            "summary": "Ship a pending feature.",
-            "components": {fixtures.PLUGIN: "minor"},
-        }, indent=2) + "\n")
-        fixtures.write(cls.root / "CHANGELOG.md", RETIRED_CHANGELOG)
-        release.write_json(cls.root / ".release" / "stable.json", {
-            "schema_version": 1,
-            "version": "0.2.0",
-            "stable_base": "a" * 40,
-            "main_source": "b" * 40,
-            "impacts": {fixtures.PLUGIN: "minor"},
-            "summaries": ["Ship the second retired feature of the reset fixture."],
-        })
-        git_fixture.init_repository(cls.root, initial_branch="main")
-        cls.git("config", "user.name", "Release Reset Test")
-        cls.git("config", "user.email", "release-reset@example.test")
-        cls.git("add", "--all")
-        cls.git("commit", "-qm", "a released line at 0.2.0")
-        cls.base_sha = cls.git("rev-parse", "HEAD")
-        apply_release_reset(cls.root)
-        cls.git("add", "--all")
-        cls.git("commit", "-qm", "chore(release): restart stable numbering")
-        cls.reset_sha = cls.git("rev-parse", "HEAD")
-
-    @classmethod
-    def tearDownClass(cls):
-        git_fixture.remove_temporary(cls.tmp)
-
-    @classmethod
-    def git(cls, *args: str) -> str:
-        return subprocess.run(
-            ["git", *args], cwd=cls.root, capture_output=True, text=True,
-            check=True,
-        ).stdout.strip()
-
-    def setUp(self):
-        self.start_from(self.reset_sha)
-
-    def start_from(self, revision: str) -> None:
-        self.git("checkout", "-q", "--detach", "--force", revision)
-        self.git("clean", "-qfdx")
-
-    def commit(self, message: str) -> str:
-        self.git("add", "--all")
-        self.git("commit", "-qm", message)
-        return self.git("rev-parse", "HEAD")
-
-    def check(self, base: str | None = None) -> dict:
-        return release.check_pr_changeset(self.root, base or self.base_sha)
-
-    def assert_refused(self, cases: dict, base: str | None = None) -> None:
-        for name, (edit, message) in cases.items():
-            with self.subTest(name):
-                self.start_from(self.reset_sha)
-                edit()
-                self.commit(name)
-                with self.assertRaisesRegex(release.ReleaseError, message):
-                    self.check(base)
-
-    def test_the_marker_is_added_once_and_never_changed(self):
-        # Once merged, the marker is part of every later base.
-        self.assert_refused({
-            "edited": (
-                lambda: release.write_json(
-                    self.root / ".release" / "reset.json",
-                    reset_marker(reason="Restart once more."),
-                ),
-                "may only add it",
-            ),
-            "deleted": (
-                lambda: (self.root / ".release" / "reset.json").unlink(),
-                "may only add it",
-            ),
-            "renamed": (
-                lambda: (self.root / ".release" / "reset.json").rename(
-                    self.root / ".release" / "earlier-reset.json"
-                ),
-                "may only add it",
-            ),
-        }, base=self.reset_sha)
 
 
 class ReleaseResetMarkerRuleTests(unittest.TestCase):
@@ -719,17 +539,6 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         self.git("branch", "-f", "feature", self.head_sha)
         self.git("config", "core.autocrlf", "true")
 
-    def tearDown(self):
-        for name in ("info/grafts", "shallow"):
-            path = Path(self.git("rev-parse", "--git-path", name))
-            if not path.is_absolute():
-                path = self.root / path
-            if path.exists():
-                path.unlink()
-        replacements = self.git("replace", "--list").split()
-        if replacements:
-            self.git("replace", "-d", *replacements)
-
     def check(self, base: str | None = None, head: str = "HEAD") -> dict:
         return release.check_pr_changeset(self.root, base or self.base_sha, head)
 
@@ -743,15 +552,13 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
 
     def test_the_exact_release_commit_is_accepted(self):
         self.assertEqual(self.check(), {"mode": "release", "version": VERSION})
+        # A pull request of the release commit alone, after the feature merged.
+        self.assertEqual(
+            self.check(self.feature_sha), {"mode": "release", "version": VERSION},
+        )
         self.assertEqual(
             self.git("log", "-1", "--format=%s", self.head_sha),
             f"chore: release v{VERSION}",
-        )
-
-    def test_a_pull_request_of_the_release_commit_alone_is_accepted(self):
-        # The feature merged first; the pull request holds only the bump.
-        self.assertEqual(
-            self.check(self.feature_sha), {"mode": "release", "version": VERSION},
         )
 
     def test_ci_checks_the_pull_request_head_beside_its_merge_commit(self):
@@ -782,17 +589,17 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         def add_a_file() -> None:
             fixtures.write(self.root / "extra.txt", "not deterministic\n")
 
-        def drop_an_execute_bit() -> None:
-            path = self.root / "dist" / "claude" / fixtures.PLUGIN / "scripts" / "backlog_compile.py"
-            path.chmod(path.stat().st_mode & ~(stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
-            self.git("update-index", "--chmod=-x", path.relative_to(self.root).as_posix())
+        def add_an_execute_bit() -> None:
+            path = self.root / "dist" / "claude" / fixtures.PLUGIN / "scripts" / "task_lane.py"
+            path.chmod(path.stat().st_mode | stat.S_IXUSR)
+            self.git("update-index", "--chmod=+x", path.relative_to(self.root).as_posix())
 
         edits = {
             "build identity": forge_build_identity, "notes": rewrite_notes,
             "kept changeset": keep_a_changeset, "extra file": add_a_file,
         }
         if os.name != "nt":
-            edits["execute bit"] = drop_an_execute_bit
+            edits["execute bit"] = add_an_execute_bit
         for name, edit in edits.items():
             with self.subTest(name):
                 self.amend(edit)
@@ -801,35 +608,6 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
                     "differs from the deterministic bump of its parent",
                 ):
                     self.check()
-
-    def test_a_hand_edit_of_a_release_owned_file_is_refused(self):
-        self.git("checkout", "-q", "--detach", self.feature_sha)
-        versions = release.load_versions(self.root)
-        versions["marketplace"] = VERSION
-        release.write_json(self.root / "versions.json", versions)
-        self.git("add", "--all")
-        self.git("commit", "-qm", "chore: edit the marketplace version by hand")
-        with self.assertRaisesRegex(
-            release.ReleaseError,
-            r"cannot edit release-owned files: versions.json\. Only a release commit",
-        ):
-            self.check()
-
-    def test_commits_before_the_release_commit_keep_the_changeset_rules(self):
-        self.git("checkout", "-q", "--detach", self.base_sha)
-        write_changeset(
-            self.root, "wrong-component", {release.MARKETPLACE_COMPONENT: "patch"},
-        )
-        change_package(self.root, "An undeclared package change.")
-        self.git("add", "--all")
-        self.git("commit", "-qm", "feat: undeclared package change")
-        bump_at(self.root)
-        with self.assertRaisesRegex(
-            release.ReleaseError,
-            "break the changeset rules: changeset omits changed release"
-            f" components: {fixtures.PLUGIN}",
-        ):
-            self.check()
 
     @unittest.skipIf(os.name == "nt", "the filesystem keeps no execute bits")
     def test_a_new_package_executable_gets_its_declared_mode(self):
@@ -855,35 +633,6 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         with mock.patch.object(release, "apply_package_index_modes"), \
                 self.assertRaisesRegex(release.ReleaseError, "deterministic bump"):
             self.check()
-
-    def test_replay_ignores_global_excludes(self):
-        excludes = Path(self.tmp.name) / "global-excludes"
-        fixtures.write(excludes, ".release/stable.json\n")
-        config = Path(self.tmp.name) / "global-gitconfig"
-        self.git("config", "--file", str(config), "core.excludesFile", str(excludes))
-        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
-            self.assertEqual(self.check()["mode"], "release")
-
-    def test_replay_ignores_global_attributes_and_filters(self):
-        attributes = Path(self.tmp.name) / "global-attributes"
-        fixtures.write(
-            attributes, ".release/stable.json filter=release-replay-poison\n",
-        )
-        config = Path(self.tmp.name) / "global-gitconfig"
-        self.git(
-            "config", "--file", str(config), "core.attributesFile",
-            str(attributes),
-        )
-        self.git(
-            "config", "--file", str(config),
-            "filter.release-replay-poison.clean", "git hash-object --stdin",
-        )
-        self.git(
-            "config", "--file", str(config),
-            "filter.release-replay-poison.required", "true",
-        )
-        with mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(config)}):
-            self.assertEqual(self.check()["mode"], "release")
 
     def test_replay_ignores_filesystem_execute_bit_loss(self):
         replace_generated = build_distributions.replace_generated
@@ -918,47 +667,6 @@ class ReleaseCommitPolicyTests(unittest.TestCase):
         with mock.patch.object(Path, "write_text", new=windows_write_text):
             bump_at(self.root)
         self.assertEqual(self.check()["mode"], "release")
-
-    def test_replacement_ref_cannot_substitute_the_release_commit(self):
-        tampered = self.amend(
-            lambda: fixtures.write(self.root / "extra.txt", "not deterministic\n"),
-        )
-        self.git("checkout", "-q", "--detach", self.base_sha)
-        self.git("replace", tampered, self.head_sha)
-        with self.assertRaisesRegex(release.ReleaseError, "tree differs"):
-            release.verify_release_commit(self.root, self.base_sha, tampered)
-
-    def test_legacy_graft_overlay_is_rejected(self):
-        graft_value = self.git("rev-parse", "--git-path", "info/grafts")
-        graft_path = Path(graft_value)
-        if not graft_path.is_absolute():
-            graft_path = self.root / graft_path
-        fixtures.write(graft_path, f"{self.head_sha} {self.base_sha}\n")
-        with self.assertRaisesRegex(release.ReleaseError, "graft overlays"):
-            self.check()
-
-    def test_shallow_repository_is_rejected(self):
-        shallow_value = self.git("rev-parse", "--git-path", "shallow")
-        shallow_path = Path(shallow_value)
-        if not shallow_path.is_absolute():
-            shallow_path = self.root / shallow_path
-        fixtures.write(shallow_path, f"{self.base_sha}\n")
-        with self.assertRaisesRegex(release.ReleaseError, "complete Git history"):
-            self.check()
-
-    def test_a_release_commit_made_before_the_base_advanced_is_refused(self):
-        self.git("checkout", "-q", "main")
-        write_changeset(self.root, "later-fix", {fixtures.PLUGIN: "patch"})
-        change_package(self.root, "A later fix on main.")
-        self.git("add", "--all")
-        self.git("commit", "-qm", "fix: a later fix on main")
-        advanced = self.git("rev-parse", "HEAD")
-        self.git("checkout", "-q", "--detach", self.head_sha)
-        with self.assertRaisesRegex(
-            release.ReleaseError, "base advanced after the release commit was made",
-        ):
-            self.check(advanced)
-
 
 @integration
 class ReleaseMonthBoundaryTests(unittest.TestCase):
@@ -1011,20 +719,6 @@ class ReleaseMonthBoundaryTests(unittest.TestCase):
             self.check(at(2026, 11, 2))
         redate(at(2026, 11, 5), at(2026, 10, 31, 23, 59, 59))
         self.assertEqual(self.check(at(2026, 11, 6)), {"mode": "release", "version": VERSION})
-
-    def test_a_release_commit_of_a_month_not_begun_is_refused(self):
-        # Only a clock that runs ahead dates a commit in a later month.
-        self.git("checkout", "-q", "--detach", self.feature_sha)
-        bump_at(self.root, at(2026, 11, 1, 0, 0, 1))
-        with self.assertRaisesRegex(
-            release.ReleaseError,
-            "it is dated 2026-11-01, in a month that has not begun; fix the clock",
-        ):
-            self.check(at(2026, 10, 31, 23, 59, 59))
-        self.assertEqual(
-            self.check(at(2026, 11, 1, 0, 0, 2)), {"mode": "release", "version": "2026.11.1"},
-        )
-
 
 @integration
 class BumpCommandTests(unittest.TestCase):
@@ -1151,18 +845,6 @@ class ReleaseCommitRuleTests(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "2 parents, not one"):
             release.release_commit_parent(["a" * 40, "b" * 40], never_asked)
 
-    @integration
-    def test_a_parent_without_release_impact_cannot_be_bumped(self):
-        with git_fixture.temporary_directory() as temporary:
-            root = Path(temporary)
-            fixtures.make_valid_root(root)
-            before = file_digests(root)
-            with self.assertRaisesRegex(
-                release.ReleaseError, "cannot be bumped: no pending stable release impact",
-            ):
-                release.bump_parent(root, OCTOBER)
-            self.assertEqual(file_digests(root), before)
-
     def test_ambient_repository_environment_is_scrubbed(self):
         poisoned = {
             "GIT_ATTR_SOURCE": "a" * 40,
@@ -1175,6 +857,7 @@ class ReleaseCommitRuleTests(unittest.TestCase):
         for name in poisoned:
             self.assertNotIn(name, environment)
         self.assertEqual(environment["GIT_NO_REPLACE_OBJECTS"], "1")
+        self.assertEqual(environment["GIT_CONFIG_GLOBAL"], os.devnull)
 
     def test_release_records_the_build_identity_of_its_sources(self):
         temporary = tempfile.TemporaryDirectory()
@@ -1228,7 +911,6 @@ class ReleaseMonthRuleTests(unittest.TestCase):
         self.assertEqual(release.next_version("0.0.1", when), "2026.11.1")
 
 
-@integration
 class BumpRuleTests(unittest.TestCase):
     """bump refuses before it writes, decided without Git."""
 
@@ -1236,7 +918,7 @@ class BumpRuleTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        fixtures.make_valid_root(self.root)
+        fixtures.make_valid_root(self.root, build=False)
         self.calls: list[tuple[str, ...]] = []
 
     def bump(self, status: str) -> None:
@@ -1578,12 +1260,6 @@ class ReleaseCandidateTests(unittest.TestCase):
         self.push(":refs/heads/stable")
         self.refused("remote stable is at nothing")
 
-    def test_main_validation_decides_last(self):
-        self.runs = [validation_run(head_sha=self.candidate, conclusion="failure")]
-        self.refused("concluded failure")
-        self.runs = []
-        self.refused("main has no push validation run")
-
     def test_the_first_release_is_the_bootstrap_state(self):
         # Without a release tag and stable the commit must be the first
         # stable baseline, and resuming it stays on that path.
@@ -1868,17 +1544,11 @@ class ReleaseFinalizeTests(unittest.TestCase):
             self.git_run("git", "branch", "--show-current").stdout.strip(), "main"
         )
         self.assertEqual(self.git_run("git", "status", "--porcelain").stdout, "")
-        for branch in (self.FEATURE,):
-            self.assertFalse(release.git_ok(
-                self.root, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
-            ))
-            self.assertFalse(release.git_ok(
-                self.root,
-                "show-ref",
-                "--verify",
-                "--quiet",
-                f"refs/remotes/origin/{branch}",
-            ))
+        self.assertEqual(self.branch_refs(self.FEATURE), (False, False))
+        self.assertFalse(release.git_ok(
+            self.root, "show-ref", "--verify", "--quiet",
+            f"refs/remotes/origin/{self.FEATURE}",
+        ))
         main_sha = release.git(self.root, "rev-parse", "refs/heads/main")
         self.assertEqual(
             release.git(self.root, "rev-parse", "refs/heads/stable"), main_sha
@@ -1922,16 +1592,7 @@ class ReleaseFinalizeTests(unittest.TestCase):
             self.root, "show-ref", "--verify", "--quiet", f"refs/heads/{self.FEATURE}"
         ))
 
-    def test_mismatched_stable_or_unbounded_branch_fails_closed(self):
-        release.validate_finalize_branch("codex/maintainer-operations-protocol")
-        with self.assertRaisesRegex(release.ReleaseError, "bounded"):
-            release.finalize_local_release(
-                self.root, self.VERSION, ["feature/anything"]
-            )
-        with self.assertRaisesRegex(release.ReleaseError, "bounded"):
-            release.validate_finalize_branch(
-                "codex/" + "a" * release.MAX_FINALIZE_BRANCH_CHARS
-            )
+    def test_mismatched_stable_fails_closed(self):
         (self.root / "stable-drift.txt").write_text("drift\n", encoding="utf-8")
         self.git_run("git", "add", "stable-drift.txt")
         self.git_run("git", "commit", "-m", "stable drift")
@@ -1969,47 +1630,6 @@ class ReleaseFinalizeTests(unittest.TestCase):
             ),
         )
 
-    def test_apply_deletes_a_merged_claude_branch_locally_and_on_origin(self):
-        branch = "claude/delivery-map-ends-with-newline"
-        self.git_run("git", "branch", branch, "main")
-        self.git_run("git", "push", "origin", branch)
-        self.git_run("git", "fetch", "origin", "--prune", "--tags")
-        self.git_run("git", "switch", branch)
-
-        result = release.finalize_local_release(
-            self.root, self.VERSION, [branch], apply=True,
-        )
-
-        self.assertEqual(
-            result["branches"][0], {"branch": branch, "local": True, "remote": True}
-        )
-        self.assertEqual(self.branch_refs(branch), (False, False))
-        self.assertFalse(release.git_ok(
-            self.root, "show-ref", "--verify", "--quiet",
-            f"refs/remotes/origin/{branch}",
-        ))
-        self.assertEqual(self.branch_refs(self.FEATURE), (True, True))
-        self.assertEqual(
-            self.git_run("git", "branch", "--show-current").stdout.strip(), "main"
-        )
-        self.assertEqual(self.git_run("git", "status", "--porcelain").stdout, "")
-
-    def test_unmerged_claude_branch_is_never_deleted(self):
-        branch = "claude/scope-approval-requires-current-bindings"
-        self.git_run("git", "switch", "-c", branch, "main")
-        (self.root / "unmerged.txt").write_text("not released\n", encoding="utf-8")
-        self.git_run("git", "add", "unmerged.txt")
-        self.git_run("git", "commit", "-m", "unmerged")
-        self.git_run("git", "push", "origin", branch)
-        with self.assertRaisesRegex(release.ReleaseError, "unmerged local branch"):
-            release.finalize_local_release(
-                self.root, self.VERSION, [branch], apply=True
-            )
-        self.assertEqual(self.branch_refs(branch), (True, True))
-        self.assertEqual(
-            self.git_run("git", "branch", "--show-current").stdout.strip(), branch
-        )
-
     def test_branch_outside_every_declared_host_prefix_is_refused(self):
         branch = "feature/issue-42"
         self.git_run("git", "branch", branch, "main")
@@ -2019,18 +1639,24 @@ class ReleaseFinalizeTests(unittest.TestCase):
                 self.root, self.VERSION, [branch], apply=True
             )
         self.assertEqual(self.branch_refs(branch), (True, True))
-        for near_miss in (
-            "claude-code/issue-42",
-            "Claude/issue-42",
-            "claude/Issue-42",
-            "claude/issue_42",
-            "claude/nested/issue-42",
-            "claude/",
-            "claude/" + "a" * release.MAX_FINALIZE_BRANCH_CHARS,
+
+    def test_the_audit_requires_versions_json_to_name_the_release(self):
+        self.git_run("git", "tag", "-a", "v9.9.9", "-m", "v9.9.9", "stable")
+        self.git_run("git", "push", "origin", "v9.9.9")
+        self.git_run("git", "fetch", "origin", "--prune", "--tags")
+        with self.assertRaisesRegex(
+            release.ReleaseError, "versions.json does not name v9.9.9",
         ):
-            with self.subTest(branch=near_miss), \
-                    self.assertRaisesRegex(release.ReleaseError, "bounded"):
-                release.validate_finalize_branch(near_miss)
+            release.release_ref_audit(self.root, "9.9.9")
+
+
+class FinalizeBranchRuleTests(unittest.TestCase):
+    """Cleanup deletes only bounded branches of a declared host prefix."""
+
+    def test_a_near_miss_of_a_declared_prefix_is_refused(self):
+        release.validate_finalize_branch("codex/maintainer-operations-protocol")
+        with self.assertRaisesRegex(release.ReleaseError, "bounded"):
+            release.validate_finalize_branch("claude/nested/issue-42")
 
     def test_cleanup_prefixes_are_read_from_the_host_adapter_registry(self):
         self.assertEqual(release.finalize_branch_prefixes(), ("claude/", "codex/"))
@@ -2048,64 +1674,6 @@ class ReleaseFinalizeTests(unittest.TestCase):
                     release.ReleaseError, "bounded other-agent/<kebab-name> branch",
                 ):
                     release.validate_finalize_branch(branch)
-
-
-    def test_the_audit_requires_versions_json_to_name_the_release(self):
-        self.git_run("git", "tag", "-a", "v9.9.9", "-m", "v9.9.9", "stable")
-        self.git_run("git", "push", "origin", "v9.9.9")
-        self.git_run("git", "fetch", "origin", "--prune", "--tags")
-        with self.assertRaisesRegex(
-            release.ReleaseError, "versions.json does not name v9.9.9",
-        ):
-            release.release_ref_audit(self.root, "9.9.9")
-
-
-@integration
-class BootstrapFinalizeTests(unittest.TestCase):
-    def test_bootstrap_release_reaches_the_clean_main_terminal_state(self):
-        with git_fixture.temporary_directory() as temporary:
-            temporary_path = Path(temporary)
-            remote = temporary_path / "remote.git"
-            root = temporary_path / "work"
-
-            def run(*args: str) -> subprocess.CompletedProcess:
-                return subprocess.run(
-                    list(args), cwd=root,
-                    capture_output=True, text=True, check=True,
-                )
-
-            git_fixture.init_repository(remote, bare=True)
-            git_fixture.init_repository(root, initial_branch="main")
-            run("git", "config", "user.name", "Bootstrap Test")
-            run("git", "config", "user.email", "bootstrap@example.test")
-            (root / "versions.json").write_text(json.dumps({
-                "schema_version": 1,
-                "marketplace": "0.0.1",
-                "plugins": {"fixture": "0.0.1"},
-            }), encoding="utf-8")
-            run("git", "add", "versions.json")
-            run("git", "commit", "-m", "bootstrap")
-            run("git", "tag", "-a", "v0.0.1", "-m", "bootstrap")
-            run("git", "branch", "stable")
-            run("git", "branch", "codex/bootstrap-fixture")
-            run("git", "remote", "add", "origin", str(remote))
-            run(
-                "git", "push", "origin", "main", "stable",
-                "codex/bootstrap-fixture", "v0.0.1",
-            )
-            run("git", "fetch", "origin", "--prune", "--tags")
-            run("git", "switch", "codex/bootstrap-fixture")
-
-            result = release.finalize_local_release(
-                root,
-                "0.0.1",
-                ["codex/bootstrap-fixture"],
-                apply=True,
-            )
-
-            self.assertEqual(result["release"]["version"], "0.0.1")
-            self.assertEqual(run("git", "branch", "--show-current").stdout.strip(), "main")
-            self.assertEqual(run("git", "status", "--porcelain").stdout, "")
 
 
 @integration

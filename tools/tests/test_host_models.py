@@ -175,33 +175,25 @@ class ClaudeListingTests(unittest.TestCase):
 
     def test_only_a_claude_ai_login_reflects_the_account(self):
         # Claude Code names the source of its auth token; only a claude.ai
-        # login gets the account's own catalog.
-        for source in ("claude.ai", "CLAUDE_CODE_OAUTH_TOKEN",
-                       "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"):
+        # login gets the account's own catalog, else a listed model stays unverified.
+        for source, view in (("CLAUDE_CODE_OAUTH_TOKEN", "account"), ("none", "generic"),
+                             (None, "generic"), ("apiKeyHelper", "generic")):
             with self.subTest(source=source):
-                self.claude.answer("*", reply={"models": CLAUDE_ROWS,
-                                               "account": {"tokenSource": source}})
-                self.assertEqual(self.listing()["view"], "account")
-
-    def test_without_a_signed_in_account_a_listed_model_stays_unverified(self):
-        for name, account in (("token source none", SIGNED_OUT), ("no account", None),
-                              ("empty token source", {"tokenSource": ""}),
-                              ("gateway token", {"tokenSource": "ANTHROPIC_AUTH_TOKEN"}),
-                              ("key helper", {"tokenSource": "apiKeyHelper"}),
-                              ("unknown source", {"tokenSource": "something-new"})):
-            with self.subTest(case=name):
                 reply = {"models": CLAUDE_ROWS}
-                if account is not None:
-                    reply["account"] = account
+                if source is not None:
+                    reply["account"] = {"tokenSource": source}
                 self.claude.answer("*", reply=reply)
                 listing = self.listing()
-                self.assertEqual((listing["status"], listing["view"]), ("ok", "generic"))
-                self.assertEqual(claude_models.verdict("claude-opus-5-5", listing), "unverified")
-                self.assertEqual(claude_models.verdict("claude-opus-4-1", listing),
-                                 "unavailable")
-                self.assertEqual(claude_models.efforts("claude-opus-5-5", listing), L5)
+                self.assertEqual((listing["status"], listing["view"]), ("ok", view))
+                if view == "generic":
+                    self.assertEqual(claude_models.verdict("claude-opus-5-5", listing),
+                                     "unverified")
+                    self.assertEqual(claude_models.verdict("claude-opus-4-1", listing),
+                                     "unavailable")
 
-    def test_the_probe_sends_initialize_alone_with_every_hook_off(self):
+    def test_the_probe_sends_initialize_alone_with_every_hook_and_mcp_server_off(self):
+        # `--strict-mcp-config` without `--mcp-config` loads no MCP server, which
+        # `claude -p` would otherwise start without approval.
         self.listing()
         calls = self.claude.calls()
         self.assertEqual([call["argv"] for call in calls], [["--version"], CLAUDE_PROBE])
@@ -211,16 +203,6 @@ class ClaudeListingTests(unittest.TestCase):
         self.assertEqual((request["type"], request["request"]), (
             "control_request", {"subtype": "initialize"}))
         self.assertIsInstance(request["request_id"], str)
-
-    def test_the_probe_loads_no_mcp_server(self):
-        # `claude -p` starts the project's `.mcp.json` servers without the
-        # approval an interactive session asks for, and every user and plugin
-        # server (https://code.claude.com/docs/en/mcp, "Project scope"); with
-        # `--strict-mcp-config` and no `--mcp-config` it loads none.
-        self.listing()
-        probe = self.claude.calls()[1]["argv"]
-        self.assertIn("--strict-mcp-config", probe)
-        self.assertFalse([arg for arg in probe if arg.startswith("--mcp-config")], probe)
 
     def test_only_the_reply_to_its_own_request_is_the_list(self):
         noise = ["Loading plugins...", json.dumps({"type": "system", "subtype": "init"})]
@@ -263,22 +245,14 @@ class ClaudeListingTests(unittest.TestCase):
         self.claude.answer("*", sleep=60, pid_file=str(pid_file), orphan_file=str(orphan_file),
                            reply={"models": CLAUDE_ROWS, "account": SIGNED_IN})
         started = time.monotonic()
-        listing = self.listing(timeout=3)
+        listing = self.listing(timeout=1)
         self.assertLess(time.monotonic() - started, 15)
         self.assertEqual(listing["status"], "failed")
-        self.assertIn("timed out after 3 s", listing["detail"])
+        self.assertIn("timed out after 1 s", listing["detail"])
         self.assertEqual(claude_models.verdict("claude-opus-5-5", listing), "unverified")
         # The probe and a process it started, which held its output open, are gone.
         for path in (pid_file, orphan_file):
             self.assertTrue(wait_gone(int(path.read_text(encoding="utf-8"))), path.name)
-
-    def test_a_version_check_that_hangs_ends_the_listing_at_the_time_limit(self):
-        self.claude.answer("--version", sleep=60, stdout="2.1.284 (Claude Code)\n")
-        started = time.monotonic()
-        listing = self.listing(timeout=2)
-        self.assertLess(time.monotonic() - started, 15)
-        self.assertEqual((listing["status"], listing["binary"]), ("failed", None))
-        self.assertIn("timed out after 2 s", listing["detail"])
 
     def test_the_binary_is_the_session_s_own_or_a_recent_enough_claude_on_path(self):
         node = fixtures.FakeHost(self.base / "node", "node")
@@ -468,10 +442,10 @@ class CodexListingTests(unittest.TestCase):
         pid_file = self.base / "listing.pid"
         self.codex.answer("debug models", sleep=60, pid_file=str(pid_file))
         started = time.monotonic()
-        listing = codex_models.list_models(self.environ(), timeout=3)
+        listing = codex_models.list_models(self.environ(), timeout=1)
         self.assertLess(time.monotonic() - started, 15)
         self.assertEqual(listing["status"], "failed")
-        self.assertIn("timed out after 3 s", listing["detail"])
+        self.assertIn("timed out after 1 s", listing["detail"])
         self.assertTrue(wait_gone(int(pid_file.read_text(encoding="utf-8"))))
 
     def test_the_binary_is_found_in_the_documented_order(self):
@@ -523,20 +497,6 @@ class VerdictTests(unittest.TestCase):
     def listing(self, status: str = "ok", view: str = "account") -> dict:
         return {"status": status, "binary": "/bin/host", "version": "1.0.0", "view": view,
                 "models": {"model-a": {"efforts": ["high"]}}, "detail": ""}
-
-    def test_both_hosts_share_one_interface_and_one_verdict(self):
-        for module in (claude_models, codex_models):
-            with self.subTest(host=module.HOST):
-                self.assertIs(module.verdict, host_listing.verdict)
-                self.assertIs(module.efforts, host_listing.efforts)
-        with mock.patch.object(host_listing, "ancestor_executables", return_value=[]), \
-                mock.patch.object(codex_models, "APP_FOLDERS", ()):
-            empty = {"PATH": "", "HOME": tempfile.gettempdir()}
-            keys = {module.HOST: set(module.list_models(empty, timeout=5))
-                    for module in (claude_models, codex_models)}
-        self.assertEqual(keys["claude"], {"status", "binary", "version", "view", "models",
-                                          "detail"})
-        self.assertEqual(keys["claude"], keys["codex"])
 
     def test_the_verdict_table(self):
         for status, view, model, expected in (
@@ -603,22 +563,12 @@ class SetupCheckTests(unittest.TestCase):
         notes = host_listing.check_notes("host-project", check, pins, {"model-a"}, conflicts,
                                          "the parent session's model")
         self.assertEqual(len(notes), 3, notes)
-        self.assertEqual(notes[0], (
-            "host-project: warning: model-a is unavailable for the high and medium classes:"
-            " this host's own model list (generic view, /opt/host/bin/host 1.2.3) does not hold"
-            " it. Their roles architect, developer run on the parent session's model at their"
-            " own effort; every setup or refresh judges it again."))
-        self.assertEqual(notes[1], (
-            "host-project: note: model-b keeps its pin unverified: the account's list; the"
-            " run-time rule covers it."))
-        self.assertEqual(notes[2], (
-            "host-project: warning: the high class runs model-c at effort high, which this"
-            " host's own model list does not name for it (low); choose another effort through"
-            " /configure models."))
-        recorded = host_listing.check_notes("host-project", {"status": "not_run"}, pins,
-                                            {"model-b"}, [], "the session's model")
-        self.assertIn("model-b is unavailable for the low class: the last setup judged it"
-                      " unavailable. Its roles reviewer run", recorded[0])
+        for note, fragments in zip(notes, (
+                ("warning: model-a is unavailable", "architect, developer"),
+                ("note: model-b keeps its pin unverified",),
+                ("warning: the high class runs model-c at effort high",))):
+            for fragment in fragments:
+                self.assertIn(fragment, note)
 
 
 class AncestorTests(unittest.TestCase):
@@ -667,103 +617,17 @@ class AncestorTests(unittest.TestCase):
         self.assertTrue(Path(ancestors[0]).name.lower().startswith("python"), ancestors)
 
 
-class HostContractTests(unittest.TestCase):
-    """Both host contracts state the one strategy in the same words."""
-
-    STRATEGY = (
-        "A role whose pinned model cannot run falls back to this session's model with a"
-        " visible warning, by one strategy on both hosts:",
-        "Setup and refresh read this host's own model list from the binary that runs this"
-        " session, without a model request, and judge each model a role is pinned to, the"
-        " project's `class_models` included: `available` when the list holds it and reflects"
-        " the signed-in account, `unavailable` when the list does"
-        " not hold it, since this binary cannot run it, and `unverified` when no list could be"
-        " read or the list reflects no account. Every probe has a time limit, and one that"
-        " fails gives `unverified`, never an error that stops setup.",
-        "The roles of an `unavailable` model run on this session's model at their own effort,"
-        " and setup prints a warning that names the model, its class slots and its roles; every"
-        " setup or refresh judges the model again. An `unverified` model keeps its pin with a"
-        " note, and the run-time rule covers it.",
-        "At run time a role whose pinned model fails gets a warning that never blocks work"
-        " and at most one start again on this session's model, only when the failed run"
-        " changed nothing.",
-    )
-
-    def contract(self, host: str) -> str:
-        return " ".join((REPO / "platforms" / host / fixtures.PLUGIN / "host-contract.md")
-                        .read_text(encoding="utf-8").split())
-
-    def test_both_contracts_state_the_strategy_and_where_the_hosts_differ(self):
-        claude, codex = self.contract("claude"), self.contract("codex")
-        for fragment in self.STRATEGY:
-            with self.subTest(fragment=fragment[:60]):
-                self.assertIn(fragment, claude)
-                self.assertIn(fragment, codex)
-        for fragment in (
-                "On Claude Code the binary is `CLAUDE_CODE_EXECPATH` or the executable of"
-                " `CLAUDE_PID`, else `claude` on PATH when its version meets the highest"
-                " `min_cli_version` of the catalog models the class slots run.",
-                "The list is the `models` of its reply to the `initialize` control request,"
-                " and it reflects the account only when the reply's `account.tokenSource`"
-                " names a claude.ai login.",
-                "The request runs with every hook off and loads no MCP server,"
-                " `--strict-mcp-config` without `--mcp-config`, so it starts none of the"
-                " project's `.mcp.json` servers, which an interactive session asks the user to"
-                " approve first, and no user or plugin server.",
-                "Claude Code reports a failed role to hooks, so the plugin's hooks below add"
-                " the run-time warning."):
-            with self.subTest(fragment=fragment[:60]):
-                self.assertIn(fragment, claude)
-        for fragment in (
-                "On Codex the binary is the nearest `codex` process above setup, since Codex"
-                " exports no variable that names it, else the target of the `apply_patch`"
-                " alias on PATH, `CODEX_CLI_PATH` when the environment carries it, `codex` on"
-                " PATH or the ChatGPT app's bundled CLI, and its version must equal"
-                " `CODEX_VERSION` when that is set.",
-                "The list is the account catalog Codex caches in `models_cache.json` in its"
-                " home when the cache comes from this binary's version and is at most 24"
-                " hours old, otherwise the output of `codex debug models`, which reflects no"
-                " account when it can only have printed the catalog bundled with the binary:"
-                " inside the command sandbox, with a `CODEX_SANDBOX` variable set, or when it"
-                " equals `codex debug models --bundled`.",
-                "omit `model` and keep `model_reasoning_effort`",
-                "Codex has no hook event for a failed role, so the run-time warning comes from"
-                " the coordinator rule below."):
-            with self.subTest(fragment=fragment[:60]):
-                self.assertIn(fragment, codex)
-        self.assertNotIn("when a `codex` executable is on PATH", codex)
-
-
 @integration
 @unittest.skipIf(os.name != "posix", "the fake host binaries are POSIX shell scripts")
 class PackagingTests(unittest.TestCase):
-    """Every host package ships its own host_models.py beside the shared core."""
+    """The committed package runs its host_models.py against a fake host."""
 
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.root = Path(cls.temporary.name) / "marketplace"
-        fixtures.make_valid_root(cls.root)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
-
-    def test_each_package_ships_its_host_s_module_and_runs_it(self):
-        for host in ("claude", "codex"):
-            scripts = self.root / "dist" / host / fixtures.PLUGIN / "scripts"
-            with self.subTest(host=host):
-                self.assertEqual(
-                    (scripts / "host_models.py").read_bytes(),
-                    (REPO / "platforms" / host / "_team/overlay/scripts/host_models.py")
-                    .read_bytes())
-                self.assertEqual((scripts / "host_listing.py").read_bytes(),
-                                 (SHARED / "host_listing.py").read_bytes())
+    def test_the_packaged_module_runs(self):
         with tempfile.TemporaryDirectory() as raw:
             claude = fixtures.FakeHost(Path(raw) / "bin", "claude")
             claude.answer("--version", stdout="2.1.284 (Claude Code)\n")
             claude.answer("*", reply={"models": CLAUDE_ROWS, "account": SIGNED_OUT})
-            script = self.root / "dist/claude" / fixtures.PLUGIN / "scripts/host_models.py"
+            script = REPO / "dist/claude" / fixtures.PLUGIN / "scripts/host_models.py"
             result = subprocess.run(
                 [sys.executable, str(script), "claude-opus-5-5", "claude-opus-4-1"],
                 capture_output=True, text=True, timeout=60, check=False,

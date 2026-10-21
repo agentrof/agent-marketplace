@@ -19,12 +19,6 @@ import sys
 import runtime_floor
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# vault_hook.py's tool vocabulary: the file tools its pre hook checks by
-# target path, and the shells.
-FILE_TOOLS = ("Write", "Edit", "MultiEdit")
-SHELL_TOOLS = ("Bash", "PowerShell")
-PATCH_TARGET_RE = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$", re.MULTILINE)
-AUTOPILOT_RUNTIME = (".agentrof", "agent-marketplace", ".runtime", "autopilot")
 
 
 def run(script, arguments):
@@ -63,93 +57,6 @@ def read_payload():
     return value if isinstance(value, dict) else {}
 
 
-def parts(path):
-    separators = re.escape(os.sep + (os.altsep or ""))
-    return tuple(part for part in re.split("[" + separators + "]", path) if part)
-
-
-def governed(path):
-    """Whether vault_hook.py governs a write to `path` in a plugin project.
-
-    A copy of vault_hook's path rules: the autopilot runtime directory
-    (in_autopilot_runtime) wherever it is, and workspace/config.json and the
-    workspace/docs vault (is_workspace_config, vault_root) only in a project
-    whose workspace/config.json exists, so a write outside a plugin project is
-    never denied.
-    """
-    size = len(AUTOPILOT_RUNTIME)
-    candidates = [os.path.abspath(path)]
-    try:
-        candidates.append(os.path.realpath(path))
-    except (OSError, ValueError):
-        pass  # a path the system cannot resolve is judged as written
-    for candidate in candidates:
-        names = parts(candidate)
-        if any(names[index:index + size] == AUTOPILOT_RUNTIME
-               for index in range(len(names) - size + 1)):
-            return True
-        if os.path.basename(candidate) == "config.json" \
-                and os.path.basename(os.path.dirname(candidate)) == "workspace" \
-                and os.path.isfile(candidate):
-            return True
-        directory = os.path.dirname(candidate)
-        while True:
-            parent = os.path.dirname(directory)
-            if os.path.basename(directory) == "docs" and os.path.basename(parent) == "workspace" \
-                    and os.path.isfile(os.path.join(parent, "config.json")):
-                return True
-            if parent == directory:
-                break
-            directory = parent
-    return False
-
-
-def written_paths(tool, tool_input):
-    """The paths a file tool or an apply_patch call writes, as vault_hook reads them."""
-    if tool in FILE_TOOLS:
-        path = tool_input.get("file_path") if isinstance(tool_input, dict) else None
-        return [path] if isinstance(path, str) and path else []
-    if tool != "apply_patch":
-        return []
-    patch = tool_input if isinstance(tool_input, str) else ""
-    for key in ("command", "patch", "patchText", "input", "text"):
-        value = tool_input.get(key) if isinstance(tool_input, dict) else None
-        if not patch and isinstance(value, str) and value.strip():
-            patch = value
-    return [target.strip() for target in PATCH_TARGET_RE.findall(patch) if target.strip()]
-
-
-def runs_plugin_script(command):
-    """Whether a shell command names a script under this plugin's root.
-
-    The resolved root is the AGENT_MARKETPLACE_SCRIPTS directory's parent.
-    """
-    text = command.replace("\\", "/")
-    flags = re.IGNORECASE if os.name == "nt" else 0
-    for root in sorted({os.path.abspath(ROOT), os.path.realpath(ROOT)}):
-        prefix = re.escape(root.replace("\\", "/").rstrip("/") + "/")
-        if re.search(prefix + r"[^\s\"'`;|&<>()]*\.py(?![\w.])", text, flags):
-            return True
-    return False
-
-
-def plugin_work(payload):
-    """Whether a pre-tool event is the plugin's own work.
-
-    That is a write to a path the vault hook governs in a plugin project, or
-    a shell command that runs one of this plugin's scripts. A raw shell write
-    to a governed file is not checked: the plugin's own flows are halted.
-    """
-    tool = payload.get("tool_name")
-    tool_input = payload.get("tool_input")
-    if tool in SHELL_TOOLS:
-        return isinstance(tool_input, dict) and any(
-            isinstance(tool_input.get(key), str) and runs_plugin_script(tool_input[key])
-            for key in ("command", "cmd"))
-    cwd = payload.get("cwd") if isinstance(payload.get("cwd"), str) else ""
-    return any(governed(os.path.join(cwd, path)) for path in written_paths(tool, tool_input))
-
-
 def invokes(payload, entry):
     """Whether a prompt runs `entry`, as autopilot.py's typed_arguments reads it."""
     if not entry:
@@ -173,10 +80,8 @@ def invokes(payload, entry):
 def below_floor(name, arguments, payload):
     """Stop only the plugin's own work; every other event exits 0 silently.
 
-    SessionStart reports the unsupported runtime as session context. The vault
-    hook's pre event denies the plugin's own work as each host's deny reads it,
-    stderr and exit 2. The autopilot entry's prompt is blocked with the hosts'
-    documented decision.
+    SessionStart reports the unsupported runtime as session context. The
+    autopilot entry's prompt is blocked with the hosts' documented decision.
     """
     import json
     if name == "team_guard.py" and arguments[:1] == ["register"]:
@@ -188,9 +93,6 @@ def below_floor(name, arguments, payload):
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "SessionStart", "additionalContext": context}}))
         return 0
-    if name == "vault_hook.py" and arguments[:1] == ["pre"] and plugin_work(payload):
-        sys.stderr.write(runtime_floor.message() + "\n")
-        return 2
     if name == "autopilot.py" and arguments[:2] == ["hook", "user-prompt"]:
         options = dict(zip(arguments[2::2], arguments[3::2]))
         if invokes(payload, options.get("--entry")):

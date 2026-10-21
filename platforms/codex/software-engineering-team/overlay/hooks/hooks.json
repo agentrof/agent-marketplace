@@ -27,7 +27,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/vault_hook.py pre"
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/autopilot_guard.py pre"
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|apply_patch|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/workspace_guard.py"
           }
         ]
       },
@@ -54,11 +63,11 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|apply_patch|Bash",
+        "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/vault_hook.py post"
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/autopilot_guard.py post"
           }
         ]
       }

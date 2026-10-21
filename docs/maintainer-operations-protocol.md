@@ -180,7 +180,7 @@ reaches them.
    package declares changes.
 6. Run focused tests while iterating. Stage the complete candidate, run
    `make check-local`, and run `make verify-local` immediately before commit.
-   Partial staging is unsupported. `make check` remains the exhaustive gate;
+   Partial staging is unsupported. Pull request CI runs the full suite;
    local receipts never replace independent required remote checks.
 7. Review the final diff for unrelated changes, generated drift, secrets,
    unsafe permissions, and stale documentation.
@@ -462,66 +462,6 @@ DRIFT_REPORT
 
 Branch protection, rulesets and security settings belong to the repository
 owner. An agent reads them to check a gate and never changes them.
-
-### Merge queue
-
-With strict required status checks ("Require branches to be up to date before
-merging"), a release that selects several PRs merges them one at a time, and
-each remaining PR must merge `main`, regenerate distributions and pass its
-checks again. A merge queue instead tests each queued PR merged onto the
-latest `main` and the PRs ahead of it, and moves `main` to that exact tested
-commit.
-
-Every workflow that reports a required context (`check`, `analyze-python`
-and `Claude Code and Codex lifecycle`) also runs on `merge_group`. A queue run
-selects impact coverage over the group's complete diff from its base. No
-release gate runs there:
-`check-pr` proved the release commit when its pull request ran, and the
-release refuses a commit that holds a changeset the release commit did not
-consume. Queue the pull request that carries a release commit alone and last,
-so no other entry of its group merges ahead of it; otherwise make the release
-commit again.
-
-Enable the queue only once these triggers are on `main`; a group built on an
-older `main` never reports its required checks. The owner then:
-
-1. Adds the merge queue to the `main protection` ruleset: Settings, Rules,
-   Rulesets, `main protection`, **Require merge queue**, with these values.
-
-   | Setting | Value | Reason |
-   | --- | --- | --- |
-   | Merge method | Merge commit | Keeps each PR's commits on `main`, the release commit included |
-   | Build concurrency | 5 | Queued PRs start their checks in parallel |
-   | Minimum group size | 1 | A single ready PR never waits for others |
-   | Maximum group size | 5 | Bounds one merge to five PRs |
-   | Wait time to meet minimum group size | 5 minutes | Unused while the minimum is 1 |
-   | Require all queue entries to pass required checks | Enabled | Each PR's own merge commit on `main` passed every required check |
-   | Status check timeout | 60 minutes | Covers a full validation with queued runners |
-
-2. Turns off **Require branches to be up to date before merging** in the
-   classic branch protection rule for `main`, keeping its required contexts.
-   The queue replaces it; keeping both forces the branch updates the queue
-   exists to avoid.
-
-The equivalent API calls, run with the owner's credentials:
-
-```console
-ruleset="$(gh api 'repos/{owner}/{repo}/rulesets' --jq '.[] | select(.name == "main protection") | .id')"
-gh api "repos/{owner}/{repo}/rulesets/$ruleset" --jq '{rules: (.rules + [{type: "merge_queue", parameters: {merge_method: "MERGE", max_entries_to_build: 5, min_entries_to_merge: 1, max_entries_to_merge: 5, min_entries_to_merge_wait_minutes: 5, grouping_strategy: "ALLGREEN", check_response_timeout_minutes: 60}}])}' |
-  gh api -X PUT "repos/{owner}/{repo}/rulesets/$ruleset" --input -
-gh api -X PATCH 'repos/{owner}/{repo}/branches/main/protection/required_status_checks' -F strict=false
-gh api 'repos/{owner}/{repo}/rules/branches/main' --jq '.[] | select(.type == "merge_queue") | .parameters'
-```
-
-Queued PRs that change different package files merge without a `dist/`
-conflict: the package provenance in `dist/*/.agent-marketplace-package.json`
-carries no per-commit build identity, and each file hash has a line of its
-own. Two queued PRs still conflict on changes to the same package file, adds
-at one sort position, an add after a changed last entry, a removal next to
-another removal or an add, and a removal of the last entry beside a change to
-the entry before it. The queue removes the later PR, which then needs `main`
-merged in, regenerated distributions and green checks before it is queued
-again.
 
 ### Release immutability
 

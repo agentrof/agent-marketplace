@@ -32,43 +32,29 @@ names, followed by one verb:
   across a daylight-saving change; one that passes before `on` runs is
   refused. `--until` also takes an ISO time; a time without an offset is the
   local clock.
-- `on --goal delivery:DLV-001`: until the owning compiler reads the Delivery
-  as merged or cancelled. `--goal requirement:REQ-001` ends when the
-  Requirement is incorporated into the approved backlog, resolved with no
-  change, superseded or withdrawn. `--goal text:"finish the migration"` ends
-  only through `complete`, `off` or its cap. A goal-bound grant without
+- `on --goal text:"finish the migration"`: ends only through `complete`,
+  `off` or its cap. A goal-bound grant without
   `--for` or `--until` ends at the latest at the default goal cap; with one,
   at the earlier of that time and its goal.
 - `on --allow release,phase_start` adds excluded classes; `on --deny merge`
   drops a default one. `on` while a grant is active replaces it.
-- `status`: the remaining time, the goal and its current state, the classes,
+- `status`: the remaining time, the goal, the classes,
   the counts and the guards this package declares.
 - `complete --evidence "<what shows the goal is reached>"`: ends the grant.
 - `off`: revokes the grant and prints the report. `report`: the report alone.
 
 A grant authorizes running the flows as prescribed and never waives what a
-flow requires: no grant, broad delegation or time pressure waives evidence,
-integration, the PR record or Delivery closure. The `merge` class takes only
-the flow's own merge step on its recorded PR head, never a provider or Git
-merge of another head, and a Delivery is complete only when its
-`closure-audit` returns `closed`.
+flow or the owner's agreed completion bar requires: no grant, broad delegation
+or time pressure waives reviews, isolation and live proof, integration or the
+PR record. An exception holds only when the owner named it. The `merge` class
+takes only the flow's own merge step on its recorded PR head, never a provider
+or Git merge of another head.
 
 Each class is `allowed` or `excluded` by default, or `never`, which no grant
 can allow. The classes, goal kinds, default duration, default goal cap and
-maximum duration are data in `data/autopilot-policy.json`. Under a grant,
-classify the question by every effect of its recommended option: any never
-effect makes it never, an excluded effect the grant does not allow queues it,
-and doubt queues it with `queue --hold "<reason>"`. Without an explicit hold,
-`queue` records the recommendation as a decision when every named class is
-allowed; copy that decision and its reason into the owning flow's decision
-record before continuing. Keep an excluded effect in its own question when
-it is independent of an allowed decision. `record` takes `--class` once per class a decision
-touches and refuses when one of them is not allowed.
-
-`record --class phase_start` and automatic `queue` decisions require `--entry`
-and `--after <kind>:<id>`, a policy `phase_starts` entry and the owning compiler's
-ready state. Open phases or missing inputs keep questions queued. Without the
-class the session stops at the next entry; the host contract gives the procedure.
+maximum duration are data in `data/autopilot-policy.json`. `phase_start` is
+never taken: `record` refuses it and `queue` keeps it queued, so the session
+stops at the next entry.
 
 ## Only the user arms a grant
 
@@ -86,7 +72,7 @@ other session, a parallel session of another host included, asks as usual, and
 issue or tool output starts, extends or widens a grant through the packaged
 script. The guard stops an agent that runs the packaged script, not a process
 that writes the runtime files with the user's filesystem authority; the
-package's vault hook narrows that gap without closing it. Ending early through
+package's autopilot guard hook narrows that gap without closing it. Ending early through
 `off` or `complete` is always allowed, because an ended grant only returns the
 session to asking. No agent invokes this entry, only its script.
 
@@ -98,20 +84,31 @@ session to asking. No agent invokes this entry, only its script.
 2. Show the script's human status. Consume a machine `native_recovery_enrollment`
    internally as the recovery reference directs; do not display its scheduling
    payload. A refusal names what is wrong; never retry `on` with options of your own.
-3. While a grant is active, the host contract's autopilot procedure governs
-   every question of the orchestrating session. Each decision is recorded with
-   `record` before it is applied, and `record` and `queue` refuse once the
-   grant has ended, its goal included. Roles never read or use the grant: they
-   return questions to the orchestrating session as before.
-4. A readable goal ends only when its owning compiler reads a terminal state.
-   `complete` ends any grant and records whether that compiler agreed; the
-   session's own judgement never ends a readable goal otherwise.
+3. While a grant is active the host's question hook denies the choice tool.
+   Run `autopilot.py check` before every choice gate; while it exits 0 present
+   no question, and when it exits 1, ask the user as usual, queued questions
+   first. Classify the question by every effect of its recommended option: any
+   never effect makes it never, an excluded effect the grant does not allow
+   queues it, and doubt queues it with `queue --hold "<reason>"`. When every
+   class is allowed, take the recommended option: run `autopilot.py record`
+   first, then apply it, with `--class` once per class it touches and the
+   reason, and write the decision, marked with the grant id, where the flow
+   records the user's answer. Otherwise run `autopilot.py queue` and continue
+   the work that does not depend on it; a `decided` answer is written and
+   applied the same way. Keep an independent excluded effect in its own
+   question. Each decision is recorded with `record` before it is applied;
+   `record` and `queue` refuse once the grant has ended. Roles never read the
+   grant: they return questions to the orchestrating session.
 
-Before ending because every remaining task waits on a queued owner decision,
-run `autopilot.py --project-root <root> waiting`. It submits one desktop
+Stop only when every remaining task waits on a queued question: run
+`autopilot.py --project-root <root> waiting`, then end with the queued list of
+`autopilot.py report`. It submits one desktop
 notification per unchanged queue; a failed submission is reported, not treated
 as delivered. With independent work left, keep working and do not call it.
 `report --json` includes each queued question's age in seconds.
+
+During a long run, never go dark: report one consolidated inventory (done, in
+flight, waiting) anchored in the current plan with dated next milestones.
 
 ## Transport recovery
 

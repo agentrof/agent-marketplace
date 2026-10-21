@@ -4,33 +4,23 @@
 
 - `{{workspace}}/config.json`: project declaration, changed only through the
   configure entry.
-- `{{workspace}}/docs/`: the governed project knowledge vault. Open this
-  directory as the vault root. Its maps, generated views, document-type
-  graph policy, citations, and navigation follow the
-  `obsidian-vault` skill and the owning validation commands.
-- `{{workspace}}/docs/experience-design/artifacts/`: the author-owned
-  Experience prototype workspace. Its structure, files, technologies, assets
-  and behavior are free; the compiler snapshots bytes and paths only.
-- `{{workspace}}/docs/experience-design/experiences/`: living approved
-  Experience packages, one active package per primary BA process. `application`
-  is a reserved slug. Prototype files are review evidence, not delivery code.
-- `{{workspace}}/apps/`: application code, one directory per application.
-- `{{workspace}}/docs/operation/`: approved verification and environment
-  contracts used when Delivery turns stories into executable Items.
-- `{{workspace}}/demos/` and `{{workspace}}/sketches/`: outward demos and
-  design exploration previews.
-- `<git-root>/.agentrof/agent-marketplace/.runtime/`: project-local runtime
-  scratch and generated caches. It is never a shared or global database.
-- `{{workspace}}/docs/backlog/`: tracked Obsidian backlog source. The nested
-  epic, story, review and test-plan files are the durable Requirement state.
+- `{{workspace}}/docs/`: the project documents. A role reads the sources its
+  task file lists and greps this tree for anything missing.
+- `{{workspace}}/apps/`: one folder per application with its own Dockerfile,
+  lock file, a README stating its contract, and its tests and migrations.
+- `{{workspace}}/tests/`, or the folder `tests_root` names: shared environment
+  and harness suites.
+- `{{workspace}}/experience-design/`: `DESIGN.md` and one
+  `<feature-slug>/design.md` with `exports/` per designed feature.
+- `{{workspace}}/project/<name>/`: project-specific data. A hook refuses any
+  top-level folder under `{{workspace}}/` or `{{workspace}}/docs/` that
+  `workspace_layout` in the config does not allow.
+- `{{workspace}}/memory/`, all loaded below: `current-plan.md` is read first
+  and updated at every step (done, next step, open decisions; history is
+  archived out of it); `product-decisions.md` holds the owner's binding
+  decisions, read before product work, and overrides the docs; `me.md` and
+  `profile.md` hold the owner's own working rules.
+- `{{workspace}}/docs/backlog/tasks/`: tracked fast-lane task records.
 
-Requirement Flow evaluates the request impact matrix, runs only the required
-Requirement stages, validates reused or not-applicable stages, and ends at
-backlog-plan unless the request resolves with no change. Delivery then starts
-only through its explicit Delivery Flow entry. Release Management remains out
-of scope for this package.
-
-Experience handoff binds the globally current `application@rN` and the exact
-current process receipts together. Every approved package-set or
-application-only delta advances that application receipt; older Requirement and
-backlog bindings must revise and rebind before further handoff.
+Work runs through the `deliver` entry: task, branch, pull request, review and
+merge. Release Management is out of scope for this package.

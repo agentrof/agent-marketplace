@@ -1,28 +1,35 @@
 #!/usr/bin/env python3
 """Fast-lane task path: one task, one branch, one pull request, one clock.
 
-Process switch ``process_profile`` at ``fast_lane`` routes a request through
-this script instead of the Requirement, Backlog and Delivery ceremonies:
+Every implementation request runs through this script:
 
 - ``start`` creates ``task/<id>-<slug>`` from the target branch and writes
   the task ``workspace/docs/backlog/tasks/<id>-<slug>.md`` with its
   ``requested_at`` time and the proposed ``rigor``.
 - ``lint`` checks one task: title, size, rigor, 3 to 8 acceptance criteria
   and a test list. ``approve`` lints it and writes ``approved_at``.
+- ``start`` also writes ``risks`` (``--risk`` and, for a build task, the risk flags its request hits),
+  ``applied_skills`` (the method skills ``task-triggers.json`` makes mandatory)
+  and ``sources`` (each doc it relies on with a short sha256); ``approve``
+  hashes a source added since. ``review-inputs`` lists the reviewers the diff
+  and the task's rigor and risks route to, writes the diff to a file the
+  reviewers read themselves, and reports triggered skills the task did not
+  apply and changed sources.
 - ``overlap`` warns, never refuses, when an open pull request touches the
   same files as this branch.
 - ``start`` and ``approve`` also route roles: each rule in
   ``skill-content/deliver/data/role-routing.json`` (and the project's
-  ``.agentrof/role-routing.json``) that matches the task's kind, size, named
-  files or keywords lands in its ``roles`` field; ``role-check`` records a
-  role's verdict in the task's ``## Role Checks`` section.
+  ``role_routing`` in ``workspace/config.json``) that matches the task's kind, size, named
+  files or keywords, at the trigger kinds its size allows, lands in its
+  ``roles`` field, and the roles of a ``spawn_modes`` mode in ``spawn``;
+  ``role-check`` records a role's verdict in the task's ``## Role Checks`` section.
 - ``open-pr`` marks the task delivered, pushes the branch and opens the PR; it
   refuses while a ``require`` role, routed by the task or its diff, has no verdict.
 - ``prove`` runs the project's local proof commands on HEAD and records each
-  one's exit code and time; at switch ``pr_proof`` ``local_record`` ``open-pr``
+  one's exit code and time; at config ``pr_proof`` ``local_record`` ``open-pr``
   refuses without a green record of a clean HEAD and adds it to the PR body.
 - ``merge`` posts the reviewers' pass on the PR and, at rigor ``normal``,
-  turns on auto-merge; at rigor ``high`` the owner merges.
+  turns on auto-merge; at rigor ``high`` the owner merges unless ``--delegated``.
 - ``criteria`` lists a backlog story's numbered criteria, its open linked tasks
   and a warning when the story changed after an open task was requested;
   ``board`` groups tasks by epic and story and marks a story delivered once
@@ -41,9 +48,8 @@ this script instead of the Requirement, Backlog and Delivery ceremonies:
   opened and causes recorded with ``rework``, classified by ``rework-causes.json``; causes that
   recur become lessons (``--write-lessons``), memory candidates and process levers. Each run appends every
   merged task's cost and waits to the history once, and later runs read that
-  row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``;
-  ``--write-report`` keeps a Delivery's summary under
-  ``workspace/docs/delivery/retrospectives/``. ``file-issues`` opens one
+  row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``.
+  ``file-issues`` opens one
   issue per proposal the user approved, in the project's own repository.
 
 Nothing is written after a merge, and no file is shared between tasks: each
@@ -53,23 +59,23 @@ task travels in its own pull request.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import csv
 import fnmatch
+import hashlib
 import io
 import json
 import re
+import shutil
 import statistics
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-import process_policy
-from ba_compile import parse_frontmatter
+from vault_markdown import parse_frontmatter
 
 TASKS = Path("workspace") / "docs" / "backlog" / "tasks"
-RETROSPECTIVES = Path("workspace") / "docs" / "delivery" / "retrospectives"
 EXPORT = Path(".agentrof") / "retrospective"
 TASK_TYPE = "task"
 TASK_STATUSES = ("active", "delivered", "dropped")
@@ -84,24 +90,32 @@ ID_RE = re.compile(r"^TK-[0-9]{3,}$")
 EPIC_RE = re.compile(r"^EP-[0-9]{3,}$")
 STORY_RE = re.compile(r"^ST-[0-9]{3,}$")
 STORIES = Path("workspace") / "docs" / "backlog" / "epics"
-ANALYSIS = Path("workspace") / "docs" / "business-analysis"
 BOARD = EXPORT / "board.md"
-DELIVERY_RE = re.compile(r"^DLV-[0-9]{3,}$")
 AC_RANGE = (3, 8)
+# Every build task proves its change is wired into the running system and names its docs change.
+LIVE_WIRING = "Live wiring:"
+DOCS_DELTA = "Docs delta:"
+TESTS_MAP_RE = re.compile(r"^-\s+([0-9]+(?:\s*,\s*[0-9]+)*)\s*:\s*\S")
 # knowledge: analysis, design, architecture, backlog and contract documents; build: code, devops, tests.
 KINDS = ("build", "knowledge")
 TARGETS_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "deliver" / "data" / "targets.json"
 # Request to merge targets in minutes per kind: s, m, l, max and the average.
 TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
+# Cost budget in USD per kind and size; the retrospective flags a merged task above its own.
+COST_BUDGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8")).get("cost_budget_usd", {})
 TARGET_MINUTES = TARGETS["build"]["average"]
 ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
-PROJECT_ROUTING = Path(".agentrof") / "role-routing.json"
-# The project's local proof commands; {base} is the target branch. Without the file
-# the proof runs the test command the flow names and the vault gate setup installs.
-PROJECT_PROOF = Path(".agentrof") / "local-proof.json"
-PROOF_COMMANDS = ("make test",
-                  "python3 .github/agentrof/vault-gate.pyz check --project-root . --changed-from origin/{base} --json")
+TRIGGERS_FILE = TARGETS_FILE.with_name("task-triggers.json")
+TRIGGER_KEYS = {"method_skills": "skill", "risk_flags": "flag", "reviewers": "role"}
+# Renamed skills: a project trigger rule or an open task may still name the old one.
+SKILL_ALIASES = {"docker-compose": "container-environment"}
+SKILLS = Path(__file__).resolve().parent.parent / "skill-content"
+SOURCE_HASH = 12
+GRAPH_REFRESH = Path(__file__).resolve().with_name("graphify_refresh.py")
+# Without a local_proof list in workspace/config.json the proof runs the test command the flow names.
+PROOF_COMMANDS = ("make test",)
 PROOFS = Path(".agentrof") / "agent-marketplace" / ".runtime" / "proof"
+REVIEWS = PROOFS.with_name("review")
 ROLE_MODES = ("require", "suggest", "off")
 ROLE_STEPS = ("pre_check", "author")
 VERDICTS = ("go", "changes")
@@ -147,9 +161,18 @@ QUALITY_KEPT = ("critical", "non_critical", "filed", "ci_first_pass", "red_runs"
 # Thresholds are a judgement call, not a measured baseline: a CI first-pass rate under 80%,
 # any escaped defect, or critical findings on more than 20% of reviewed tasks earns a lever.
 FIRST_PASS_FLOOR = 0.8
+# A lever is proposed only from a kind with this many merged tasks; fewer is noise, not evidence.
+MIN_PROPOSAL_TASKS = 5
+MAX_PROPOSALS = 5
+# Branch commits that are routine, never rework: merging the target in and the deliver-docs commit.
+MAIN_MERGE_RE = re.compile(r"^Merge (?:remote-tracking )?branch '(?:origin/)?(?:main|master)'")
+DELIVER_DOCS = "docs: deliver task "
+MISSING_REASONS = {"requested_at": "no request time", "approved_at": "no approval time",
+                   "pr_opened": "no pull request", "ci_green": "CI not green", "review": "no review pass",
+                   "merged": "not merged"}
 CRITICAL_CEILING = 0.2
 QUALITY_LEVERS = {
-    "ci": "Run the CI's test command for the touched suites and the vault gate before open-pr,"
+    "ci": "Run the CI's test command for the touched suites before open-pr,"
           " and reproduce a red check locally before pushing again.",
     "escaped": "Turn each escaped defect into a criterion and a named test on the fixing task, and"
                " have the reviewer check every criterion against a test in the diff.",
@@ -181,7 +204,7 @@ LEVERS = {
     "write": "Split tasks whose write step runs long, or run backend and frontend"
              " writers side by side on disjoint files.",
     "ci": "Run only the checks the diff touches (skip unit suites for document-only changes,"
-          " scope the vault gate to the changed trees) and cache dependencies in CI.",
+          " scope checks to the changed trees) and cache dependencies in CI.",
     "review": "Give the reviewer the diff and the task only, single pass, with a"
               " time budget; file non-critical findings as issues.",
     "merge_wait": "Remove the slower of CI and review from the merge path, or drop a"
@@ -242,11 +265,9 @@ def proposed_rigor(request: str) -> tuple[str, list[str]]:
 
 
 def role_rules(root: Path | None = None) -> list[dict]:
-    """Packaged rules, a project's .agentrof/role-routing.json rule replacing the one of its role."""
+    """Packaged rules, a rule of the project's role_routing setting replacing the one of its role."""
     rules = {rule["role"]: rule for rule in json.loads(ROUTING_FILE.read_text(encoding="utf-8"))["rules"]}
-    own = root / PROJECT_ROUTING if root else None
-    if own and own.is_file():
-        rules.update({rule["role"]: rule for rule in json.loads(own.read_text(encoding="utf-8"))["rules"]})
+    rules.update({rule["role"]: rule for rule in project_setting(root, "role_routing", {}).get("rules", [])})
     for rule in rules.values():
         if rule.get("mode") not in ROLE_MODES or rule.get("step") not in ROLE_STEPS:
             raise Refused(f"role rule {rule['role']}: mode must be one of {', '.join(ROLE_MODES)}"
@@ -254,25 +275,109 @@ def role_rules(root: Path | None = None) -> list[dict]:
     return [rule for rule in rules.values() if rule["mode"] != "off"]
 
 
+def routing_policy(root: Path | None = None) -> dict:
+    """pre_check_triggers and spawn_modes, the project's role_routing value replacing the packaged one."""
+    keys = ("pre_check_triggers", "spawn_modes")
+    policy = {key: value for key, value in json.loads(ROUTING_FILE.read_text(encoding="utf-8")).items() if key in keys}
+    return policy | {key: value for key, value in project_setting(root, "role_routing", {}).items() if key in keys}
+
+
+def spawn_roles(roles: list[dict], root: Path | None = None) -> list[str]:
+    """The routed roles the flow spawns on its own; any other routed role spawns only when the owner asks."""
+    modes = routing_policy(root).get("spawn_modes", ["require"])
+    return [item["role"] for item in roles if item["mode"] in modes]
+
+
 def named_files(text: str) -> set[str]:
     return {token.rstrip(".") for token in PATH_RE.findall(text) if token.rstrip(".")}
 
 
-def route(rules: list[dict], text: str, kind: str, size: str, files: set[str]) -> list[dict]:
-    """The rules a task hits, each with the triggers that matched as its reasons."""
+def route(rules: list[dict], text: str, kind: str, size: str, files: set[str],
+          allowed: list[str] | None = None) -> list[dict]:
+    """The rules a task hits, each with the triggers that matched as its reasons; ``allowed``
+    names the trigger kinds (size, path, keyword) that may route at this size, all when None."""
+    allowed = ["size", "path", "keyword"] if allowed is None else allowed
     found = []
     for rule in rules:
         if kind not in rule.get("kinds", KINDS):
             continue
-        reasons = [f"size {size}"] if size in rule.get("sizes", []) else []
-        reasons += [f"file {name} matches {glob}" for glob in rule.get("path_globs", [])
-                    for name in sorted(files) if fnmatch.fnmatch(name, glob)]
-        reasons += [f"keyword {word}" for word in rule.get("keywords", [])
-                    if re.search(rf"\b{re.escape(word)}(?:s|es)?\b", text, re.IGNORECASE)]
+        reasons = [f"size {size}"] if "size" in allowed and size in rule.get("sizes", []) else []
+        reasons += [reason for reason in trigger_reasons(rule, text, files)
+                    if ("path" if reason.startswith("file ") else "keyword") in allowed]
         if reasons:
-            found.append({key: rule.get(key) for key in ("role", "mode", "step", "time_budget_minutes", "ask")}
+            found.append({key: rule.get(key)
+                          for key in ("role", "mode", "step", "model_class", "time_budget_minutes", "ask")}
                          | {"reasons": reasons})
     return found
+
+
+def trigger_reasons(rule: dict, text: str, files: set[str]) -> list[str]:
+    """The files and keywords of one rule that a task's text and files hit."""
+    files = {name for name in files
+             if not any(fnmatch.fnmatch(name, glob) for glob in rule.get("exclude_globs", []))}
+    reasons = [f"file {name} matches {glob}" for glob in rule.get("path_globs", [])
+               for name in sorted(files) if fnmatch.fnmatch(name, glob)]
+    return reasons + [f"keyword {word}" for word in rule.get("keywords", [])
+                      if re.search(rf"\b{re.escape(word)}(?:s|es)?\b", text, re.IGNORECASE)]
+
+
+def task_triggers(root: Path | None = None) -> dict:
+    """Packaged trigger tables, a rule of the project's task_triggers setting replacing the one of its id."""
+    tables = json.loads(TRIGGERS_FILE.read_text(encoding="utf-8"))
+    extra = project_setting(root, "task_triggers", {})
+    result = {}
+    for table, key in TRIGGER_KEYS.items():
+        rules = {rule[key]: rule for rule in tables[table]}
+        own_rules = [dict(rule, skill=SKILL_ALIASES.get(rule["skill"], rule["skill"])) if key == "skill" else rule
+                     for rule in extra.get(table, [])]
+        rules.update({rule[key]: rule for rule in own_rules})
+        result[table] = list(rules.values())
+    unknown = {rule["skill"] for rule in result["method_skills"]} - {
+        path.parent.name for path in SKILLS.glob("*/SKILL.md")}
+    if unknown:
+        raise Refused(f"task triggers name skills this package does not ship: {', '.join(sorted(unknown))}")
+    return result
+
+
+def triggered(rules: list[dict], key: str, text: str, files: set[str]) -> list[str]:
+    return sorted({rule[key] for rule in rules if trigger_reasons(rule, text, files)})
+
+
+def field_items(props: dict, key: str) -> list[str]:
+    """A comma-separated or list front matter field as its items."""
+    value = props.get(key) or []
+    items = value if isinstance(value, list) else str(value).split(",")
+    return [str(item).strip() for item in items if str(item).strip()]
+
+
+def applied_skills(props: dict) -> list[str]:
+    return [SKILL_ALIASES.get(skill, skill) for skill in field_items(props, "applied_skills")]
+
+
+def source_hash(root: Path, relative: str) -> str:
+    path = root / relative
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:SOURCE_HASH] if path.is_file() else "missing"
+
+
+def hashed_sources(root: Path, items: list[str]) -> list[str]:
+    """Each source as path@hash; an item that already carries its hash keeps it."""
+    return [item if "@" in item else f"{item}@{source_hash(root, item)}" for item in items]
+
+
+def changed_sources(root: Path, items: list[str]) -> list[dict]:
+    """The sources whose content changed since the task recorded their hash."""
+    found = []
+    for item in items:
+        relative, _, recorded = item.rpartition("@")
+        if relative and source_hash(root, relative) != recorded:
+            found.append({"path": relative, "defined": recorded, "now": source_hash(root, relative)})
+    return found
+
+
+def task_body(path: Path) -> str:
+    """The task's own words: the body before the navigation and the recorded verdicts."""
+    return re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks|^## Rework",
+                    path.read_text(encoding="utf-8").split("\n---\n", 1)[-1])[0]
 
 
 def task_roles(props: dict) -> dict[str, dict]:
@@ -304,13 +409,12 @@ def routed_roles(root: Path | None, path: Path, files: set[str] = frozenset()) -
     """Every role the task routes to now (its roles field, then the rules its text, size and the
     given changed files hit), and the require roles that have no recorded verdict yet."""
     props = task_props(path)
-    # The navigation and the recorded verdicts are not the task's own words.
-    body = re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks|^## Rework",
-                    path.read_text(encoding="utf-8").split("\n---\n", 1)[-1])[0]
+    body = task_body(path)
     text = f"{props.get('title', '')}\n{body}"
     roles = task_roles(props)
-    for item in route(role_rules(root), text, props.get("task_kind", "build"), props.get("size", "s"),
-                      named_files(body) | set(files)):
+    size = props.get("size", "s")
+    for item in route(role_rules(root), text, props.get("task_kind", "build"), size,
+                      named_files(body) | set(files), routing_policy(root).get("pre_check_triggers", {}).get(size)):
         roles.setdefault(item["role"], item)
         if item["mode"] == "require":
             roles[item["role"]] |= {"mode": "require"}
@@ -336,29 +440,30 @@ def role_minutes(task: dict) -> dict:
     return {"checks": len(checks), "minutes": round(minutes, 1)}
 
 
-def task_text(task: str, title: str, request: str, requested_at: str, delivery: str,
+def task_text(task: str, title: str, request: str, requested_at: str,
               rigor: str, epic: str = "", source_story: str = "", covers: list[int] | None = None,
-              kind: str = "build", size: str = "s", fixes: str = "") -> str:
-    grouped = f"delivery: {delivery}\n" if delivery else ""
-    grouped += f"fixes: {fixes}\n" if fixes else ""
+              kind: str = "build", size: str = "s", fixes: str = "", risks: list[str] = (),
+              skills: list[str] = (), sources: list[str] = ()) -> str:
+    grouped = f"fixes: {fixes}\n" if fixes else ""
+    facts = "".join(f"{key}:{' ' if items else ''}{', '.join(items)}\n"
+                    for key, items in (("risks", risks), ("sources", sources), ("applied_skills", skills)))
     if kind == "knowledge":
         # A knowledge task needs no separate approval: the owner's request is the approval.
         return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
                 f"task_kind: knowledge\nrequested_at: {requested_at}\napproved_at: {requested_at}\n"
-                f"size: {size}\nrigor: {rigor}\n{grouped}"
+                f"size: {size}\nrigor: {rigor}\n{facts}{grouped}"
                 f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
-                f"# {title}\n\n## Request\n\n{request.strip()}\n\n<!-- sec: nav -->\n## Navigation\n\n"
-                "- [[maps/backlog|Backlog]]\n")
+                f"# {title}\n\n## Request\n\n{request.strip()}\n\n<!-- sec: nav -->\n## Navigation\n")
     grouped += f"epic: {epic}\n" if epic else ""
     if source_story:
         grouped += f"source_story: {source_story}\ncovers:\n" + "".join(
             f"  - {number}\n" for number in covers or [])
     return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
-            f"requested_at: {requested_at}\nsize: {size}\nrigor: {rigor}\n{grouped}"
+            f"requested_at: {requested_at}\nsize: {size}\nrigor: {rigor}\n{facts}{grouped}"
             f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
-            f"# {title}\n\n## Request\n\n{request.strip()}\n\n## Acceptance Criteria\n\n"
-            "1. \n2. \n3. \n\n## Tests\n\n- \n\n<!-- sec: nav -->\n## Navigation\n\n"
-            "- [[maps/backlog|Backlog]]\n")
+            f"# {title}\n\n## Request\n\n{request.strip()}\n\n### Do\n\n- \n\n## Acceptance Criteria\n\n"
+            f"1. \n2. {LIVE_WIRING} \n3. {DOCS_DELTA} \n\n## Tests\n\n- 1: \n- 2: \n- 3: \n\n"
+            "<!-- sec: nav -->\n## Navigation\n")
 
 
 def section(body: str, title: str) -> list[str]:
@@ -399,8 +504,6 @@ def lint(path: Path) -> list[str]:
                 errors.append(f"{key} must be an ISO UTC time")
     if "requested_at" not in props:
         errors.append("requested_at is required")
-    if props.get("delivery") and not DELIVERY_RE.match(str(props["delivery"])):
-        errors.append("delivery must be DLV-<number>")
     if props.get("fixes") and not ID_RE.match(str(props["fixes"])):
         errors.append("fixes must be TK-<number>")
     if props.get("epic") and not EPIC_RE.match(str(props["epic"])):
@@ -424,6 +527,15 @@ def lint(path: Path) -> list[str]:
         errors.append("Role Checks lines must be '- <time> <role> go|changes: <note>'")
     if any(not REWORK_RE.match(line) for line in section(body, "Rework")):
         errors.append("Rework lines must be '- <time> <category> [<ref>]: <note>'")
+    triggers = task_triggers()
+    flags = {rule["flag"] for rule in triggers["risk_flags"]}
+    bad = sorted(set(field_items(props, "risks")) - flags)
+    if bad:
+        errors.append(f"risks must be among {', '.join(sorted(flags))}, found {', '.join(bad)}")
+    bad = sorted(skill for skill in applied_skills(props)
+                 if not (SKILLS / skill / "SKILL.md").is_file())
+    if bad:
+        errors.append("applied_skills names skills this package does not ship: " + ", ".join(bad))
     if props.get("task_kind") == "knowledge":
         return errors
     criteria = [line for line in section(body, "Acceptance Criteria")
@@ -431,8 +543,15 @@ def lint(path: Path) -> list[str]:
     if not AC_RANGE[0] <= len(criteria) <= AC_RANGE[1]:
         errors.append(f"Acceptance Criteria needs {AC_RANGE[0]} to {AC_RANGE[1]} numbered"
                       f" criteria, found {len(criteria)}")
-    if not [line for line in section(body, "Tests") if re.match(r"^-\s+\S", line)]:
-        errors.append("Tests needs at least one '- <test>' line")
+    numbers = {int(line.split(".", 1)[0]) for line in criteria}
+    for label in (LIVE_WIRING, DOCS_DELTA):
+        if not any(re.match(rf"^[0-9]+\.\s+{label}\s*\S", line) for line in criteria):
+            errors.append(f"Acceptance Criteria needs a filled '{label}' criterion")
+    mapped = {int(number) for line in section(body, "Tests") if (match := TESTS_MAP_RE.match(line))
+              for number in match.group(1).split(",")}
+    if numbers - mapped:
+        errors.append("Tests needs a '- <criterion>: <test>' line for criteria "
+                      + ", ".join(str(number) for number in sorted(numbers - mapped)))
     return errors
 
 
@@ -598,10 +717,7 @@ def pr_times(root: Path, number, runs: bool = True, causes: dict | None = None) 
               "review_note": next((scrub(FINDINGS_RE.sub("", body.replace(REVIEW_MARK, "")), 240)
                                    for comment in reversed(comments)
                                    if REVIEW_MARK in (body := comment.get("body") or "")), ""),
-              "revisions": [{"sha": item.get("oid", "")[:7], "at": item["committedDate"],
-                             "subject": item.get("messageHeadline") or ""}
-                            for item in data.get("commits") or [] if item.get("committedDate")
-                            and data.get("createdAt") and parse_time(item["committedDate"]) > parse_time(data["createdAt"])]}
+              "revisions": revisions(data.get("commits") or [], data.get("createdAt"))}
     if runs:
         listed = ci_runs(root, data.get("headRefName") or "")
         result.update(first_pass(listed, data.get("mergedAt")),
@@ -707,20 +823,45 @@ def minutes_between(times: dict, start, end: str) -> float | None:
     return round((parse_time(times[end]) - begin).total_seconds() / 60, 1)
 
 
+def revisions(commits: list[dict], opened: str | None) -> list[dict]:
+    """Feature commits pushed after the pull request opened. Merges from main and the deliver-docs
+    commit are routine; when no feature commit preceded the opening, the first one after it is the
+    feature itself, not rework."""
+    if not opened:
+        return []
+    feature = sorted((item for item in commits if item.get("committedDate")
+                      and not MAIN_MERGE_RE.match(item.get("messageHeadline") or "")
+                      and not (item.get("messageHeadline") or "").startswith(DELIVER_DOCS)),
+                     key=lambda item: parse_time(item["committedDate"]))
+    after = [item for item in feature if parse_time(item["committedDate"]) > parse_time(opened)]
+    if after and len(after) == len(feature):
+        after = after[1:]
+    return [{"sha": item.get("oid", "")[:7], "at": item["committedDate"], "subject": item.get("messageHeadline") or ""}
+            for item in after]
+
+
 def task_row(task: dict, pr: dict | None) -> dict:
     times = {"requested_at": task.get("requested_at"), "approved_at": task.get("approved_at"),
              **{key: (pr or {}).get(key) for key in ("pr_opened", "ci_green", "review", "merged")}}
     steps = {step: minutes_between(times, start, end) for step, (start, end) in STEPS.items()}
+    total = minutes_between(times, "requested_at", "merged")
+    # ci and review overlap, so the larger counts; measured before a local proof replaces ci.
+    side = [steps[step] for step in ("ci", "review") if steps[step] is not None]
+    accounted = sum(steps[step] or 0.0 for step in ("define", "write", "merge_wait")) + max(side, default=0.0)
+    missing = {step: ", ".join(MISSING_REASONS[key] for key in
+                               ((start if isinstance(start, tuple) else (start,)) + (end,)) if not times.get(key))
+               for step, (start, end) in STEPS.items() if steps[step] is None}
     if (pr or {}).get("proof_minutes") is not None:
         steps["ci"] = pr["proof_minutes"]
     known = {step: value for step, value in steps.items() if value is not None}
     return {"task_id": task["id"], "title": task.get("title", ""), "size": task.get("size", ""),
-            "rigor": task.get("rigor", "normal"), "delivery": task.get("delivery", ""),
+            "rigor": task.get("rigor", "normal"),
             "kind": task.get("task_kind", "build"), "story": task.get("source_story", ""),
             "fixes": task.get("fixes", ""), "role_checks": role_minutes(task),
             "quality": {key: (pr or {}).get(key) for key in QUALITY_KEPT},
             "pr": (pr or {}).get("pr", ""), **times,
-            "total": minutes_between(times, "requested_at", "merged"), "steps": steps,
+            "total": total, "steps": steps, "missing": missing,
+            "unaccounted": None if total is None else round(total - accounted, 1),
             "largest_step": max(known, key=known.get) if known else None,
             "checks": (pr or {}).get("checks", {}),
             "rework_auto": auto_events(task, pr), "rework_notes": task.get("rework_notes") or []}
@@ -803,6 +944,10 @@ def attach_sessions(rows: list[dict], tasks: list[dict], events: list[dict], dee
         end = parse_time(row["merged"]).timestamp() if row.get("merged") else until
         claims.append([session_cost.belongs(event, task_branch(task), start, end, task.get("id", ""))
                        for event in events])
+    ids = [task.get("id", "") for task in tasks]
+    for index, event in enumerate(events):
+        if event.get("lead") in ids and not any(claimed[index] for claimed in claims):
+            claims[ids.index(event["lead"])][index] = True
     holders = [sum(column) for column in zip(*claims)] if claims else [0] * len(events)
     for row, claimed in zip(rows, claims):
         mine = [{**event, "share": 1 / holders[index]} for index, event in enumerate(events) if claimed[index]]
@@ -814,12 +959,10 @@ def attach_sessions(rows: list[dict], tasks: list[dict], events: list[dict], dee
     return {"tokens": rest["tokens"], "usd": rest["usd"]}
 
 
-def select(tasks: list[dict], delivery: str | None = None, since: str | None = None,
+def select(tasks: list[dict], since: str | None = None,
            recent: int | None = None, at: datetime | None = None) -> list[dict]:
-    """The tasks in scope: one Delivery, a time window or the latest tasks."""
+    """The tasks in scope: a time window or the latest tasks."""
     chosen = [task for task in tasks if task.get("requested_at")]
-    if delivery:
-        chosen = [task for task in chosen if task.get("delivery") == delivery]
     if since:
         match = re.fullmatch(r"([0-9]+)([dh])", since)
         if not match:
@@ -828,9 +971,14 @@ def select(tasks: list[dict], delivery: str | None = None, since: str | None = N
         cutoff = (at or datetime.now(timezone.utc)).timestamp() - hours * 3600
         chosen = [task for task in chosen if parse_time(task["requested_at"]).timestamp() >= cutoff]
     chosen.sort(key=lambda task: parse_time(task["requested_at"]))
-    if recent and not (delivery or since):
+    if recent and not since:
         chosen = chosen[-recent:]
     return chosen
+
+
+def share(part: float, whole: float) -> float | None:
+    """A share in [0, 1], or None without a whole."""
+    return min(1.0, max(0.0, round(part / whole, 2))) if whole else None
 
 
 def summary(values: list[float]) -> dict:
@@ -1017,7 +1165,7 @@ def quality_summary(rows: list[dict]) -> dict | None:
     return {"tasks": len(rows), "reviewed": len(reviewed), "critical_per_task": mean(reviewed, "critical"),
             "critical_tasks": [row["task_id"] for row in rows if row["quality"].get("critical")],
             "non_critical_per_task": mean(reviewed, "non_critical"),
-            "filed_share": round(sum(item["filed"] for item in reviewed) / minor, 2) if minor else None,
+            "filed_share": share(sum(min(item["filed"], item["non_critical"]) for item in reviewed), minor),
             "ci_checked": len(checked), "first_pass_rate": mean(checked, "ci_first_pass"),
             "red_runs_per_task": mean(checked, "red_runs", 1),
             "escaped": {task: row["quality"]["fixed_by"] for row in rows
@@ -1169,7 +1317,7 @@ def rework_summary(records: list[dict]) -> dict | None:
     total = sum(record["total"] or 0.0 for record in known)
     return {"tasks": len(known), "one_pass": len(clean), "one_pass_rate": round(len(clean) / len(known), 2),
             "events": sum(len(record["events"]) for record in known), "minutes": round(spent, 1),
-            "minutes_share": round(spent / total, 2) if total else None}
+            "minutes_share": share(spent, total)}
 
 
 def promotions(groups: list[dict], causes: dict) -> list[dict]:
@@ -1270,11 +1418,12 @@ def write_lessons(root: Path, rework: dict, causes: dict) -> dict:
 
 
 def kind_proposals(rows: list[dict], records: list[dict] | None = None, causes: dict | None = None) -> list[dict]:
-    """Levers per task kind, the kind furthest over its average target first, at most four
-    per kind; time, cost and quality levers rank together by the share of the task's minutes,
-    dollars or tasks they address, and recurring process or plugin rework causes by the share of
-    the kind's tasks they hit; each names its kind and the gap to that target."""
-    found = []
+    """One proposal per cause, at most ``MAX_PROPOSALS``, from the kinds with at least
+    ``MIN_PROPOSAL_TASKS`` merged tasks; time, cost and quality levers rank together by the share of
+    the task's minutes, dollars or tasks they address, and recurring process or plugin rework causes
+    by the share of the kind's tasks they hit. A cause seen in several kinds is one proposal whose
+    evidence names each kind and its gap to target."""
+    found: dict[str, dict] = {}
     records = records or []
     goals = targets(rows, [])
     kinds = {row.get("kind", "build") for row in rows}
@@ -1282,25 +1431,49 @@ def kind_proposals(rows: list[dict], records: list[dict] | None = None, causes: 
         goal = goals.get(kind)
         mine = [row for row in rows if row.get("kind", "build") == kind]
         done = [row["total"] for row in mine if row["total"] is not None]
-        minutes = statistics.mean(done) if done else 0
+        if len(done) < MIN_PROPOSAL_TASKS:
+            continue
+        minutes = statistics.mean(done)
         levers = [{**item, "weight": item["weight"] / minutes if minutes and item["weight"] > 0
                    else item["weight"]} for item in proposals(mine, keep_weight=True)]
         rework = rework_proposals([record for record in records if record["kind"] == kind],
                                   causes or rework_causes()) if records else []
         levers = sorted(levers + cost_proposals(mine) + quality_proposals(mine) + rework,
                         key=lambda item: -item["weight"])
-        for item in levers[:4]:
-            item.pop("weight")
+        for item in levers:
             versus = (f"; average {goal['average']} vs target {goal['average_target']} min"
                       f" ({'+' if goal['target_gap'] > 0 else ''}{goal['target_gap']})") if goal else ""
-            found.append({**item, "id": item["id"].replace("RETRO-", f"RETRO-{kind.upper()}-", 1),
-                          "kind": kind, "evidence": f"{kind}: {item['evidence']}{versus}"})
-    return found
+            evidence = f"{kind}: {item['evidence']}{versus}"
+            if item["id"] in found:
+                same = found[item["id"]]
+                same.update(kinds=same["kinds"] + [kind], evidence=f"{same['evidence']}; {evidence}",
+                            weight=max(same["weight"], item["weight"]))
+            else:
+                found[item["id"]] = {**item, "kinds": [kind], "evidence": evidence}
+    ranked = sorted(found.values(), key=lambda item: -item["weight"])[:MAX_PROPOSALS]
+    for item in ranked:
+        item.pop("weight")
+    return ranked
 
 
-def targets(rows: list[dict], totals: list[float]) -> dict:
-    """Per kind: the average against its average target, and each merged task against the
-    target of its own size and the kind's maximum."""
+def calibrated(rows: list[dict], history: list[dict], kind: str) -> dict:
+    """Per size, the median request-to-merge of this kind's merged tasks in scope and in the kept
+    history, once at least ``MIN_PROPOSAL_TASKS`` tasks of that size exist; else None."""
+    seen = {item["task_id"]: item for item in history if item.get("total") is not None
+            and item.get("kind", "build") == kind and item.get("size")}
+    seen.update({row["task_id"]: row for row in rows if row["total"] is not None
+                 and row.get("kind", "build") == kind and row.get("size")})
+    result = {}
+    for size in SIZES:
+        values = [item["total"] for item in seen.values() if item["size"] == size]
+        result[size] = {"tasks": len(values), "median": round(statistics.median(values), 1)
+                        if len(values) >= MIN_PROPOSAL_TASKS else None}
+    return result
+
+
+def targets(rows: list[dict], totals: list[float], history: list[dict] | None = None) -> dict:
+    """Per kind: the average against its average target, each merged task against the target
+    of its own size and the kind's maximum, and the per-size medians calibrated from history."""
     result = {}
     for kind, goal in TARGETS.items():
         done = [row for row in rows if row.get("kind", "build") == kind and row["total"] is not None]
@@ -1308,6 +1481,9 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
             continue
         average = round(statistics.mean(row["total"] for row in done), 1)
         over = [row["task_id"] for row in done if row["total"] > goal.get(row["size"] or "s", goal["max"])]
+        budget = COST_BUDGETS.get(kind, {})
+        over_cost = [row["task_id"] for row in done
+                     if (row.get("cost") or {}).get("usd", 0) > budget.get(row["size"] or "s", float("inf"))]
         result[kind] = {"tasks": len(done), "average": average, "average_target": goal["average"],
                         "target_gap": round(average - goal["average"], 1),
                         "total": summary([row["total"] for row in done]),
@@ -1316,6 +1492,8 @@ def targets(rows: list[dict], totals: list[float]) -> dict:
                         "average_met": average <= goal["average"], "max": max(row["total"] for row in done),
                         "max_target": goal["max"], "max_met": all(row["total"] <= goal["max"] for row in done),
                         "size_targets": {size: goal[size] for size in SIZES}, "over_size_target": over,
+                        "cost_budget_usd": budget, "over_cost_budget": over_cost,
+                        "calibrated": calibrated(rows, history or [], kind),
                         "cost": cost_summary(done), "quality": quality_summary(done),
                         "rework": rework_summary([row["rework"] for row in done if row.get("rework")]),
                         "role_checks": role_summary(done)}
@@ -1346,9 +1524,12 @@ def report(rows: list[dict], scope: str, previous: dict | None = None,
             "per_task": rows,
             "slowest": [{"task_id": row["task_id"], "total": row["total"],
                          "largest_step": row["largest_step"],
-                         "largest_minutes": row["steps"].get(row["largest_step"])}
+                         "largest_minutes": row["steps"].get(row["largest_step"]), "steps": row["steps"],
+                         "size": row["size"] or "s",
+                         "target": TARGETS.get(row.get("kind", "build"), TARGETS["build"]).get(row["size"] or "s")}
                         for row in slowest],
-            "targets": targets(rows, totals), "previous": previous,
+            "targets": targets(rows, totals, extra), "previous": previous,
+            "missing_cost": [row["task_id"] for row in rows if row["total"] is not None and not row.get("cost")],
             "cost": cost_summary([row for row in rows if row["total"] is not None]),
             "quality": quality_summary([row for row in rows if row["total"] is not None]),
             "unattributed": unattributed,
@@ -1361,14 +1542,17 @@ def render(data: dict) -> str:
     lines = [f"Scope: {data['scope']}",
              f"Tasks: {data['tasks']} ({data['merged']} merged), target {data['target_minutes']} min",
              f"Request to merge: average {total['average']}, median {total['median']},"
-             f" max {total['max']} min", "",
-             "Per task (min): define / write / ci / review / merge_wait = total"]
+             f" max {total['max']} min", *headline(data), "",
+             "Per task (min): define / write / ci / review / merge_wait / unaccounted = total"
+             " (ci and review overlap; the larger counts)"]
     for row in data["per_task"]:
         steps = " / ".join("-" if row["steps"][step] is None else str(row["steps"][step])
                            for step in STEPS)
+        missing = "; ".join(f"{step} ({reason})" for step, reason in (row.get("missing") or {}).items())
         lines.append(f"- {row['task_id']} ({row['size'] or '-'}, {row['rigor']}) PR"
-                     f" {row['pr'] or '-'}: {steps}"
-                     f" = {row['total'] if row['total'] is not None else 'open'}")
+                     f" {row['pr'] or '-'}: {steps} / {dash(row.get('unaccounted'))}"
+                     f" = {row['total'] if row['total'] is not None else 'open'}"
+                     + (f"; missing: {missing}" if missing else ""))
     if data["per_task"]:
         lines += ["", "Quality per task: findings critical / non-critical / filed; CI first pass (red runs);"
                       " fixed by; story coverage"]
@@ -1388,7 +1572,10 @@ def render(data: dict) -> str:
         lines.append(f"Target {kind} ({goal['tasks']}): average {goal['average']} vs {goal['average_target']} min"
                      f" ({'met' if goal['average_met'] else 'missed'}), max {goal['max']} vs"
                      f" {goal['max_target']} ({'met' if goal['max_met'] else 'missed'}), s/m/l {sizes};"
-                     f" over size target: {', '.join(goal['over_size_target']) or 'none'}")
+                     f" over size target: {', '.join(goal['over_size_target']) or 'none'}; calibrated s/m/l "
+                     + "/".join(dash(goal["calibrated"][size]["median"]) for size in SIZES)
+                     + " (median of " + "/".join(str(goal["calibrated"][size]["tasks"]) for size in SIZES)
+                     + f" tasks, shown at {MIN_PROPOSAL_TASKS} or more)")
     for kind, goal in (data.get("targets") or {}).items():
         spent = goal.get("role_checks")
         if spent and spent["checks"]:
@@ -1397,6 +1584,10 @@ def render(data: dict) -> str:
     for kind, goal in (data.get("targets") or {}).items():
         if goal.get("cost"):
             lines.append(f"Cost {kind}: {cost_line(goal['cost'])}")
+        if goal.get("over_cost_budget"):
+            lines.append(f"Over cost budget {kind} (s/m/l $" + "/".join(
+                str(goal["cost_budget_usd"].get(size, "-")) for size in SIZES)
+                + f"): {', '.join(goal['over_cost_budget'])}")
     if data.get("cost"):
         lines.append(f"Cost all merged: {cost_line(data['cost'])}")
     for kind, goal in (data.get("targets") or {}).items():
@@ -1408,6 +1599,9 @@ def render(data: dict) -> str:
             lines.append(f"Rework {kind}: one pass {spent['one_pass']}/{spent['tasks']} ({percent(spent['one_pass_rate'])}),"
                          f" {spent['events']} events, {spent['minutes']} min after the first event"
                          f" ({percent(spent['minutes_share'])} of request to merge)")
+    if data.get("missing_cost"):
+        lines.append(f"Cost missing: {', '.join(data['missing_cost'])} (no host session record in the scanned"
+                     " window, or sessions not scanned)")
     if data.get("unattributed"):
         lines.append(f"Unattributed in the scanned window: ${data['unattributed']['usd']:.2f},"
                      f" tokens {tokens_line(data['unattributed']['tokens'])}")
@@ -1441,9 +1635,13 @@ def render(data: dict) -> str:
                 lines.append(f"  - tool results over 200 KB: {row['reading']['results_over_200kb']}")
     if data["slowest"]:
         lines += ["", "Slowest:"]
-        lines += [f"- {item['task_id']}: {item['total']} min, largest step {item['largest_step']}"
-                  f" ({item['largest_minutes']} min)" for item in data["slowest"]]
+        lines += [f"- {item['task_id']}: {item['total']} min vs {item['size']} target {item['target']}"
+                  f" ({'met' if item['total'] <= item['target'] else 'missed'}); "
+                  + " / ".join(f"{step} {dash(item['steps'][step])}" for step in STEPS)
+                  + f"; largest step {item['largest_step']} ({item['largest_minutes']} min)" for item in data["slowest"]]
     lines += rework_lines(data.get("rework"))
+    if not data["proposals"] and data["merged"]:
+        lines += ["", f"Proposals: none; a kind needs {MIN_PROPOSAL_TASKS} merged tasks before a lever is evidence."]
     if data["proposals"]:
         lines += ["", "Proposals (approve by number or id to file one issue each):"]
         lines += [f"{number}. [{item['id']}] {item['proposal']} Evidence: {item['evidence']}."
@@ -1453,6 +1651,28 @@ def render(data: dict) -> str:
     if not data["tasks"]:
         lines.append("No task in scope.")
     return "\n".join(lines)
+
+
+def headline(data: dict) -> list[str]:
+    """Verdict against target, baseline and step breakdown for the scope's request-to-merge."""
+    total, before = data["request_to_merge_minutes"], data.get("previous")
+    if total["average"] is None:
+        return []
+    goal = data["target_minutes"]
+    lines = [f"Verdict: average {total['average']} vs target {goal} min"
+             f" ({'met' if total['average'] <= goal else 'missed'}); baseline "
+             + (f"{before['average']} min average at the previous retrospective ({before['at'][:10]})"
+                if before and before.get("average") is not None else "none, the first retrospective of this scope")]
+    merged = [row for row in data["per_task"] if row["total"] is not None]
+    averages = {step: [row["steps"][step] for row in merged if row["steps"][step] is not None] for step in STEPS}
+    spare = [row["unaccounted"] for row in merged if row.get("unaccounted") is not None]
+    lines.append("Steps (average min): " + " / ".join(
+        f"{step} {round(statistics.mean(values), 1) if values else '-'}" for step, values in averages.items())
+        + f" / unaccounted {round(statistics.mean(spare), 1) if spare else '-'}")
+    if before and before.get("cost_method") and data.get("cost_method") and before["cost_method"] != data["cost_method"]:
+        lines.append(f"Cost method changed since the previous retrospective ({before['cost_method']} ->"
+                     f" {data['cost_method']}): dollars are not comparable with that baseline.")
+    return lines
 
 
 def dash(value) -> str:
@@ -1539,7 +1759,7 @@ def export(data: dict, fmt: str) -> str:
     if fmt == "json":
         return json.dumps(data, indent=2) + "\n"
     buffer = io.StringIO()
-    fields = ["task_id", "title", "size", "rigor", "delivery", "pr", "requested_at",
+    fields = ["task_id", "title", "size", "rigor", "pr", "requested_at",
               "approved_at", "pr_opened", "ci_green", "review", "merged", "total", *STEPS, *WAITS,
               "agents", "output_tokens", "usd", "input_tokens", "cache_write_tokens", "cache_read_tokens",
               "spawns", "startup_context", "main_usd", *QUALITY_KEPT, "fixes", "fixed_by", "story",
@@ -1559,14 +1779,6 @@ def export(data: dict, fmt: str) -> str:
                          "startup_context": round(statistics.mean(spawn["startup_context"] for spawn in spawns))
                          if spawns else "", "main_usd": (cost.get("main") or {}).get("usd", "")})
     return buffer.getvalue()
-
-
-def retrospective_note(data: dict, delivery: str) -> str:
-    return (f"---\ntype: retrospective\ntitle: {json.dumps(delivery + ' retrospective')}\n"
-            f"status: final\ndelivery: {delivery}\ntags:\n  - doc/retrospective\n"
-            f"  - status/final\n---\n# {delivery} retrospective\n\n## Summary\n\n```text\n"
-            f"{render(data)}\n```\n\n<!-- sec: nav -->\n## Navigation\n\n"
-            "- [[maps/delivery|Delivery]]\n")
 
 
 def history(root: Path) -> list[dict]:
@@ -1611,6 +1823,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
         handle.write(json.dumps({"at": now(), "scope": data["scope"], "merged": data["merged"],
                                  "average": total["average"], "median": total["median"],
                                  "max": total["max"], "usd_per_task": spend.get("usd_per_task"),
+                                 "cost_method": data.get("cost_method"),
                                  "tokens_per_task": sum((spend.get("tokens_per_task") or {}).values())
                                  if spend else None,
                                  "quality": {key: spec.get(key) for key in (
@@ -1626,7 +1839,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
                              + "\n")
             if row["total"] is not None and row.get("rework_auto") is not None and row["task_id"] not in reworked:
                 handle.write(json.dumps({"type": "task_rework", "at": now(), "task_id": row["task_id"],
-                                         **{key: row.get(key) for key in ("kind", "requested_at", "merged", "total")},
+                                         **{key: row.get(key) for key in ("kind", "size", "requested_at", "merged", "total")},
                                          "events": row["rework_auto"]}) + "\n")
 
 
@@ -1635,7 +1848,7 @@ def gather(root: Path, args) -> dict:
     for path in sorted((root / TASKS).glob("tk-*.md")):
         tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path),
                       "rework_notes": rework_notes(path)})
-    chosen = select(tasks, args.delivery, args.since, args.recent)
+    chosen = select(tasks, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
     causes = rework_causes(root)
     graded = {} if getattr(args, "rescan", False) else kept_quality(root)
@@ -1665,8 +1878,18 @@ def gather(root: Path, args) -> dict:
     for row in rows:
         if row["total"] is not None and row["task_id"] in kept:
             row.update(cost=kept[row["task_id"]]["cost"], waits=kept[row["task_id"]]["waits"])
-    scope = args.delivery or (f"since {args.since}" if args.since else f"latest {args.recent}")
-    return report(rows, scope, previous_run(root, scope), unattributed, extra, causes)
+    scope = f"since {args.since}" if args.since else f"latest {args.recent}"
+    return {**report(rows, scope, previous_run(root, scope), unattributed, extra, causes),
+            "cost_method": cost_method(root)}
+
+
+def cost_method(root: Path) -> str | None:
+    """A fingerprint of the effective price table; a change makes dollars incomparable."""
+    try:
+        import session_cost
+    except ImportError:
+        return None
+    return hashlib.sha256(json.dumps(session_cost.load_prices(root), sort_keys=True).encode()).hexdigest()[:12]
 
 
 # --- story links and board -------------------------------------------------
@@ -1809,13 +2032,10 @@ def cmd_board(args, root: Path):
 # --- commands --------------------------------------------------------------
 
 def cmd_start(args, root: Path) -> dict:
-    if args.delivery and not DELIVERY_RE.match(args.delivery):
-        raise Refused("--delivery must be DLV-<number>")
     requested_at = args.at or now()
     parse_time(requested_at)
     request = Path(args.request_file).read_text(encoding="utf-8") if args.request_file else args.request
     request = request or args.title
-    rigor, reasons = proposed_rigor(f"{args.title}\n{request}")
     epic, covers = args.epic or "", []
     if args.epic and not EPIC_RE.match(args.epic):
         raise Refused("--epic must be EP-<number>")
@@ -1836,7 +2056,18 @@ def cmd_start(args, root: Path) -> dict:
     elif args.covers:
         raise Refused("--covers needs --source-story")
     kind = "knowledge" if args.knowledge else "build"
-    roles = route(role_rules(root), f"{args.title}\n{request}", kind, args.size, named_files(request))
+    # A documents-only task names risky words without touching them: no keyword rigor or risk flags.
+    rigor, reasons = proposed_rigor(f"{args.title}\n{request}") if kind == "build" else ("normal", [])
+    text, files = f"{args.title}\n{request}", named_files(request)
+    roles = route(role_rules(root), text, kind, args.size, files,
+                  routing_policy(root).get("pre_check_triggers", {}).get(args.size))
+    triggers = task_triggers(root)
+    flags = {rule["flag"] for rule in triggers["risk_flags"]}
+    asked = set(getattr(args, "risk", None) or [])
+    if asked - flags:
+        raise Refused(f"--risk must be one of {', '.join(sorted(flags))}")
+    risks = sorted(asked | (set(triggered(triggers["risk_flags"], "flag", text, files)) if kind == "build" else set()))
+    skills = triggered(triggers["method_skills"], "skill", text, files)
     run("git", "fetch", "--prune", "origin", cwd=root)
     task = next_id(taken_names(root, args.base))
     slug = slugify(args.title)
@@ -1844,14 +2075,19 @@ def cmd_start(args, root: Path) -> dict:
     run("git", "switch", "-c", branch, f"origin/{args.base}", cwd=root)
     path = root / TASKS / f"{task.lower()}-{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes((task_text(task, args.title, request, requested_at, args.delivery or "",
+    # The docs the task relies on: the ones it is given and the existing docs its request names.
+    named = sorted(name for name in files if name.startswith("workspace/docs/") and (root / name).is_file())
+    sources = hashed_sources(root, list(dict.fromkeys([*(getattr(args, "source", None) or []), *named])))
+    path.write_bytes((task_text(task, args.title, request, requested_at,
                               rigor, epic, args.source_story or "", covers,
-                              kind, args.size, getattr(args, "fixes", None) or "")).encode("utf-8"))
+                              kind, args.size, getattr(args, "fixes", None) or "",
+                              risks, skills, sources)).encode("utf-8"))
     if roles:
         set_field(path, "roles", roles_value(roles))
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     return {"task_id": task, "branch": branch, "task": str(path.relative_to(root)),
-            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles}
+            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles, "spawn": spawn_roles(roles, root),
+            "risks": risks, "applied_skills": skills, "sources": sources}
 
 
 def cmd_lint(args, root: Path) -> dict:
@@ -1869,12 +2105,40 @@ def cmd_approve(args, root: Path) -> dict:
         raise Refused("task lint failed: " + "; ".join(errors))
     if not task_props(path).get("approved_at"):
         set_field(path, "approved_at", args.at or now())
+    # Sources added while the task was filled are hashed now, still at define time.
+    sources = field_items(task_props(path), "sources")
+    if sources != hashed_sources(root, sources):
+        set_field(path, "sources", ", ".join(hashed_sources(root, sources)))
     roles, missing = routed_roles(root, path)
     if roles:
         set_field(path, "roles", roles_value(roles))
     props = task_props(path)
     return {"ok": True, "task_id": args.task, "approved_at": props["approved_at"],
-            "rigor": props.get("rigor", "normal"), "roles": roles, "pending_roles": missing}
+            "rigor": props.get("rigor", "normal"), "roles": roles, "spawn": spawn_roles(roles, root),
+            "pending_roles": missing}
+
+
+def cmd_review_inputs(args, root: Path) -> dict:
+    """What the review needs: its reviewers, the diff written to a file each reviewer reads itself,
+    triggered skills the task did not apply and sources whose content changed since the task was defined."""
+    path = task_path(root, args.task)
+    props = task_props(path)
+    files = changed_files(root, args.base)
+    triggers = task_triggers(root)
+    skills = triggered(triggers["method_skills"], "skill", f"{props.get('title', '')}\n{task_body(path)}",
+                       named_files(task_body(path)) | files)
+    risks = field_items(props, "risks")
+    reviewers = triggered(triggers["reviewers"], "role", "", files) + [
+        rule["role"] for rule in triggers["reviewers"]
+        if props.get("rigor", "normal") in rule.get("rigors", []) or (risks and rule.get("on_any_risk"))]
+    diff = REVIEWS / f"{args.task.lower()}.diff"
+    (root / diff).parent.mkdir(parents=True, exist_ok=True)
+    (root / diff).write_bytes(run("git", "diff", f"origin/{args.base}...HEAD", cwd=root).encode("utf-8"))
+    return {"ok": True, "task_id": args.task, "reviewers": list(dict.fromkeys(reviewers)), "risks": risks,
+            "diff_file": diff.as_posix(),
+            "triggered_skills": skills,
+            "missing_skills": sorted(set(skills) - set(applied_skills(props))),
+            "changed_sources": changed_sources(root, field_items(props, "sources"))}
 
 
 def cmd_role_check(args, root: Path) -> dict:
@@ -1927,19 +2191,24 @@ def cmd_overlap(args, root: Path) -> dict:
     return {"ok": True, "advisory": True, "overlaps": overlap(root, args.base)}
 
 
-def pr_proof(root: Path) -> str:
-    """The ``pr_proof`` value in force; the default when the policy cannot be read."""
+def project_setting(root: Path | None, key: str, default):
+    """``key`` from ``workspace/config.json``; ``default`` when unset or unreadable."""
     try:
-        return process_policy.effective_values(root / "workspace" / "docs")[0]["pr_proof"]["value"]
-    except (KeyError, OSError, ValueError):
-        return "remote_ci"
+        value = json.loads((root / "workspace" / "config.json").read_text(encoding="utf-8")) if root else None
+    except (OSError, ValueError):
+        return default
+    return value.get(key, default) if isinstance(value, dict) else default
+
+
+def pr_proof(root: Path) -> str:
+    return project_setting(root, "pr_proof", "remote_ci")
 
 
 def proof_commands(root: Path, base: str) -> list[str]:
-    path = root / PROJECT_PROOF
-    commands = json.loads(path.read_text(encoding="utf-8"))["commands"] if path.is_file() else PROOF_COMMANDS
-    if not commands or not all(isinstance(item, str) and item.strip() for item in commands):
-        raise Refused(f"{PROJECT_PROOF.as_posix()} must list at least one command under commands")
+    commands = project_setting(root, "local_proof", PROOF_COMMANDS)
+    if not isinstance(commands, (list, tuple)) or not commands \
+            or not all(isinstance(item, str) and item.strip() for item in commands):
+        raise Refused("local_proof in workspace/config.json must list at least one command")
     return [item.replace("{base}", base) for item in commands]
 
 
@@ -2017,36 +2286,6 @@ def proof_section(record: dict) -> str:
             f" finished {finished}.\n\n| Command | Result | Seconds |\n|---|---|---|\n{rows}\n")
 
 
-def reseal_analysis(root: Path, changed: set[str]) -> list[str]:
-    """Re-approve each approved business-analysis space the task edited.
-
-    Merging the pull request is the owner's approval of the edit; resealing here
-    keeps the package and every package that requires it approved/current.
-    """
-    import ba_compile
-    names = {Path(path).parts[len(ANALYSIS.parts)] for path in changed
-             if Path(path).parts[:len(ANALYSIS.parts)] == ANALYSIS.parts and len(Path(path).parts) > len(ANALYSIS.parts) + 1}
-    sealed = []
-    for name in sorted(names):
-        space = root / ANALYSIS / name
-        overview = space / "space.md"
-        if not overview.is_file():
-            continue
-        props = parse_frontmatter(overview.read_text(encoding="utf-8"))[0]
-        if props.get("package_status") != "approved" or props.get("package_hash") == ba_compile.package_hash(space):
-            continue
-        common = ["--space", str(space), "--vault-root", str(root / ANALYSIS.parent)]
-        for step in (["begin-revision", *common, "--doc", "space.md"], ["enter-review", *common, "--doc", "space.md"],
-                     ["approve", *common, "--doc", "space.md"], ["approve-package", *common]):
-            out = io.StringIO()
-            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-                code = ba_compile.main(step)
-            if code:
-                raise Refused(f"resealing business-analysis/{name} failed at {step[0]}: {out.getvalue().strip()}")
-        sealed.append(space.relative_to(root).as_posix())
-    return sealed
-
-
 def cmd_open_pr(args, root: Path) -> dict:
     path = task_path(root, args.task)
     errors = lint(path)
@@ -2063,11 +2302,9 @@ def cmd_open_pr(args, root: Path) -> dict:
         # Checked before the delivered-status commit, the only change open-pr adds.
         problems, record = proof_problems(root, args.task)
         if problems:
-            raise Refused("no local proof for this HEAD (switch pr_proof is local_record): " + "; ".join(problems))
+            raise Refused("no local proof for this HEAD (pr_proof is local_record): " + "; ".join(problems))
     if task_props(path).get("status") == "active":
         set_field(path, "status", "delivered")
-    for space in reseal_analysis(root, changed_files(root, args.base)):
-        run("git", "add", space, cwd=root)
     run("git", "add", str(path), cwd=root)
     if run("git", "diff", "--cached", "--name-only", cwd=root):
         run("git", "commit", "-m", f"docs: deliver task {args.task}", cwd=root)
@@ -2085,16 +2322,36 @@ def cmd_open_pr(args, root: Path) -> dict:
             "overlaps": warnings}
 
 
+def refresh_graph(root: Path, pr: str) -> None:
+    """Start the graph refresh for the pull request's range in the background when it and graphify
+    are installed; never blocks a merge."""
+    if GRAPH_REFRESH.is_file() and shutil.which("graphify"):
+        try:
+            data = json.loads(run("gh", "pr", "view", str(pr), "--json", "baseRefName,headRefOid", cwd=root))
+            commit_range = f"origin/{data['baseRefName']}...{data['headRefOid']}"
+            subprocess.Popen([sys.executable, str(GRAPH_REFRESH), "--project-root", str(root),
+                              "--range", commit_range], cwd=root, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except (OSError, Refused, ValueError, KeyError):
+            pass
+
+
 def cmd_merge(args, root: Path) -> dict:
     rigor = task_props(task_path(root, args.task)).get("rigor", "normal")
     note = REVIEW_MARK + (f"\n\n{args.detail}" if args.detail else "")
     counts = [getattr(args, key, None) for key in ("critical", "non_critical", "filed")]
+    if any(count is not None and count < 0 for count in counts) or (counts[2] or 0) > (counts[1] or 0):
+        raise Refused("finding counts are non-negative and --filed is at most --non-critical;"
+                      " pass counts, never an issue number")
     if any(count is not None for count in counts):
         note += "\n\nfindings: critical {}, non-critical {}, filed {}".format(*(count or 0 for count in counts))
-    if rigor == "high":
+    owner_merges = rigor == "high" and not getattr(args, "delegated", False)
+    if owner_merges:
         note += "\n\nRigor high: the owner merges this pull request."
+    elif rigor == "high":
+        note += "\n\nRigor high: auto-merged under the owner's delegation."
     run("gh", "pr", "comment", args.pr, "--body", note, cwd=root)
-    if rigor == "high":
+    if owner_merges:
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False,
                 "next": "rigor high: the owner reviews and merges"}
     try:
@@ -2104,7 +2361,9 @@ def cmd_merge(args, root: Path) -> dict:
         if "clean status" not in str(refused):
             raise
         run("gh", "pr", "merge", args.pr, f"--{args.style}", cwd=root)
+        refresh_graph(root, args.pr)
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False, "merged": True}
+    refresh_graph(root, args.pr)
     return {"task_id": args.task, "pr": args.pr, "auto_merge": True}
 
 
@@ -2121,13 +2380,6 @@ def cmd_report(args, root: Path):
         lessons = write_lessons(root, data["rework"], rework_causes(root))
         written.append(lessons["path"])
         data = {**data, "lessons": lessons}
-    if args.write_report:
-        if not args.delivery:
-            raise Refused("--write-report needs a Delivery scope, such as DLV-007")
-        target = root / RETROSPECTIVES / f"{args.delivery.lower()}-retrospective.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(retrospective_note(data, args.delivery).encode("utf-8"))
-        written.append(str(target.relative_to(root)))
     if args.json:
         return {**data, "written": written}
     return render(data) + "".join(f"\nWrote {path}" for path in written)
@@ -2200,7 +2452,6 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--request-file")
     start.add_argument("--base", default="main")
     start.add_argument("--at")
-    start.add_argument("--delivery", help="group the task under a Delivery label, such as DLV-007")
     start.add_argument("--epic", help="the epic the task belongs to, such as EP-003")
     start.add_argument("--source-story", help="the backlog story the task delivers part of, such as ST-012")
     start.add_argument("--covers", help="comma-separated criterion numbers of the source story")
@@ -2208,6 +2459,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="a knowledge task (documents only): the request is the approval, no criteria or reviewer")
     start.add_argument("--size", choices=SIZES, default="s")
     start.add_argument("--fixes", help="the earlier task whose defect this task repairs, such as TK-007")
+    start.add_argument("--risk", action="append", help="a risk flag of the task; repeatable")
+    start.add_argument("--source", action="append", help="a project file the task relies on; repeatable")
     criteria = sub.add_parser("criteria")
     criteria.add_argument("--story", required=True)
     criteria.add_argument("--base", default="main")
@@ -2227,6 +2480,9 @@ def main(argv: list[str] | None = None) -> int:
     checked.add_argument("--note", help="the reasons, one line")
     checked.add_argument("--at")
     sub.add_parser("overlap").add_argument("--base", default="main")
+    reviewed = sub.add_parser("review-inputs", help="reviewers, the diff file, missing triggered skills and changed sources")
+    reviewed.add_argument("--task", required=True)
+    reviewed.add_argument("--base", default="main")
     opened = sub.add_parser("open-pr")
     opened.add_argument("--task", required=True)
     opened.add_argument("--base", default="main")
@@ -2238,13 +2494,14 @@ def main(argv: list[str] | None = None) -> int:
     merge.add_argument("--pr", required=True)
     merge.add_argument("--style", choices=("merge", "squash", "rebase"), default="merge")
     merge.add_argument("--detail")
+    merge.add_argument("--delegated", action="store_true",
+                       help="rigor high under a delegation that allows merge: auto-merge too")
     for key in ("critical", "non-critical", "filed"):
         merge.add_argument(f"--{key}", type=int, help=f"the review's {key} finding count"
                            if key != "filed" else "the non-critical findings filed as issues")
     retro = sub.add_parser("report")
     retro.add_argument("--json", action="store_true")
     retro.add_argument("--export", choices=("csv", "json"))
-    retro.add_argument("--write-report", action="store_true")
     retro.add_argument("--rescan", action="store_true",
                        help="price every task from the transcripts again and save the result as its newest row")
     retro.add_argument("--write-lessons", action="store_true",
@@ -2260,7 +2517,6 @@ def main(argv: list[str] | None = None) -> int:
     issues = sub.add_parser("file-issues")
     issues.add_argument("--ids", required=True, help="comma-separated proposal numbers or ids")
     for scoped in (retro, issues):
-        scoped.add_argument("--delivery")
         scoped.add_argument("--since")
         scoped.add_argument("--recent", type=int, default=20)
         scoped.add_argument("--no-sessions", action="store_true",
@@ -2270,7 +2526,7 @@ def main(argv: list[str] | None = None) -> int:
                 "overlap": cmd_overlap, "open-pr": cmd_open_pr, "prove": cmd_prove, "merge": cmd_merge,
                 "report": cmd_report, "file-issues": cmd_file_issues,
                 "criteria": cmd_criteria, "board": cmd_board,
-                "role-check": cmd_role_check, "rework": cmd_rework}
+                "role-check": cmd_role_check, "rework": cmd_rework, "review-inputs": cmd_review_inputs}
     try:
         if args.command == "lint" and not (args.file or args.task):
             raise Refused("lint needs --file or --task")

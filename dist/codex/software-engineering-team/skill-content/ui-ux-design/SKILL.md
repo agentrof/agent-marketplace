@@ -1,15 +1,13 @@
 ---
 name: ui-ux-design
-description: Search-driven design intelligence for web interfaces. Generates complete design systems (pattern, style, semantic light+dark palette, typography, radius, motion, breakpoints, icon set) from a curated corpus, persists them as a Master file plus page overrides under workspace/docs/design-system/, and enforces professional UI rules through checklists and forbidden patterns.
+description: Professional UI rules for web interfaces. Applies design-token layering, accessibility, motion and responsive rules through checklists and forbidden patterns.
 exposure: internal
 ---
 
 # UI/UX Design
 
-Decision surface for design-and-experience work. The intelligence lives in the
-CSV corpus under `data/`; the scripts search it, reason over it, and persist a
-design system. Do not invent styles or palettes from memory when the corpus
-can answer.
+UI rules for design-and-experience work: token layering, accessibility, motion
+and responsive behavior, checked before a change ships.
 
 ## When to Use
 
@@ -23,61 +21,11 @@ can answer.
 Decision rule: if the change alters how a feature looks, feels, moves, or is
 interacted with, use this skill.
 
-## Work mode
-
-- **Create:** the Design System flow generates divergent candidates, then the
-  approved selection is persisted by its owner.
-- **Revise:** begin the existing Design System revision before changing MASTER
-  or page overrides; use the existing review and approval gates.
-- **Consume:** implementation reads the approved MASTER and applicable page
-  override. It preserves them and searches the corpus only for an unresolved
-  implementation question consistent with their decisions.
-- **Review:** inspect fidelity, accessibility and the supplied evidence; return
-  findings without regenerating or persisting the design system.
-
 ## Workflow
 
-Run commands from the consuming project's git root: the scripts resolve
-their data relative to themselves, and `--persist` writes to the relative
-default `workspace/docs/design-system/`, which is only correct from the
-project root. Pass `--output-dir` for any other target; never persist
-while sitting inside the plugin directory.
-
 1. **Analyze product context.** Purpose, users, dominant content (data/text/media/forms), emotional goal (trust/energy/calm), interaction pattern (scan/keyboard/input/navigate). Method: the design-rationale-method reference below.
-2. **Create or revise the design system** only in the owning Design System
-   flow. Generate candidates with the packaged
-   `skill-content/ui-ux-design/scripts/search.py "<product> <industry> <tone>
-   <density>" --design-system -p "Project Name"`.
-3. **Persist Master + overrides** once a candidate is chosen with the packaged
-   `search.py "<query>" --design-system --persist -p "Project Name" [--page
-   "dashboard"]`.
-   Writes `workspace/docs/design-system/MASTER.md` and `pages/<page>.md` as vault notes (frontmatter, tags and nav section per the obsidian-vault skill; the script emits them). When building a page, read `pages/<page>.md` first; if it exists its rules override MASTER.md, otherwise follow MASTER.md strictly.
-4. **Deep-dive domains** as needed with the packaged `search.py "<keywords>"
-   --domain <product|style|color|typography|landing|ux|chart|icons>`.
-5. **Stack guidance** for implementation fidelity with the packaged
-   `search.py "<keywords>" --stack <react|html-tailwind|shadcn>`.
-
-## Query Strategy and Divergence
-
-- Use multi-dimensional keywords: product + industry + tone + density. "fintech dashboard data-dense trust" beats "app".
-- Never ship the first candidate. Generate divergent candidates by re-running with `--style-emphasis "<style keywords>"`. Seeds: the product row's Secondary Styles (`--domain product`) and the reasoning output's decision-rule branches.
-- Candidates must differ on a structural axis (restraint vs expressive, border-led vs shadow-led depth, data-first vs marketing-first), not palette shuffles. Present the axis and a rationale per decision, then refine the chosen one.
-- Stuck? Re-run with different keywords. Dark-mode contrast, animation feel, form UX, or navigation problems: match the symptom to its section in the ux-quick-reference file.
-
-## Scripts Contract
-
-| Script | Purpose |
-|--------|---------|
-| `skill-content/ui-ux-design/scripts/search.py` | CLI: domain search, stack search, `--design-system`, `--persist`, `--style-emphasis`, `--output-dir`, `--force-master` |
-| `skill-content/ui-ux-design/scripts/core.py` | BM25 engine, CSV and domain config; standard library only |
-| `skill-content/ui-ux-design/scripts/design_system.py` | Aggregation, reasoning rules, light+dark palette derivation (native mode annotated), success and warning roles, MASTER.md and page-override writer; persisting over an existing MASTER refuses without `--force-master` and routes to UPDATE mode |
-
-Generated MASTER.md always contains: light+dark palette pair per semantic
-role, spacing tokens, radius scale derived from the style, shadow scale,
-motion tokens (fast/normal/slow plus easing), breakpoints
-(375/640/768/1024/1280/1536), one declared icon set, component specs,
-anti-patterns, and the pre-delivery checklist. Structure the
-implementation as three token layers: the token-architecture reference below.
+2. **Follow the project's design tokens.** Theme through the three token layers in the token-architecture reference; never hardcode per-screen values.
+3. **Review against the rules.** Match a UX symptom (contrast, motion, forms, navigation) to its section in the ux-quick-reference file, then run the checklist below.
 
 ## Pre-Delivery Checklist
 
@@ -106,6 +54,6 @@ DO NOT skip standard breakpoints or allow horizontal scroll on mobile.
 ## References
 
 - [ux-quick-reference](references/ux-quick-reference.md): ten prioritized rule categories, the named-laws table, information-architecture rules, professional-UI tables. Read when reviewing a surface or matching a UX symptom (contrast, motion, forms, navigation) to its rules.
-- [token-architecture](references/token-architecture.md): three-layer token system (primitive, semantic, component) with dark-mode overrides and naming convention. Read when implementing the generated design system in code.
-- [design-rationale-method](references/design-rationale-method.md): exemplar-derived principles, rationale-per-decision, divergence protocol, self-critique gate. Read when analyzing product context, generating divergent candidates, or running the self-critique gate.
+- [token-architecture](references/token-architecture.md): three-layer token system (primitive, semantic, component) with dark-mode overrides and naming convention. Read when implementing design tokens in code.
+- [design-rationale-method](references/design-rationale-method.md): exemplar-derived principles, rationale-per-decision, divergence protocol, self-critique gate. Read when analyzing product context or running the self-critique gate.
 - [recipes](references/recipes.md): fluid type via clamp(), runnable contrast-ratio checker, dark-palette derivation rules. Read when verifying contrast or implementing fluid type and dark palettes.

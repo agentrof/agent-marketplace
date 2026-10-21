@@ -10,5 +10,5 @@
     "security_review": {"escalates": false},
     "orchestration": {"escalates": false}
   },
-  "risk_flags": ["auth", "secrets", "data_placement", "migration", "irreversible"]
+  "risk_flags": ["auth", "secrets", "data_placement", "migration", "money", "irreversible"]
 }

@@ -104,21 +104,6 @@ def make_refresh_pair(n_root: Path, next_root: Path) -> None:
     make_valid_root(n_root, REFRESH_N_VERSION, build=False)
     plugin = n_root / "plugins" / PLUGIN
 
-    write(
-        plugin / "templates/vault/.obsidian/snippets/brand.css",
-        "/* N-only brand payload */\n:root { --agentrof-accent: #000001; }\n",
-    )
-
-    projected_plugin = (
-        plugin / "templates" / "vault" / ".obsidian" / "plugins"
-        / "obsidian-front-matter-title-plugin"
-    )
-    license_path = projected_plugin / "LICENSE"
-    license_path.unlink()
-    license_path.mkdir()
-    write(license_path / "retired-license-fragment.txt", "N-only directory\n")
-    write(projected_plugin / "retired-after-n.js", "N-only package asset\n")
-
     write(plugin / "agents" / "refresh-retired-probe.md", (
         "---\n"
         "name: refresh-retired-probe\n"

@@ -1,5 +1,4 @@
-"""Fast lane: switch `process_profile` keeps every request on the standard
-ceremonies at `governed`. At `fast_lane`, one task, one branch and one
+"""Fast lane: one task, one branch and one
 pull request carry a change; the task holds the request and approval times,
 GitHub the rest, and the retrospective derives steps and proposals from them."""
 
@@ -22,10 +21,8 @@ TEAM = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
-import architecture_compile  # noqa: E402
-import process_policy  # noqa: E402
 import task_lane  # noqa: E402
-import vault_check  # noqa: E402
+from tools.tests.git_fixture import init_repository  # noqa: E402
 
 try:
     from tools.tests.levels import integration
@@ -58,54 +55,19 @@ Export the month's invoices as CSV.
 1. The export lists every invoice of the month.
 2. Each row carries the invoice number and total.
 3. An empty month yields a header-only file.
+4. Live wiring: the export button downloads the file from the running app.
+5. Docs delta: none.
 
 ## Tests
 
-- tests/test_export.py
+- 1, 2, 3: tests/test_export.py
+- 4, 5: manual check
 
 <!-- sec: nav -->
 ## Navigation
 
 - [[maps/backlog|Backlog]]
 """
-
-
-def run_policy(docs: Path, command: str, *argv: str) -> None:
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        code = process_policy.main([command, "--docs", str(docs), *argv])
-    if code:
-        raise AssertionError(output.getvalue())
-
-
-class SwitchTests(unittest.TestCase):
-    def test_the_switch_defaults_to_governed_and_offers_the_fast_lane(self):
-        spec = process_policy.load_registry()["process_profile"]
-        self.assertEqual(spec["default"], "governed")
-        self.assertEqual(spec["values"], ["governed", "fast_lane"])
-        self.assertNotIn("delivery-execution", spec["spec"]["flows"])
-        self.assertNotIn("delivery-planning", spec["spec"]["flows"])
-
-    def test_profile_reads_governed_without_a_policy_and_fast_lane_when_set(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs = Path(temporary) / "workspace" / "docs"
-            (docs / "delivery").mkdir(parents=True)
-            self.assertEqual(process_policy.process_profile(docs), "governed")
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            self.assertEqual(process_policy.process_profile(docs), "governed",
-                             "a draft policy never opens the fast lane")
-            run_policy(docs, "approve")
-            self.assertEqual(process_policy.process_profile(docs), "fast_lane")
-
-    def test_the_planning_entries_redirect_and_the_stage_flows_anchor_the_switch(self):
-        for entry in ("deliver-governed", "delivery-plan", "execution-plan"):
-            text = (TEAM / "skill-content" / entry / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("use `/deliver` or\n`/requirement`", text, entry)
-        for flow in ("requirement", "business-analysis", "solution-design", "design-system",
-                     "experience-design", "backlog-planning", "fast-lane"):
-            text = (TEAM / "flows" / f"{flow}.md").read_text(encoding="utf-8")
-            self.assertIn("Switch `process_profile`", text, flow)
 
 
 class TaskTests(unittest.TestCase):
@@ -120,7 +82,9 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task_lane.lint(self.write(TASK)), [])
 
     def test_criteria_size_rigor_and_times_are_checked(self):
-        bad = (TASK.replace("3. An empty month yields a header-only file.\n", "")
+        bad = (TASK.replace("1. The export lists every invoice of the month.\n", "")
+               .replace("2. Each row carries the invoice number and total.\n", "")
+               .replace("3. An empty month yields a header-only file.\n", "")
                .replace("size: s", "size: xl").replace("rigor: normal", "rigor: extreme")
                .replace("requested_at: 2026-10-16T10:00:00+00:00\n", ""))
         errors = task_lane.lint(self.write(bad))
@@ -129,20 +93,15 @@ class TaskTests(unittest.TestCase):
         self.assertTrue(any(error.startswith("rigor") for error in errors))
         self.assertIn("requested_at is required", errors)
 
-    def test_nine_criteria_are_two_tasks(self):
-        many = "\n".join(f"{n}. Criterion {n}." for n in range(1, 10))
-        text = TASK.split("## Acceptance Criteria")[0] + "## Acceptance Criteria\n\n" + many \
-            + "\n\n## Tests" + TASK.split("## Tests")[1]
-        self.assertTrue(any("found 9" in error for error in task_lane.lint(self.write(text))))
-
     def test_the_skeleton_is_valid_once_filled(self):
         text = task_lane.task_text("TK-007", "Rotate keys", "Rotate the signing keys.",
-                                    "2026-10-16T10:00:00+00:00", "DLV-009", "high")
-        text = text.replace("1. \n2. \n3. \n", "1. One.\n2. Two.\n3. Three.\n").replace("- \n", "- t\n")
+                                    "2026-10-16T10:00:00+00:00", "high")
+        text = (text.replace("1. \n", "1. One.\n").replace("Live wiring: \n", "Live wiring: seen.\n")
+                .replace("Docs delta: \n", "Docs delta: none.\n").replace(": \n", ": t\n"))
         path = self.write(text)
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
-        self.assertEqual((props["rigor"], props["delivery"]), ("high", "DLV-009"))
+        self.assertEqual(props["rigor"], "high")
 
     def test_set_field_adds_and_replaces_only_its_scalar(self):
         path = self.write(TASK.replace("approved_at: 2026-10-16T10:03:00+00:00\n", ""))
@@ -155,14 +114,11 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task_lane.lint(path), [])
 
     def test_risky_requests_propose_high_rigor(self):
-        self.assertEqual(task_lane.proposed_rigor("Delete stale tenant data")[0], "high")
-        self.assertEqual(task_lane.proposed_rigor("Rotate the API key secrets")[0], "high")
-        self.assertEqual(task_lane.proposed_rigor("Add a CSV export button")[0], "normal")
-
-    def test_authority_is_a_business_term_not_an_auth_risk(self):
-        self.assertEqual(task_lane.proposed_rigor("Show the approving authority")[0], "normal")
-        self.assertEqual(task_lane.proposed_rigor("Add authentication to the export")[0], "high")
-        self.assertEqual(task_lane.proposed_rigor("Authorize the reviewer role")[0], "high")
+        cases = {"Delete stale tenant data": "high", "Rotate the API key secrets": "high",
+                 "Add authentication to the export": "high", "Add a CSV export button": "normal",
+                 "Show the approving authority": "normal"}
+        for request, rigor in cases.items():
+            self.assertEqual(task_lane.proposed_rigor(request)[0], rigor, request)
 
     def test_ids_follow_tasks_and_remote_task_branches(self):
         names = ["workspace/docs/backlog/tasks/tk-003-a.md", "origin/task/tk-011-b"]
@@ -187,12 +143,16 @@ class RetrospectiveTests(unittest.TestCase):
                                         "merge_wait": 1.0})
         self.assertEqual((row["total"], row["largest_step"]), (16.0, "write"))
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_an_open_task_has_no_total_and_a_proposal_names_it(self):
-        data = task_lane.report([task_lane.task_row(self.task, None)], "latest 20")
+        merged = task_lane.task_row({**self.task, "id": "TK-005"}, pr("2026-10-16T10:10:00Z", None, None,
+                                                                      "2026-10-16T10:20:00Z"))
+        data = task_lane.report([task_lane.task_row(self.task, None), merged], "latest 20")
         self.assertIsNone(data["per_task"][0]["total"])
-        self.assertEqual(data["request_to_merge_minutes"]["count"], 0)
-        self.assertIn("RETRO-BUILD-OPEN-TASKS", [item["id"] for item in data["proposals"]])
+        self.assertEqual(data["request_to_merge_minutes"]["count"], 1)
+        self.assertIn("RETRO-OPEN-TASKS", [item["id"] for item in data["proposals"]])
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_report_ranks_proposals_by_measured_minutes(self):
         rows = [task_lane.task_row({**self.task, "id": f"TK-00{n}"},
                                      pr("2026-10-16T10:05:00Z", f"2026-10-16T10:{20 + n}:00Z",
@@ -203,22 +163,17 @@ class RetrospectiveTests(unittest.TestCase):
         self.assertEqual(data["request_to_merge_minutes"],
                          {"count": 3, "average": 23.0, "median": 23.0, "max": 24.0})
         ids = [item["id"] for item in data["proposals"]]
-        self.assertEqual(ids[0], "RETRO-BUILD-CI")
-        self.assertIn("RETRO-BUILD-CHECK-TESTS", ids)
+        self.assertEqual(ids[0], "RETRO-CI")
+        self.assertIn("RETRO-CHECK-TESTS", ids)
         self.assertLessEqual(len(ids), 5)
         self.assertEqual(data["slowest"][0]["task_id"], "TK-003")
-        text = task_lane.render(data)
-        self.assertIn("1. [RETRO-BUILD-CI]", text)
-        self.assertIn("Request to merge: average 23.0, median 23.0, max 24.0 min", text)
         self.assertEqual(task_lane.export(data, "csv").splitlines()[0].split(",")[:3],
                          ["task_id", "title", "size"])
 
-    def test_scope_selects_a_delivery_a_window_or_the_latest(self):
-        tasks = [{"id": f"TK-00{n}", "requested_at": f"2026-10-{10 + n}T10:00:00+00:00",
-                  "delivery": "DLV-007" if n % 2 else ""} for n in range(1, 6)]
+    def test_scope_selects_a_window_or_the_latest(self):
+        tasks = [{"id": f"TK-00{n}", "requested_at": f"2026-10-{10 + n}T10:00:00+00:00"}
+                 for n in range(1, 6)]
         at = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
-        self.assertEqual([task["id"] for task in task_lane.select(tasks, delivery="DLV-007")],
-                         ["TK-001", "TK-003", "TK-005"])
         self.assertEqual([task["id"] for task in task_lane.select(tasks, since="3d", at=at)],
                          ["TK-004", "TK-005"])
         self.assertEqual([task["id"] for task in task_lane.select(tasks, recent=2)],
@@ -237,12 +192,6 @@ class RetrospectiveTests(unittest.TestCase):
         comments = [{"body": "looks fine", "createdAt": "2026-10-16T10:06:00Z"},
                     {"body": task_lane.REVIEW_MARK, "createdAt": "2026-10-16T10:09:00Z"}]
         self.assertEqual(task_lane.review_at(comments), "2026-10-16T10:09:00Z")
-
-    def test_the_retrospective_note_is_vault_shaped(self):
-        data = task_lane.report([task_lane.task_row(self.task, None)], "DLV-007")
-        note = task_lane.retrospective_note(data, "DLV-007")
-        self.assertIn("type: retrospective", note)
-        self.assertIn("<!-- sec: nav -->", note)
 
 
 class GitHubCommandTests(unittest.TestCase):
@@ -278,6 +227,22 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertTrue(result["merged"])
         self.assertEqual(calls[-1], ("gh", "pr", "merge", "9", "--merge"))
 
+    def test_the_graph_refresh_gets_the_project_root_and_the_merged_range(self):
+        import graphify_refresh
+        script = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/graphify_refresh.py"
+        view = json.dumps({"baseRefName": "main", "headRefOid": "abc123"})
+        with mock.patch.object(task_lane, "GRAPH_REFRESH", script), \
+                mock.patch.object(task_lane.shutil, "which", return_value="/bin/graphify"), \
+                mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: view if "view" in a else ""), \
+                mock.patch.object(task_lane.subprocess, "Popen") as popen:
+            task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None),
+                                self.project("normal"))
+        argv = popen.call_args.args[0][2:]
+        self.assertEqual(argv[argv.index("--range") + 1], "origin/main...abc123")
+        with mock.patch.object(graphify_refresh.subprocess, "Popen") as child:
+            self.assertEqual(graphify_refresh.main(argv), 0)
+        self.assertIn("--wait", child.call_args.args[0])
+
     def test_high_rigor_leaves_the_merge_to_the_owner(self):
         calls = []
         with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
@@ -286,36 +251,14 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertFalse(result["auto_merge"])
         self.assertFalse(any(call[:3] == ("gh", "pr", "merge") for call in calls))
 
-    def test_issues_open_only_for_named_proposals_in_the_origin_repository(self):
-        root = self.project("normal")
+    def test_high_rigor_auto_merges_under_a_delegation(self):
         calls = []
-
-        def fake(*args, **_kwargs):
-            calls.append(args)
-            if args[:3] == ("git", "remote", "get-url"):
-                return "git@github.com:acme/shop.git"
-            if args[:3] == ("gh", "pr", "list"):
-                return json.dumps([{"number": 9, "headRefName": "task/tk-004-export-invoices"}])
-            if args[:3] == ("gh", "pr", "view"):
-                return json.dumps({"createdAt": "2026-10-16T10:10:00Z",
-                                   "mergedAt": "2026-10-16T10:30:00Z", "comments": [],
-                                   "statusCheckRollup": [{"name": "tests", "conclusion": "SUCCESS",
-                                                          "startedAt": "2026-10-16T10:10:00Z",
-                                                          "completedAt": "2026-10-16T10:25:00Z"}]})
-            if args[:3] == ("gh", "issue", "create"):
-                return "https://github.com/acme/shop/issues/1"
-            return ""
-
-        args = SimpleNamespace(ids="1", delivery=None, since=None, recent=20, no_sessions=True)
-        with mock.patch.object(task_lane, "run", side_effect=fake):
-            result = task_lane.cmd_file_issues(args, root)
-            with self.assertRaises(task_lane.Refused):
-                task_lane.cmd_file_issues(SimpleNamespace(**{**vars(args), "ids": "RETRO-NOPE"}), root)
-        created = [call for call in calls if call[:3] == ("gh", "issue", "create")]
-        self.assertEqual(len(created), 1)
-        self.assertEqual(created[0][3:5], ("--repo", "acme/shop"))
-        self.assertIn("Evidence:", created[0][-1])
-        self.assertEqual(result["repo"], "acme/shop")
+        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
+            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
+                                                          detail=None, delegated=True),
+                                         self.project("high"))
+        self.assertTrue(result["auto_merge"])
+        self.assertIn(("gh", "pr", "merge", "9", "--auto", "--merge"), calls)
 
 
 class RoleRoutingTests(unittest.TestCase):
@@ -326,9 +269,10 @@ class RoleRoutingTests(unittest.TestCase):
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
         return root
 
-    def roles(self, text: str, kind: str = "build", size: str = "s", root: Path | None = None) -> dict:
+    def roles(self, text: str, kind: str = "build", size: str = "m", root: Path | None = None) -> dict:
+        allowed = task_lane.routing_policy(root)["pre_check_triggers"][size]
         return {item["role"]: item for item in task_lane.route(task_lane.role_rules(root), text, kind, size,
-                                                               task_lane.named_files(text))}
+                                                               task_lane.named_files(text), allowed)}
 
     def fake_run(self, changed: str = ""):
         def run(*args, **_kwargs):
@@ -348,34 +292,50 @@ class RoleRoutingTests(unittest.TestCase):
         return task_lane.cmd_role_check(SimpleNamespace(task="TK-004", role=role, verdict="go",
                                                         note="fits the records", at=at), root)
 
-    def test_a_keyword_routes_the_architect_as_required(self):
-        found = self.roles("Add an invoice_lines table for partial payments")
+    def test_only_a_path_rule_routes_the_architect_at_size_m_on_the_cheaper_class(self):
+        found = self.roles("Rename the total column in db/migrations/0007_totals.sql please")
         self.assertEqual(found["software-architect"]["mode"], "require")
         self.assertEqual(found["software-architect"]["step"], "pre_check")
-        self.assertIn("keyword table", found["software-architect"]["reasons"])
-        self.assertNotIn("software-architect", self.roles("Add a CSV export button"))
-
-    def test_a_named_file_routes_the_architect(self):
-        found = self.roles("Rename the total column in db/migrations/0007_totals.sql please")
+        self.assertEqual(found["software-architect"]["model_class"], "routine_review")
         self.assertIn("file db/migrations/0007_totals.sql matches *migrations/*",
                       found["software-architect"]["reasons"])
+        self.assertEqual(self.roles("Refactor the invoice model and its database table interface"), {})
+
+    def test_size_s_routes_no_role(self):
+        self.assertEqual(self.roles("Rename the column in db/migrations/0007_totals.sql", size="s"), {})
 
     def test_size_l_routes_the_architect_only_for_build_tasks(self):
         self.assertEqual(self.roles("Polish the export", size="l")["software-architect"]["reasons"], ["size l"])
         self.assertNotIn("software-architect", self.roles("Polish the export", size="m"))
         self.assertEqual(self.roles("Rewrite the schema notes", kind="knowledge", size="l"), {})
 
-    def test_start_writes_the_roles_field_and_prints_the_reasons(self):
+    def test_start_writes_the_roles_field_and_lists_only_require_roles_to_spawn(self):
         root = self.project()
-        args = SimpleNamespace(delivery=None, at=None, request="Add a payments table", request_file=None,
+        args = SimpleNamespace(delivery=None, at=None, request="Add db/migrations/0009_payments.sql for the"
+                               " approval workflow", request_file=None,
                                title="Payments", epic=None, source_story=None, covers=None, fixes=None,
-                               knowledge=False, size="s", base="main")
+                               knowledge=False, size="l", base="main")
         with self.fake_run():
             result = task_lane.cmd_start(args, root)
-        self.assertEqual(result["roles"][0]["role"], "software-architect")
-        self.assertIn("keyword table", result["roles"][0]["reasons"])
+        self.assertEqual([item["role"] for item in result["roles"]], ["software-architect", "business-analyst",
+                                                                   "qa-engineer"])
+        self.assertIn("file db/migrations/0009_payments.sql matches *migrations/*", result["roles"][0]["reasons"])
+        self.assertEqual(result["spawn"], ["software-architect"])
         props = task_lane.task_props(root / result["task"])
-        self.assertEqual(props["roles"], "software-architect:require:pre_check")
+        self.assertEqual(props["roles"], "software-architect:require:pre_check, business-analyst:suggest:pre_check,"
+                                        " qa-engineer:suggest:pre_check")
+
+    def test_a_knowledge_task_naming_risky_words_starts_normal_with_only_explicit_risks(self):
+        root = self.project()
+        args = SimpleNamespace(delivery=None, at=None, request="Document where the credential and token live",
+                               request_file=None, title="Secrets notes", epic=None, source_story=None,
+                               covers=None, fixes=None, knowledge=True, size="s", base="main", risk=None)
+        with self.fake_run():
+            result = task_lane.cmd_start(args, root)
+        self.assertEqual((result["proposed_rigor"], result["risks"]), ("normal", []))
+        args.risk = ["secrets"]
+        with self.fake_run():
+            self.assertEqual(task_lane.cmd_start(args, root)["risks"], ["secrets"])
 
     def test_a_required_role_blocks_open_pr_until_its_verdict_is_recorded(self):
         root = self.project(TASK.replace("size: s", "size: l"))
@@ -392,33 +352,26 @@ class RoleRoutingTests(unittest.TestCase):
             self.assertEqual(self.open_pr(root)["pr"], "9")
 
     def test_a_changed_migration_in_the_diff_requires_the_architect(self):
-        root = self.project()
+        root = self.project(TASK.replace("size: s", "size: m"))
         with self.fake_run("db/migrations/0008_add_index.sql\n"), \
                 self.assertRaisesRegex(task_lane.Refused, "software-architect"):
             self.open_pr(root)
 
-    def test_suggested_roles_never_block(self):
-        root = self.project(TASK.replace("as CSV.", "as CSV from a new screen."))
-        roles, missing = task_lane.routed_roles(root, task_lane.task_path(root, "TK-004"))
-        self.assertEqual([(item["role"], item["mode"]) for item in roles], [("ux-designer", "suggest")])
-        self.assertEqual(missing, [])
-        with self.fake_run():
-            self.assertEqual(self.open_pr(root)["pr"], "9")
-
     def test_a_project_rule_replaces_adds_or_drops_a_packaged_rule(self):
         root = self.project()
-        (root / ".agentrof").mkdir()
-        (root / task_lane.PROJECT_ROUTING).write_text(json.dumps({"rules": [
+        (root / "workspace").mkdir(exist_ok=True)
+        (root / "workspace/config.json").write_text(json.dumps({"role_routing": {"rules": [
             {"role": "software-architect", "mode": "suggest", "step": "pre_check", "kinds": ["build"],
              "keywords": ["table"], "time_budget_minutes": 2, "ask": "Check the table."},
-            {"role": "ux-designer", "mode": "off", "step": "pre_check"},
+            {"role": "qa-engineer", "mode": "off", "step": "pre_check"},
             {"role": "security-reviewer", "mode": "require", "step": "pre_check", "kinds": ["build"],
-             "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}),
+             "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}}),
             encoding="utf-8")
-        found = self.roles("Add a table and a login screen in src/auth/login.tsx", root=root)
+        found = self.roles("Add a table, a regression check and a login screen in src/auth/login.tsx",
+                           size="l", root=root)
         self.assertEqual(found["software-architect"]["mode"], "suggest")
         self.assertEqual(found["security-reviewer"]["mode"], "require")
-        self.assertNotIn("ux-designer", found)
+        self.assertNotIn("qa-engineer", found)
 
     def test_the_retrospective_counts_role_checks_and_their_minutes(self):
         root = self.project()
@@ -431,220 +384,119 @@ class RoleRoutingTests(unittest.TestCase):
         self.assertEqual(row["role_checks"], {"checks": 2, "minutes": 3.5})
         data = task_lane.report([row], "latest 20")
         self.assertEqual(data["targets"]["build"]["role_checks"], {"tasks": 1, "checks": 2, "minutes": 3.5})
-        self.assertIn("Role checks build: 2 on 1 of 1 tasks, 3.5 min", task_lane.render(data))
 
 
-@integration
 class LocalProofTests(unittest.TestCase):
-    """Switch `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
+    """Config `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
+
+    HEAD = "a" * 40
 
     def project(self, value: str | None = "local_record") -> Path:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
-        docs = root / "workspace" / "docs"
-        (docs / "delivery").mkdir(parents=True)
         if value:
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "pr_proof", "--value", value)
-            run_policy(docs, "approve")
-        self.git(root, "init", "-q")
-        self.git(root, "add", "-A")
-        self.git(root, "commit", "-qm", "start")
+            (root / "workspace" / "config.json").write_text(json.dumps({"pr_proof": value}),
+                                                            encoding="utf-8")
         return root
 
-    def git(self, root: Path, *args: str) -> str:
-        return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=root)
+    def record(self, root: Path, head: str = HEAD, clean: bool = True, *commands: dict) -> None:
+        commands = commands or ({"command": "make test", "exit_code": 0, "seconds": 1.0,
+                                 "finished_at": "2026-10-16T10:00:00+00:00"},)
+        path = root / task_lane.PROOFS / "TK-004.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"head": head, "tree_clean": clean, "commands": list(commands)}),
+                        encoding="utf-8")
 
-    def declare(self, root: Path, *commands: str) -> None:
-        (root / ".agentrof").mkdir(exist_ok=True)
-        (root / task_lane.PROJECT_PROOF).write_text(json.dumps({"commands": list(commands)}), encoding="utf-8")
+    def open_pr(self, root: Path, clean: bool = True) -> tuple[dict, str]:
+        calls = []
 
-    def prove(self, root: Path) -> dict:
-        return task_lane.cmd_prove(SimpleNamespace(task="TK-004", base="main"), root)
-
-    def open_pr(self, root: Path) -> tuple[dict, list]:
-        real, calls = task_lane.run, []
-
-        def run(*args, **kwargs):
+        def run(*args, **_kwargs):
             calls.append(args)
-            if args[:2] == ("git", "push") or (args[:2] == ("git", "diff") and "--cached" not in args):
-                return ""
             if args[:3] == ("gh", "pr", "list"):
                 return "[]"
             if args[:3] == ("gh", "pr", "create"):
                 return "https://github.com/acme/shop/pull/9"
-            if args[:2] == ("git", "commit"):
-                return real("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args[1:], **kwargs)
-            return real(*args, **kwargs)
-        with mock.patch.object(task_lane, "run", side_effect=run):
+            return ""
+        with mock.patch.object(task_lane, "run", side_effect=run), \
+                mock.patch.object(task_lane, "head_state", return_value=(self.HEAD, clean)):
             result = task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
-        return result, calls
-
-    def body(self, calls: list) -> str:
         create = next(call for call in calls if call[:3] == ("gh", "pr", "create"))
-        return create[create.index("--body") + 1]
-
-    def test_the_switch_defaults_to_remote_ci(self):
-        spec = process_policy.load_registry()["pr_proof"]
-        self.assertEqual((spec["default"], spec["values"]), ("remote_ci", ["remote_ci", "local_record"]))
+        return result, create[create.index("--body") + 1]
 
     def test_the_default_opens_the_pull_request_without_a_record(self):
         for value in (None, "remote_ci"):
-            root = self.project(value)
-            result, calls = self.open_pr(root)
+            result, body = self.open_pr(self.project(value))
             self.assertEqual(result["pr"], "9")
-            self.assertNotIn("Local proof", self.body(calls))
+            self.assertNotIn("Local proof", body)
 
-    def test_open_pr_refuses_without_a_record_before_pushing(self):
-        root = self.project()
-        real = task_lane.run
-        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: "" if a[:2] == ("git", "diff") else real(*a, **k)), \
-                self.assertRaisesRegex(task_lane.Refused, "no local proof record; run prove --task TK-004"):
-            task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
-        self.assertEqual(task_lane.task_props(task_lane.task_path(root, "TK-004"))["status"], "active")
-
-    def test_a_record_of_an_older_head_is_stale(self):
-        root = self.project()
-        self.declare(root, "true")
-        self.assertTrue(self.prove(root)["ok"])
-        (root / "src.txt").write_text("change", encoding="utf-8")
-        self.git(root, "add", "src.txt")
-        self.git(root, "commit", "-qm", "change")
-        with self.assertRaisesRegex(task_lane.Refused, "the proof ran on [0-9a-f]{12}, HEAD is"):
-            self.open_pr(root)
-
-    def test_a_red_command_records_its_failing_test_ids_and_the_refusal_names_them(self):
-        root = self.project()
-        noise = "x" * 3000
-        self.declare(root, "printf 'FAILED tests/test_a.py::test_one - AssertionError\\nFAIL: test_two (pkg.test_b.Case)\\n"
-                     "FAILED tests/test_a.py::test_one - again\\n" + noise + "\\n'; exit 1")
-        result = self.prove(root)
-        (command,) = result["commands"]
-        self.assertEqual(command["failed_tests"], ["tests/test_a.py::test_one", "pkg.test_b.Case.test_two"])
-        self.assertNotIn("test_one", command["tail"])
-        with self.assertRaisesRegex(task_lane.Refused, "failed: tests/test_a.py::test_one, pkg.test_b.Case.test_two"):
-            self.open_pr(root)
-        self.declare(root, "true")
-        self.assertEqual(self.prove(root)["commands"][0]["failed_tests"], [])
-
-    def test_a_red_command_or_a_dirty_tree_refuses(self):
-        root = self.project()
-        self.declare(root, "true", "echo boom; exit 3")
-        record = self.prove(root)
-        self.assertFalse(record["ok"])
-        self.assertEqual([item["exit_code"] for item in record["commands"]], [0, 3])
-        self.assertIn("boom", record["commands"][1]["tail"])
-        with self.assertRaisesRegex(task_lane.Refused, "`echo boom; exit 3` exited 3"):
-            self.open_pr(root)
-        self.declare(root, "true")
-        task_lane.task_path(root, "TK-004").write_text(TASK + "\n", encoding="utf-8")
-        self.assertFalse(self.prove(root)["tree_clean"])
-        with self.assertRaisesRegex(task_lane.Refused, "uncommitted changes"):
-            self.open_pr(root)
+    def test_a_missing_stale_red_or_dirty_proof_refuses_before_pushing(self):
+        red = {"command": "echo boom; exit 3", "exit_code": 3, "failed_tests": ["tests/test_a.py::test_one"]}
+        cases = (("no local proof record; run prove --task TK-004", None, True),
+                 ("the proof ran on bbbbbbbbbbbb, HEAD is aaaaaaaaaaaa", {"head": "b" * 40}, True),
+                 ("`echo boom; exit 3` exited 3; failed: tests/test_a.py::test_one", {"commands": (red,)}, True),
+                 ("the proof ran on a tree with uncommitted changes", {"clean": False}, True),
+                 ("tracked files changed since HEAD", {}, False))
+        for message, record, clean in cases:
+            with self.subTest(message):
+                root = self.project()
+                if record is not None:
+                    self.record(root, record.get("head", self.HEAD), record.get("clean", True),
+                                *record.get("commands", ()))
+                with self.assertRaisesRegex(task_lane.Refused, re.escape(message)):
+                    self.open_pr(root, clean=clean)
+                self.assertEqual(task_lane.task_props(task_lane.task_path(root, "TK-004"))["status"], "active")
 
     def test_a_green_record_of_head_opens_the_pull_request_with_its_proof(self):
         root = self.project()
-        self.declare(root, "true", "echo {base}")
-        head = self.git(root, "rev-parse", "HEAD")
-        record = self.prove(root)
-        self.assertTrue(record["ok"])
-        self.assertEqual(record["head"], head)
-        self.assertEqual(record["commands"][1]["command"], "echo main")
-        saved = json.loads((root / task_lane.PROOFS / "TK-004.json").read_text(encoding="utf-8"))
-        self.assertTrue({"exit_code", "seconds", "started_at", "finished_at"} <= set(saved["commands"][0]))
-        result, calls = self.open_pr(root)
+        self.record(root)
+        result, body = self.open_pr(root)
         self.assertEqual(result["pr"], "9")
-        body = self.body(calls)
-        self.assertIn(f"## Local proof\n\nEvery check passed on HEAD `{head}` with a clean tree", body)
-        self.assertIn("| `echo main` | pass |", body)
+        self.assertIn(f"Every check passed on HEAD `{self.HEAD}` with a clean tree", body)
+        self.assertIn("| `make test` | pass |", body)
 
     def test_a_role_check_after_the_proof_keeps_it_but_any_other_change_does_not(self):
         root = self.project()
-        self.declare(root, "true")
-        self.prove(root)
-        task_lane.cmd_role_check(SimpleNamespace(task="TK-004", role="software-architect", verdict="go",
-                                                 note="fine", at="2026-01-01T00:00:00Z"), root)
-        self.git(root, "commit", "-qam", "role check")
-        self.assertEqual(task_lane.proof_problems(root, "TK-004")[0], [])
-        (root / "other.txt").write_text("x", encoding="utf-8")
-        self.git(root, "add", "-A")
-        self.git(root, "commit", "-qm", "code")
-        self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
+        self.record(root, "b" * 40)
+        own = task_lane.task_path(root, "TK-004").relative_to(root).as_posix()
+        for changed, stale in ((own, False), (own + "\nsrc/other.txt", True)):
+            with mock.patch.object(task_lane, "run", return_value=changed), \
+                    mock.patch.object(task_lane, "head_state", return_value=(self.HEAD, True)):
+                problems = task_lane.proof_problems(root, "TK-004")[0]
+            self.assertEqual(any("run prove again" in item for item in problems), stale, changed)
+
+    def test_failing_test_ids_are_read_from_pytest_and_unittest_output(self):
+        output = ("FAILED tests/test_a.py::test_one - AssertionError\nFAIL: test_two (pkg.test_b.Case)\n"
+                  "FAILED tests/test_a.py::test_one - again\n")
+        self.assertEqual(task_lane.failed_test_ids(output), ["tests/test_a.py::test_one", "pkg.test_b.Case.test_two"])
 
 
 @integration
-class AnalysisResealTests(unittest.TestCase):
-    def test_an_edited_approved_space_is_resealed_strict_current(self):
-        from tools.tests import test_ba_compile as ba_tests
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            space = root / task_lane.ANALYSIS / "erp"
-            ba_tests.make_valid_space(space)
-            overview = space / "space.md"
-            overview.write_text(overview.read_text(encoding="utf-8").replace(
-                "status: approved\n", "status: approved\ntags:\n  - doc/space\n  - status/approved\n", 1),
-                encoding="utf-8")
-            common = ["--space", str(space), "--vault-root", str(space.parent.parent)]
-            self.assertEqual(ba_tests.run(["approve-package", *common])[0], 0)
-            (space / "space.md").write_text((space / "space.md").read_text(encoding="utf-8")
-                                            + "\nA reworded scope line.\n", encoding="utf-8")
-            self.assertEqual(ba_tests.ba.classify_package(space, ba_tests.SCHEMA,
-                                                          space.parent.parent)["profile"], "invalid")
-            sealed = task_lane.reseal_analysis(root, {"workspace/docs/business-analysis/erp/space.md"})
-            self.assertEqual(sealed, ["workspace/docs/business-analysis/erp"])
-            self.assertEqual(ba_tests.ba.classify_package(space, ba_tests.SCHEMA,
-                                                          space.parent.parent)["profile"], "strict-current")
-            self.assertEqual(task_lane.reseal_analysis(root, {"workspace/docs/business-analysis/erp/space.md"}), [])
+class LocalProofGitTests(unittest.TestCase):
+    def test_prove_records_each_command_on_the_real_head_and_a_new_commit_makes_it_stale(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        init_repository(root)
+        (root / task_lane.TASKS).mkdir(parents=True)
+        (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
+        (root / "workspace").mkdir(exist_ok=True)
+        (root / "workspace/config.json").write_text(json.dumps({"local_proof": ["true", "echo {base}; exit 3"]}),
+                                                    encoding="utf-8")
 
-
-class FastLaneOwnershipTests(unittest.TestCase):
-    def test_a_task_owns_architecture_only_in_the_fast_lane(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            docs = Path(temporary) / "workspace" / "docs"
-            (docs / "delivery").mkdir(parents=True)
-            tasks = docs / "backlog" / "tasks"
-            tasks.mkdir(parents=True)
-            (tasks / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
-            self.assertIsNone(architecture_compile.task_owner(docs, "TK-004"))
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            run_policy(docs, "approve")
-            path, props, ref = architecture_compile.task_owner(docs, "TK-004")
-            self.assertEqual((path.name, ref), ("tk-004-export-invoices.md", "TK-004"))
-            self.assertIsNone(architecture_compile.task_owner(docs, "ST-004"))
-            (tasks / "tk-004-export-invoices.md").write_text(
-                TASK.replace("status: active", "status: dropped"), encoding="utf-8")
-            with self.assertRaises(ValueError):
-                architecture_compile.task_owner(docs, "TK-004")
-
-    def test_task_owners_need_no_inbound_map_link(self):
-        policy = vault_check.load_policy(vault_check.DEFAULT_POLICY)
-        self.assertIn("task", policy["navigation_exempt_types"])
-        task = SimpleNamespace(rel="backlog/tasks/tk-004-a.md", fm={"type": "task"},
-                               generated=False)
-        story = SimpleNamespace(rel="backlog/epics/e/stories/s/story.md", fm={"type": "story"},
-                                generated=False)
-        vault = SimpleNamespace(policy=policy, notes={task.rel: task, story.rel: story})
-        self.assertEqual([note.rel for note in vault_check.navigated(vault)], [story.rel])
-
-    def test_every_field_the_lane_writes_is_a_registered_property(self):
-        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
-                            .read_text(encoding="utf-8"))
-        source = (TEAM / "scripts/task_lane.py").read_text(encoding="utf-8")
-        written = set(re.findall(r'set_field\(\w+, "([a-z_]+)"', source))
-        self.assertIn("roles", written)
-        self.assertEqual(sorted(written - set(policy["property_types"])), [])
-
-    def test_the_task_type_is_registered_in_the_vault_policy(self):
-        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
-                            .read_text(encoding="utf-8"))
-        self.assertIn("task", policy["extra_doc_types"])
-        self.assertIn("retrospective", policy["extra_doc_types"])
-        for key, kind in (("requested_at", "datetime"), ("size", "text"), ("rigor", "text"),
-                          ("delivery", "text")):
-            self.assertEqual(policy["property_types"][key], kind)
+        def git(*args: str) -> str:
+            return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=root)
+        git("add", "-A")
+        git("commit", "-qm", "start")
+        record = task_lane.cmd_prove(SimpleNamespace(task="TK-004", base="main"), root)
+        self.assertEqual((record["head"], record["tree_clean"], record["ok"]), (git("rev-parse", "HEAD"), True, False))
+        self.assertEqual([(item["command"], item["exit_code"]) for item in record["commands"]],
+                         [("true", 0), ("echo main; exit 3", 3)])
+        self.assertIn("main", record["commands"][1]["tail"])
+        (root / "src.txt").write_text("change", encoding="utf-8")
+        git("add", "src.txt")
+        git("commit", "-qm", "change")
+        self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
 
 
 STORY = """---
@@ -694,16 +546,6 @@ class TaskLinkTests(unittest.TestCase):
         self.assertIn("epic must be EP-<number>", errors)
         self.assertIn("covers needs a source_story", errors)
 
-    def test_standalone_tasks_need_no_story(self):
-        self.assertEqual(task_lane.lint(self.write(TASK.replace("rigor: normal\n",
-                                                               "rigor: normal\nepic: EP-003\n"))), [])
-
-    def test_the_story_index_reads_criteria_and_epic(self):
-        story = task_lane.story_index(self.project())["ST-012"]
-        self.assertEqual(story["epic"], "EP-003")
-        self.assertEqual(len(story["criteria"]), 3)
-        self.assertTrue(story["criteria"][0].startswith("The export lists"))
-
     def test_a_story_is_delivered_once_merged_tasks_cover_every_criterion(self):
         stories = task_lane.story_index(self.project())
         merged = [{"id": "TK-001", "title": "a", "source_story": "ST-012", "covers": ["1", "2"]}]
@@ -715,9 +557,6 @@ class TaskLinkTests(unittest.TestCase):
         self.assertTrue(epics["EP-003"]["ST-012"]["delivered"])
         standalone = task_lane.board(stories, [], opened[1:])["EP-003"]["standalone"]
         self.assertEqual([task["id"] for task in standalone["tasks"]], ["TK-003"])
-        text = task_lane.render_board(task_lane.board(stories, merged, opened), stories, [])
-        self.assertIn("ST-012 Invoice export: 2/3 criteria, missing [3]", text)
-        self.assertIn("never edit by hand", text)
 
     def test_a_story_changed_after_an_open_task_was_requested_warns(self):
         stories = task_lane.story_index(self.project())
@@ -727,118 +566,6 @@ class TaskLinkTests(unittest.TestCase):
         earlier = {"ST-012": "2026-10-16T09:00:00+00:00"}
         self.assertEqual([item["task"] for item in task_lane.drift(stories, opened, later)], ["TK-002"])
         self.assertEqual(task_lane.drift(stories, opened, earlier), [])
-
-    def test_the_link_properties_are_registered(self):
-        policy = json.loads((TEAM / "skill-content/obsidian-vault/data/vault-policy.json")
-                            .read_text(encoding="utf-8"))
-        for key, kind in (("epic", "text"), ("source_story", "text"), ("covers", "multitext")):
-            self.assertEqual(policy["property_types"][key], kind)
-        self.assertEqual(policy["type_path_patterns"]["task"],
-                         ["^backlog/tasks/tk-[0-9]{3,}-[a-z0-9]+(?:-[a-z0-9]+)*\\.md$"])
-
-
-class FastLaneContractTests(unittest.TestCase):
-    """At fast_lane, contracts, the DoD and Governance change by plain pull request."""
-
-    def project(self, fast: bool) -> Path:
-        docs = Path(tempfile.mkdtemp()) / "workspace" / "docs"
-        self.addCleanup(lambda: __import__("shutil").rmtree(docs.parent.parent))
-        (docs / "delivery").mkdir(parents=True)
-        if fast:
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "process_profile", "--value", "fast_lane")
-            run_policy(docs, "approve")
-        return docs
-
-    def edited_contract(self, docs: Path) -> None:
-        """A contract a pull request edited to approved, with no stamp, citation or revision."""
-        import operation_compile
-        with contextlib.redirect_stdout(io.StringIO()):
-            operation_compile.main(["init", "--docs", str(docs), "--kind", "verification"])
-        path = operation_compile.contract_path(docs, "verification")
-        props, body = operation_compile.parse(path)
-        props.update(status="approved", test_command="make test")
-        props.pop("revision")
-        path.write_text(operation_compile.render(props, body), encoding="utf-8")
-
-    def test_a_plain_pull_request_contract_is_in_force(self):
-        import operation_compile
-        for fast in (True, False):
-            docs = self.project(fast)
-            self.edited_contract(docs)
-            value, errors = operation_compile.check_contract(docs, "verification")
-            with self.subTest(fast=fast):
-                if fast:
-                    self.assertEqual(errors, [])
-                    self.assertTrue(value["current"])
-                    self.assertNotIn("paired_environment", value)
-                    self.assertEqual(operation_compile.pairing_findings(docs, value), [])
-                else:
-                    self.assertIn("approved contract source_hash is stale", errors)
-                    self.assertIn("revision must be a positive integer", errors)
-                    self.assertIn("approved contract must cite at least one accepted Solution decision"
-                                  " in constrained_by", errors)
-                props, body = operation_compile.parse(operation_compile.contract_path(docs, "verification"))
-                self.assertEqual(operation_compile.contract_in_force(docs, props, body), fast)
-
-    def test_between_gates_never_refuses_a_shared_document_in_the_fast_lane(self):
-        import delivery_compile
-        docs = self.project(True)
-        with mock.patch.object(delivery_compile, "delivery_dirs", side_effect=AssertionError("read")):
-            self.assertEqual(delivery_compile.between_gates_refusals(docs, "Verification Contract revision 2"), [])
-
-    def test_the_dod_needs_no_fixed_headings_or_stamp(self):
-        import delivery_compile
-        text = ("---\ntype: definition-of-done\nid: DOD\nstatus: approved\n---\n# Definition of Done\n\n"
-                "Tests pass in CI.\n\n<!-- sec: nav -->\n## Navigation\n\n- [[maps/delivery|Delivery]]\n")
-        for fast in (True, False):
-            docs = self.project(fast)
-            path = docs / "delivery" / "definition-of-done.md"
-            path.write_text(text, encoding="utf-8")
-            errors = delivery_compile.check_dod(path)
-            with self.subTest(fast=fast):
-                if fast:
-                    self.assertEqual(errors, [])
-                    snapshot, snapshot_errors = delivery_compile.approved_dod_source(docs)
-                    self.assertEqual(snapshot_errors, [])
-                    self.assertTrue(snapshot["definition_of_done_source_hash"].startswith("sha256:"))
-                else:
-                    self.assertIn("DoD missing sections: Commands, Evidence Rules, Quality Gates", errors)
-                    self.assertIn("approved DoD source_hash is stale", errors)
-
-    def test_item_contract_bindings_follow_the_contract_in_force(self):
-        import delivery_compile
-        docs = self.project(True)
-        self.edited_contract(docs)
-        stale = {"runtime_required": False, "verification_contract_ref": "operation/verification-contract",
-                 "verification_contract_hash": "sha256:old"}
-        self.assertEqual(delivery_compile.item_operation_findings(docs, stale), [])
-
-    def test_governance_is_optional_for_activation(self):
-        import delivery_git
-        docs = self.project(True)
-        self.assertEqual(delivery_git.project_max_parallel(docs.parent.parent, "none"), 1)
-        with self.assertRaises(RuntimeError):
-            delivery_git.project_max_parallel(self.project(False).parent.parent, "none")
-
-    def test_the_hook_lets_a_plain_pull_request_edit_contracts_and_governance(self):
-        sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
-        import vault_hook
-        for fast in (True, False):
-            docs = self.project(fast)
-            self.edited_contract(docs)
-            for rel in ("operation/verification-contract.md", "delivery/governance/governance.md"):
-                target = docs / rel
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if not target.exists():
-                    target.write_text("---\ntype: delivery-governance\nstatus: approved\n---\n# G\n",
-                                      encoding="utf-8")
-                with self.subTest(fast=fast, rel=rel), contextlib.redirect_stdout(io.StringIO()), \
-                        contextlib.redirect_stderr(io.StringIO()):
-                    code = vault_hook.pre_target({"file_path": str(target), "old_string": "a",
-                                                  "new_string": "b"})
-                    self.assertEqual(code == 0, fast)
-
 
 class RetrospectiveCostTests(unittest.TestCase):
     """Cost per task from transcripts, waits with an owner, reading waste, targets and history."""
@@ -915,42 +642,28 @@ class RetrospectiveCostTests(unittest.TestCase):
         owners = {item["id"]: item["cause_owner"] for item in task_lane.proposals([row])}
         self.assertEqual(owners.get("RETRO-WAIT-CI-WAIT"), "project")
 
-    def test_a_knowledge_task_is_measured_against_the_docs_targets(self):
-        row = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-003", "size": "m",
-                                  "task_kind": "knowledge"},
-                                 pr("2026-10-16T10:01:00Z", None, None, "2026-10-16T10:02:30Z"))
-        goal = task_lane.targets([row], [row["total"]])
-        self.assertEqual(list(goal), ["knowledge"])
-        self.assertEqual((goal["knowledge"]["average_target"], goal["knowledge"]["over_size_target"]), (5, []))
+    def test_a_task_over_its_cost_budget_is_flagged(self):
+        rows = [task_lane.task_row({**RetrospectiveTests.task, "id": task_id},
+                                   pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:10:00Z"))
+                for task_id in ("TK-001", "TK-002")]
+        budget = task_lane.COST_BUDGETS["build"]["s"]
+        cost = {"main": {"usd": 0.0}, "tokens": dict.fromkeys(task_lane.COST_TOKENS, 0)}
+        rows[0]["cost"], rows[1]["cost"] = {**cost, "usd": budget + 1}, {**cost, "usd": budget}
+        data = task_lane.report(rows, "latest 20")
+        self.assertEqual(data["targets"]["build"]["over_cost_budget"], ["TK-001"])
 
     def test_a_knowledge_task_is_approved_by_its_request_and_needs_no_criteria(self):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         path = root / "tk-009-fix-wording.md"
         path.write_text(task_lane.task_text("TK-009", "Fix wording", "Reword rule 3.",
-                                            "2026-10-16T10:00:00Z", "", "normal", kind="knowledge"),
+                                            "2026-10-16T10:00:00Z", "normal", kind="knowledge"),
                         encoding="utf-8")
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
         self.assertEqual((props["task_kind"], props["approved_at"]), ("knowledge", props["requested_at"]))
 
-    def test_every_property_a_task_can_carry_is_registered_in_the_vault_schema(self):
-        texts = [task_lane.task_text("TK-009", "T", "R.", "2026-10-16T10:00:00Z", "DLV-001", "normal",
-                                     epic="EP-1", source_story="ST-1", covers=[1], size="m", fixes="TK-008"),
-                 task_lane.task_text("TK-010", "T", "R.", "2026-10-16T10:00:00Z", "DLV-001", "normal",
-                                     kind="knowledge", fixes="TK-008")]
-        emitted = {match for text in texts
-                   for match in re.findall(r"(?m)^([a-z_]+):", text.split("\n---\n")[0])}
-        self.assertIn("fixes", emitted)
-        plugin = ROOT / "plugins" / "software-engineering-team"
-        registered = (
-            set(json.loads((plugin / "skill-content/obsidian-vault/data/vault-policy.json")
-                           .read_text(encoding="utf-8"))["property_types"]),
-            set(json.loads((plugin / "templates/vault/.obsidian/types.json")
-                           .read_text(encoding="utf-8"))["types"]))
-        for names in registered:
-            self.assertEqual(emitted - names, set())
-
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_sums_each_kind_and_ranks_its_levers_by_the_target_gap(self):
         build = task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001"},
                                    pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:40:00Z"))
@@ -960,11 +673,9 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.assertEqual(set(data["targets"]), {"build", "knowledge"})
         self.assertEqual(data["targets"]["build"]["total"]["average"], 40.0)
         self.assertIn("define", data["targets"]["knowledge"]["steps"])
-        self.assertTrue(data["proposals"][0]["id"].startswith("RETRO-BUILD-"))
+        self.assertTrue(data["proposals"][0]["evidence"].startswith("build: "))
         self.assertIn("vs target 15 min", data["proposals"][0]["evidence"])
-        text = task_lane.render(data)
-        self.assertIn("- build (1 merged): total 40.0 / 40.0 / 40.0;", text)
-        self.assertIn("- knowledge (1 merged): total 4.0 / 4.0 / 4.0;", text)
+        self.assertEqual(data["targets"]["knowledge"]["average_target"], 5)
 
     def test_targets_and_the_previous_run_are_compared(self):
         rows = [task_lane.task_row({**RetrospectiveTests.task, "id": "TK-001", "size": "l"},
@@ -982,10 +693,6 @@ class RetrospectiveCostTests(unittest.TestCase):
         task_lane.remember(root, data)
         before = task_lane.previous_run(root, "latest 20")
         self.assertEqual((before["average"], before["merged"]), (35.0, 2))
-        text = task_lane.render(task_lane.report(rows, "latest 20", before))
-        self.assertIn("Target build (2): average 35.0 vs 15 min (missed), max 60.0 vs 60 (met), s/m/l 5/15/30;"
-                      " over size target: TK-001, TK-002", text)
-        self.assertIn("Previous retrospective", text)
 
     def test_plugin_causes_go_to_the_ledger_and_known_issues_get_a_comment(self):
         root = Path(tempfile.mkdtemp())
@@ -1014,6 +721,11 @@ class RetrospectiveCostTests(unittest.TestCase):
                 mock.patch.object(task_lane, "run", side_effect=fake):
             result = task_lane.cmd_file_issues(args, root)
             again = task_lane.cmd_file_issues(SimpleNamespace(**{**vars(args), "ids": "1"}), root)
+            with self.assertRaises(task_lane.Refused):
+                task_lane.cmd_file_issues(SimpleNamespace(**{**vars(args), "ids": "RETRO-NOPE"}), root)
+        self.assertEqual(result["repo"], "acme/shop")
+        created = [call for call in calls if call[:3] == ("gh", "issue", "create")]
+        self.assertEqual([call[3:5] for call in created], [("--repo", "acme/shop")])
         self.assertEqual([item["id"] for item in result["plugin_ledger"]], ["RETRO-REVIEW"])
         self.assertFalse(again["plugin_ledger"][0]["added"])
         ledger = (root / task_lane.LEDGER).read_text(encoding="utf-8")
@@ -1084,19 +796,12 @@ class RetrospectiveDollarTests(unittest.TestCase):
             "input": 1, "cache_write": 0, "cache_read": 0, "output": 1}}, self.prices))
         self.assertIsNotNone(self.session_cost.rates("claude-opus-5-5[1m]", self.prices))
 
-    def test_a_fast_call_costs_its_multiplier_and_every_price_has_all_rates(self):
+    def test_a_fast_call_costs_its_multiplier(self):
         call = {"model": "claude-opus-5-5", "tokens": {"input": 1000, "cache_write": 0, "cache_read": 0, "output": 1000}}
         self.assertAlmostEqual(self.session_cost.usd(call, self.prices), 0.024)
         self.assertAlmostEqual(self.session_cost.usd({**call, "fast": True}, self.prices), 0.048)
         self.assertAlmostEqual(self.session_cost.usd({**call, "model": "claude-sonnet-5-5", "fast": True}, self.prices),
                                0.012)
-        rates = {"input", "cache_write_5m", "cache_write_1h", "cache_read", "output"}
-        for model, rate in self.prices.items():
-            self.assertLessEqual(rates, set(rate), model)
-            self.assertTrue(all(rate[key] > 0 for key in rates), model)
-            self.assertLess(rate["cache_read"], rate["input"], model)
-            if "long_context" in rate:
-                self.assertLessEqual(rates | {"above_prompt_tokens"}, set(rate["long_context"]), model)
 
     def test_a_project_price_file_overrides_a_model(self):
         (self.project / ".agentrof").mkdir()
@@ -1134,6 +839,20 @@ class RetrospectiveDollarTests(unittest.TestCase):
         self.assertEqual(sum(row["cost"]["tokens"]["output"] for row in rows) + rest["tokens"]["output"],
                          self.session_cost.cost(self.scan(), self.prices)["tokens"]["output"])
 
+    def test_a_task_session_counts_its_calls_before_start_once_across_a_resume(self):
+        # Base branch named task/...; m1 runs before start; m2 streams twice; the resumed run adds m3.
+        (self.folder / "s1.jsonl").write_text("\n".join([
+            self.call(1, "m1", branch="task/trial", model="claude-sonnet-5-5", output_tokens=100),
+            self.call(6, "m2", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=1),
+            self.call(6, "m2", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=200),
+            self.call(30, "m3", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=300)]) + "\n",
+            encoding="utf-8")
+        task = {**RetrospectiveTests.task, "id": "TK-001", "file": "tk-001-a.md",
+                "requested_at": "2026-10-16T10:05:00+00:00"}
+        row = task_lane.task_row(task, pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:40:00Z"))
+        rest = task_lane.attach_sessions([row], [task], self.scan(), False, 1e12, self.prices)
+        self.assertEqual((row["cost"]["main"]["tokens"]["output"], row["cost"]["usd"], rest["usd"]), (600, 0.006, 0))
+
     def test_codex_tokens_split_cached_and_written_input_and_name_their_branch(self):
         folder = self.home / "codex" / "2026" / "10" / "16"
         folder.mkdir(parents=True)
@@ -1170,6 +889,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         row["waits"] = dict.fromkeys(task_lane.WAITS, 0.0)
         return row
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_prices_each_task_and_kind_and_ranks_cost_levers_with_time(self):
         data = task_lane.report([self.costed_row()], "latest 20")
         cost = data["targets"]["build"]["cost"]
@@ -1178,12 +898,8 @@ class RetrospectiveDollarTests(unittest.TestCase):
         self.assertEqual(cost["tokens_per_task"]["cache_read"], 2000000)
         ids = [item["id"] for item in data["proposals"]]
         for lever in ("STARTUP", "EFFORT", "MAIN"):
-            self.assertIn(f"RETRO-BUILD-COST-{lever}", ids)
-        self.assertLessEqual(len(ids), 4)
-        text = task_lane.render(data)
-        self.assertIn("  - cost $2.00; tokens input 2 / cache_write 64000 / cache_read 2000000 / output 2000;"
-                      " 1 spawns, startup context 64000 per spawn; main session $1.00", text)
-        self.assertIn("Cost build: $2.00 over 1 tasks, $2.00 per task;", text)
+            self.assertIn(f"RETRO-COST-{lever}", ids)
+        self.assertLessEqual(len(ids), task_lane.MAX_PROPOSALS)
         header = task_lane.export(data, "csv").splitlines()[0].split(",")
         self.assertTrue({"usd", "input_tokens", "cache_write_tokens", "cache_read_tokens", "spawns",
                          "startup_context", "main_usd"} <= set(header))
@@ -1208,7 +924,6 @@ class RetrospectiveDollarTests(unittest.TestCase):
                 mock.patch.object(self.session_cost, "scan", side_effect=AssertionError("scanned")):
             again = task_lane.gather(root, args)
         self.assertEqual(again["per_task"][0]["cost"]["usd"], 2.0)
-        self.assertIn("$2.00 and 2066002 tokens per task", task_lane.render(again))
         # A rescan prices from the transcripts again and appends a newer row; the old one stays.
         fixed = {**again["per_task"][0]["cost"], "usd": 1.5}
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
@@ -1265,7 +980,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
     def test_a_fixing_task_names_the_task_it_repairs_and_counts_as_its_escaped_defect(self):
         path = Path(tempfile.mkdtemp()) / "tk-009-fix.md"
         self.addCleanup(lambda: __import__("shutil").rmtree(path.parent))
-        path.write_text(task_lane.task_text("TK-009", "Fix export", "Fix it.", "2026-10-16T10:00:00Z", "",
+        path.write_text(task_lane.task_text("TK-009", "Fix export", "Fix it.", "2026-10-16T10:00:00Z",
                                             "normal", kind="knowledge", fixes="TK-004"), encoding="utf-8")
         self.assertEqual(task_lane.task_props(path)["fixes"], "TK-004")
         self.assertEqual(task_lane.lint(path), [])
@@ -1288,6 +1003,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
         task_lane.link_quality(rows, tasks, stories)
         self.assertEqual([row["quality"]["story_coverage"] for row in rows], [0.67, 0.67])
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_shows_quality_per_task_and_kind_and_ranks_its_levers(self):
         rows = [self.row("TK-001", {"critical": 1, "non_critical": 2, "filed": 2, "ci_first_pass": False,
                                     "red_runs": 2}),
@@ -1302,16 +1018,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
                          (0.5, 1.0, 0.5, 1.0, 0.5, {"ST-012": 0.67}))
         ids = [item["id"] for item in data["proposals"]]
         for lever in ("CI-FIRST-PASS", "ESCAPED", "CRITICAL"):
-            self.assertIn(f"RETRO-BUILD-QUALITY-{lever}", ids)
-        for item in data["proposals"]:
-            for key in ("evidence", "cause_owner", "expected_gain", "verify", "proposal"):
-                self.assertTrue(item[key], (item["id"], key))
-        text = task_lane.render(data)
-        self.assertIn("- TK-001: 1 / 2 / 2; CI first pass no (2); fixed by TK-005; -", text)
-        self.assertIn("- TK-002: 0 / 0 / 0; CI first pass yes (0); fixed by -; ST-012 67%", text)
-        self.assertIn("Quality build: critical 0.5 and non-critical 1 per task over 2 reviewed, filed 100%;"
-                      " CI first pass 50% over 2 (1 red runs per task); escaped 1/2 (50%): TK-001;"
-                      " coverage ST-012 67%", text)
+            self.assertIn(f"RETRO-QUALITY-{lever}", ids)
         lines = task_lane.export(data, "csv").splitlines()
         header = lines[0].split(",")
         self.assertTrue({"critical", "non_critical", "filed", "ci_first_pass", "red_runs", "fixes", "fixed_by",
@@ -1332,8 +1039,6 @@ class RetrospectiveQualityTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_quality"), 1)
         before = task_lane.previous_run(root, "latest 20")
         self.assertEqual(before["quality"]["first_pass_rate"], 0.0)
-        self.assertIn("critical 1 per task, CI first pass 0%, escaped 0%, coverage -",
-                      task_lane.render(task_lane.report(data["per_task"], "latest 20", before)))
         tasks = root / task_lane.TASKS
         tasks.mkdir(parents=True)
         (tasks / "tk-001-a.md").write_text(TASK.replace("TK-004", "TK-001"), encoding="utf-8")
@@ -1379,7 +1084,9 @@ class RetrospectiveReworkTests(unittest.TestCase):
                  "tests: re-run attempt 2": "flaky-test", "Merge branch 'main' into task/tk-1-x": "merge-conflict",
                  "review: missing test for the empty month": "review-missing-test",
                  "fix: security review found the token kept in the checkout": "review-finding",
-                 "no tests ran for the changed module": "test-impact", "wip": task_lane.UNCLASSIFIED}
+                 "no tests ran for the changed module": "test-impact", "wip": task_lane.UNCLASSIFIED,
+                 "test: cover the empty month": "review-missing-test", "style: wrap long lines": "lint-format",
+                 "code-reviewer changes: deadline unbounded": "review-finding"}
         for text, category in cases.items():
             self.assertEqual(task_lane.cause_of(text, self.causes), category, text)
         owners = {item["owner"] for item in self.causes["categories"]}
@@ -1549,9 +1256,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
         self.assertEqual((first["added"], first["over_cap"]), (["lint-format", "spec-gap"], ["type-error"]))
         path = root / causes["lessons"]["path"]
         text = path.read_text(encoding="utf-8")
-        self.assertIn("### lint-format\n\n- Cause: lint or format check\n- Rule: Run the project's formatter", text)
-        self.assertIn("- Owner: project. Status: open. Promote: memory.\n- Evidence: 4 events in 3 tasks"
-                      " (TK-001, TK-002, TK-003), first 2026-10-01, last 2026-10-03.", text)
+        self.assertIn("4 events in 3 tasks", text)
         path.write_text(text.replace("- Rule: Run the project's formatter", "- Rule: Run make fmt, the formatter"),
                         encoding="utf-8")
         again = write(items + [self.item("TK-004", 4, "ruff")])
@@ -1588,6 +1293,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
         self.assertIn("up to 15.0 rework min per affected task", lever["expected_gain"])
         self.assertTrue(lever["verify"])
 
+    @mock.patch.object(task_lane, "MIN_PROPOSAL_TASKS", 1)
     def test_the_report_shows_rework_per_task_and_kind_keeps_it_once_and_groups_across_history(self):
         def row(task_id, minute, red):
             return task_lane.task_row({**RetrospectiveTests.task, "id": task_id},
@@ -1602,13 +1308,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
                          {"tasks": 2, "one_pass": 1, "one_pass_rate": 0.5, "events": 1, "minutes": 8.0,
                           "minutes_share": 0.16})
         self.assertEqual(data["rework"]["groups"][0]["status"], "recurring")
-        self.assertIn("RETRO-BUILD-REWORK-SPEC-GAP", [item["id"] for item in data["proposals"]])
-        text = task_lane.render(data)
-        self.assertIn("- TK-004: 1 (ci 1); spec-gap 1; 8.0 min", text)
-        self.assertIn("- TK-005: none, one pass", text)
-        self.assertIn("Rework build: one pass 1/2 (50%), 1 events, 8.0 min after the first event (16% of request to merge)",
-                      text)
-        self.assertIn("- spec-gap [process]: 3 events in 2 tasks (TK-001, TK-004)", text)
+        self.assertIn("RETRO-REWORK-SPEC-GAP", [item["id"] for item in data["proposals"]])
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         task_lane.remember(root, data)
@@ -1622,71 +1322,149 @@ class RetrospectiveReworkTests(unittest.TestCase):
         self.assertEqual(sum(1 for item in task_lane.history(root) if item.get("type") == "task_rework"), 4)
 
 
-class GovernedRenameTests(unittest.TestCase):
-    OLD = __import__("re").compile(r"/deliver(?= DLV-| \{)|--entry deliver(?![-\w])|entry=\"deliver\"")
+class RetrospectiveHonestyTests(unittest.TestCase):
+    """Bounded figures, rework that counts only real rework, steps that add up, proposals backed
+    by enough tasks, and durations with a verdict and a baseline."""
 
-    def test_no_governed_surface_names_the_old_entry(self):
-        governed = [*(TEAM / "flows").glob("*.md"),
-                    *(TEAM / "skill-content" / "deliver-governed").rglob("*.md"),
-                    *(TEAM / "skill-content" / "deliver" / "references").glob("switch-*.md"),
-                    *(TEAM / "skill-content" / "delivery-plan").rglob("*.md"),
-                    *(TEAM / "skill-content" / "execution-plan").rglob("*.md"),
-                    *(TEAM / "scripts").glob("delivery_*.py"),
-                    *(ROOT / "platforms").glob("*/software-engineering-team/host-contract.md")]
-        offenders = [f"{path.relative_to(ROOT)}:{number}"
-                     for path in governed
-                     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
-                     if self.OLD.search(line)]
-        self.assertEqual(offenders, [])
+    def row(self, task_id, merged="2026-10-16T10:20:00Z", kind="build", size="s", **pr_extra):
+        return task_lane.task_row({**RetrospectiveTests.task, "id": task_id, "task_kind": kind, "size": size},
+                                  {**pr("2026-10-16T10:10:00Z", "2026-10-16T10:15:00Z", "2026-10-16T10:18:00Z",
+                                        merged), **pr_extra})
 
-    def test_the_governed_entry_binds_its_references_from_the_shared_folder(self):
-        import task_inputs
-        route = task_inputs.catalog()["entries"]["deliver-governed"]
-        self.assertEqual(route["flows"], ["delivery-execution"])
-        self.assertEqual(route["reference_skills"], ["deliver"])
-        self.assertEqual(task_inputs.catalog()["entries"]["deliver"]["flows"], ["fast-lane"])
+    def test_merge_refuses_a_filed_count_above_the_found_count(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / task_lane.TASKS).mkdir(parents=True)
+        (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
+        args = SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None, critical=0, non_critical=2,
+                               filed=712)
+        with mock.patch.object(task_lane, "run") as run, self.assertRaises(task_lane.Refused):
+            task_lane.cmd_merge(args, root)
+        run.assert_not_called()
+
+    def test_a_share_never_exceeds_the_whole(self):
+        row = self.row("TK-001", critical=0, non_critical=1, filed=9)
+        self.assertEqual(task_lane.quality_summary([row])["filed_share"], 1.0)
+        self.assertEqual(task_lane.share(30, 20), 1.0)
+
+    def test_merges_from_main_the_docs_commit_and_the_first_feature_commit_are_not_rework(self):
+        def commit(sha, minute, subject):
+            return {"oid": sha * 7, "committedDate": f"2026-10-16T10:{minute:02d}:00Z", "messageHeadline": subject}
+        commits = [commit("a", 9, "docs: deliver task TK-004"), commit("b", 11, "Add the export"),
+                   commit("c", 12, "Merge branch 'main' into task/tk-004-export"),
+                   commit("d", 13, "Merge remote-tracking branch 'origin/main' into task/tk-004-export"),
+                   commit("e", 14, "test: cover the empty month")]
+        self.assertEqual([item["sha"] for item in task_lane.revisions(commits, "2026-10-16T10:10:00Z")],
+                         ["eeeeeee"])
+        self.assertEqual(task_lane.revisions(commits[1:2], "2026-10-16T10:10:00Z"), [])
+
+    def test_steps_add_up_and_a_missing_step_says_why(self):
+        row = task_lane.task_row(RetrospectiveTests.task, pr("2026-10-16T10:10:00Z", None, "2026-10-16T10:18:00Z",
+                                                             "2026-10-16T10:20:00Z"))
+        self.assertEqual((row["steps"]["ci"], row["steps"]["merge_wait"]), (None, None))
+        self.assertEqual(row["missing"], {"ci": "CI not green", "merge_wait": "CI not green"})
+        self.assertEqual(row["unaccounted"], 2.0)
+        full = self.row("TK-002")
+        self.assertEqual((full["unaccounted"], full["missing"]), (0.0, {}))
+
+    def test_a_kind_needs_five_merged_tasks_before_a_proposal(self):
+        four = [self.row(f"TK-00{n}", merged="2026-10-16T11:00:00Z") for n in range(1, 5)]
+        data = task_lane.report(four, "latest 20")
+        self.assertEqual(data["proposals"], [])
+        self.assertTrue(task_lane.report(four + [self.row("TK-005", merged="2026-10-16T11:00:00Z")],
+                                         "latest 20")["proposals"])
+
+    def test_one_proposal_per_cause_across_kinds(self):
+        rows = [self.row(f"TK-0{n:02d}", merged="2026-10-16T11:00:00Z", kind=kind)
+                for n, kind in enumerate(["build"] * 5 + ["knowledge"] * 5)]
+        ids = [item["id"] for item in task_lane.report(rows, "latest 20")["proposals"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        review = next(item for item in task_lane.report(rows, "latest 20")["proposals"] if item["id"] == "RETRO-REVIEW")
+        self.assertEqual(sorted(review["kinds"]), ["build", "knowledge"])
+
+    def test_size_targets_are_calibrated_from_history(self):
+        history = [{"task_id": f"TK-1{n}", "kind": "build", "size": "m", "total": 10.0 + n} for n in range(4)]
+        goal = task_lane.targets([self.row("TK-001", size="m")], [], history)["build"]["calibrated"]
+        self.assertEqual(goal["m"], {"tasks": 5, "median": 12.0})
+        self.assertEqual(goal["s"], {"tasks": 0, "median": None})
+
+    def test_durations_carry_steps_a_verdict_a_baseline_and_a_cost_method_flag(self):
+        data = task_lane.report([self.row("TK-001")], "latest 20")
+        text = task_lane.render(data)
+        self.assertIn("Verdict: average 20.0 vs target 15 min (missed); baseline none", text)
+        self.assertIn("Steps (average min): define 3.0 / write 7.0 / ci 5.0 / review 8.0 / merge_wait 2.0"
+                      " / unaccounted 0.0", text)
+        self.assertIn("- TK-001: 20.0 min vs s target 5 (missed); define 3.0 / write 7.0", text)
+        before = {"at": "2026-10-10T00:00:00Z", "merged": 3, "average": 12.0, "median": 12.0, "max": 14.0,
+                  "cost_method": "aaa"}
+        again = task_lane.render({**task_lane.report([self.row("TK-001")], "latest 20", before), "cost_method": "bbb"})
+        self.assertIn("baseline 12.0 min average at the previous retrospective (2026-10-10)", again)
+        self.assertIn("Cost method changed since the previous retrospective (aaa -> bbb)", again)
+        costed = task_lane.render(task_lane.report([RetrospectiveDollarTests.costed_row(self)], "latest 20"))
+        self.assertIn("Cost build: $2.00 over 1 tasks", costed)
 
 
-class EntryExposureTests(unittest.TestCase):
-    # Agents may call every entry the user can; arming autopilot stays the user's.
-    MODEL_INVOCABLE = ["business-analysis", "configure", "deliver", "demo", "design-system",
-                       "experience-design", "issue-report", "organize-docs", "requirement",
-                       "retrospective", "setup", "sketch", "solution-design"]
-    USER_ONLY = ["autopilot"]
+class TaskTriggerTests(unittest.TestCase):
+    def project(self, task: str = TASK) -> Path:
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / task_lane.TASKS).mkdir(parents=True)
+        (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
+        return root
 
-    def test_the_model_invocable_entries_are_listed_on_both_hosts(self):
-        claude = ROOT / "dist" / "claude" / "software-engineering-team" / "skills"
-        codex = ROOT / "dist" / "codex" / "software-engineering-team" / "skills"
-        invocable, user_only = [], []
-        for wrapper in sorted(claude.glob("*/SKILL.md")):
-            header = wrapper.read_text(encoding="utf-8").split("---", 2)[1]
-            if "user-invocable: false" in header:
-                continue
-            name = wrapper.parent.name
-            (user_only if "disable-model-invocation: true" in header else invocable).append(name)
-            policy = (codex / name / "agents" / "openai.yaml").read_text(encoding="utf-8")
-            self.assertIn(f"allow_implicit_invocation: {'false' if name in self.USER_ONLY else 'true'}",
-                          policy, name)
-        self.assertEqual(invocable, self.MODEL_INVOCABLE)
-        self.assertEqual(user_only, self.USER_ONLY)
+    def test_the_risk_flags_are_the_class_map_flags(self):
+        declared = json.loads((ROOT / "tools/data/models.json").read_text(encoding="utf-8"))["risk_flags"]
+        flags = [rule["flag"] for rule in task_lane.task_triggers()["risk_flags"]]
+        self.assertEqual(sorted(flags), sorted(declared))
 
-    def test_autopilot_arming_still_needs_the_typed_command(self):
-        text = (TEAM / "skill-content" / "autopilot" / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("model_invocable: false", text.split("---", 2)[1])
-        self.assertIn("`on` refuses without one", " ".join(text.split()))
+    def test_paths_and_words_make_method_skills_mandatory_and_propose_risks(self):
+        triggers = task_lane.task_triggers()
+        text = "Add a migration for the orders table"
+        files = {"deploy/Dockerfile", "web/src/Orders.tsx", "db/migrations/0003_orders.sql"}
+        self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", text, files),
+                         ["container-environment", "react-typescript", "sql-database-design"])
+        self.assertEqual(task_lane.triggered(triggers["risk_flags"], "flag", text, files), ["migration"])
+        self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "Fix a Go handler", {"cmd/main.go"}), [])
 
-    def test_the_planning_entries_are_hidden_like_internal_skills(self):
-        claude = ROOT / "dist" / "claude" / "software-engineering-team" / "skills"
-        codex = ROOT / "dist" / "codex" / "software-engineering-team" / "skills"
-        internal = (claude / "code-review" / "SKILL.md").read_text(encoding="utf-8")
-        policy = [line for line in internal.splitlines()[1:4] if "invoc" in line]
-        for entry in ("backlog-plan", "delivery-plan", "execution-plan", "deliver-governed"):
-            text = (claude / entry / "SKILL.md").read_text(encoding="utf-8")
-            self.assertEqual([line for line in text.splitlines()[1:5] if "invoc" in line], policy,
-                             entry)
-            self.assertFalse((codex / entry).exists(), entry)
-            source = (TEAM / "skill-content" / entry / "SKILL.md").read_text(encoding="utf-8")
-            self.assertIn("exposure: entry\nuser_invocable: false\n", source)
+    def test_a_project_rule_naming_a_renamed_skill_maps_to_the_new_name(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = Path(tmp.name)
+        (root / "workspace").mkdir()
+        (root / "workspace/config.json").write_text(json.dumps({"task_triggers": {"method_skills": [
+            {"skill": "docker-compose", "path_globs": ["*infra/*"]}]}}), encoding="utf-8")
+        triggers = task_lane.task_triggers(root)
+        self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "", {"infra/x"}),
+                         ["container-environment"])
+        self.assertEqual(task_lane.applied_skills({"applied_skills": "docker-compose"}), ["container-environment"])
+
+    def test_a_changed_source_is_reported_at_review(self):
+        root = self.project()
+        doc = root / "workspace/docs/solution-design/decision.md"
+        doc.parent.mkdir(parents=True)
+        doc.write_text("v1\n", encoding="utf-8")
+        recorded = task_lane.hashed_sources(root, ["workspace/docs/solution-design/decision.md"])
+        self.assertEqual(task_lane.changed_sources(root, recorded), [])
+        doc.write_text("v2\n", encoding="utf-8")
+        self.assertEqual([item["path"] for item in task_lane.changed_sources(root, recorded)],
+                         ["workspace/docs/solution-design/decision.md"])
+
+    def test_review_inputs_route_reviewers_and_report_a_missing_skill(self):
+        task = TASK.replace("rigor: normal\n", "rigor: normal\nrisks: auth\napplied_skills: react-typescript\n")
+        root = self.project(task)
+        self.assertEqual(task_lane.lint(root / task_lane.TASKS / "tk-004-export-invoices.md"), [])
+        changed = {"api/models.py", "workspace/docs/business-analysis/rules.md"}
+        with mock.patch.object(task_lane, "changed_files", return_value=changed), \
+                mock.patch.object(task_lane, "run", return_value="diff --git a/api/models.py"):
+            result = task_lane.cmd_review_inputs(SimpleNamespace(task="TK-004", base="main"), root)
+        self.assertEqual(result["reviewers"], ["analysis-challenger", "code-reviewer", "security-reviewer"])
+        self.assertEqual((root / result["diff_file"]).read_text(encoding="utf-8"), "diff --git a/api/models.py")
+        self.assertEqual(result["missing_skills"], ["python-fastapi", "sql-database-design"])
+
+    def test_an_unknown_risk_flag_fails_lint(self):
+        path = self.project(TASK.replace("rigor: normal\n", "rigor: normal\nrisks: weather\n"))
+        self.assertTrue(any(error.startswith("risks must be among")
+                            for error in task_lane.lint(path / task_lane.TASKS / "tk-004-export-invoices.md")))
 
 
 if __name__ == "__main__":

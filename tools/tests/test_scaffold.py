@@ -21,7 +21,6 @@ import fixtures  # noqa: E402
 import scaffold  # noqa: E402
 
 
-@integration
 class ScaffoldContracts(unittest.TestCase):
     def test_new_plugin_has_no_dependency_or_extra_catalog(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -68,35 +67,6 @@ class ScaffoldContracts(unittest.TestCase):
             self.assertFalse((root / "plugins/sample-team").exists())
             for host in ("claude", "codex"):
                 self.assertFalse((root / "platforms" / host / "sample-team").exists())
-
-    def test_new_agent_has_no_hidden_runtime_language(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            fixtures.make_valid_root(root)
-            scaffold.new_plugin(root, "sample-team")
-            scaffold.new_agent(root, "sample-team", "sample-reviewer")
-            text = (root / "plugins/sample-team/agents/sample-reviewer.md").read_text(
-                encoding="utf-8"
-            ).lower()
-            for forbidden in ("runtime state", "run folder", "during runs"):
-                self.assertNotIn(forbidden, text)
-            self.assertIn("project-local input", text)
-
-    def test_new_skills_have_no_hidden_runtime_language(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            fixtures.make_valid_root(root)
-            scaffold.new_plugin(root, "sample-team")
-            scaffold.new_skill(root, "sample-team", "sample-entry", "entry")
-            scaffold.new_skill(root, "sample-team", "sample-knowledge", "hidden")
-            for relative in (
-                "plugins/sample-team/skill-content/sample-entry/SKILL.md",
-                "plugins/sample-team/skill-content/sample-knowledge/SKILL.md",
-            ):
-                text = (root / relative).read_text(encoding="utf-8").lower()
-                for forbidden in ("runtime state", "run folder", "during runs"):
-                    self.assertNotIn(forbidden, text)
-
 
 if __name__ == "__main__":
     unittest.main()

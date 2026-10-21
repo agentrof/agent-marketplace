@@ -82,22 +82,12 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
     return [(f"skills/{name}/SKILL.md", text)]
 
 
-def base_agent(name: str) -> str:
-    """The canonical agent a variant name renders from."""
-    for agent in sorted(set(AGENT_TOOLS["browser_agents"]) | set(AGENT_TOOLS["spawning_agents"]),
-                        key=len, reverse=True):
-        if name == agent or name.startswith(f"{agent}-"):
-            return agent
-    return name
-
-
 def disallowed_tools(name: str) -> list[str]:
     """The tools a role never needs: none for a role with its own tool list."""
-    agent = base_agent(name)
     denied = list(AGENT_TOOLS["disallowed"])
-    if agent not in AGENT_TOOLS["spawning_agents"]:
+    if name not in AGENT_TOOLS["spawning_agents"]:
         denied.append("Agent")
-    denied += AGENT_TOOLS["browser_disallowed_mcp"] if agent in AGENT_TOOLS["browser_agents"] \
+    denied += AGENT_TOOLS["browser_disallowed_mcp"] if name in AGENT_TOOLS["browser_agents"] \
         else AGENT_TOOLS["disallowed_mcp"]
     return denied
 

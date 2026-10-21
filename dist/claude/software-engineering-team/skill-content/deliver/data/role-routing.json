@@ -1,5 +1,7 @@
 {
-  "description": "Fast-lane role routing: which team role takes part in a task, and when. A rule matches a task of one of its kinds when any trigger hits: the task size, a file the task names or changes (shell globs, * crosses /), or a keyword in its title or text (whole word, plural allowed). mode require blocks open-pr until the role's verdict is recorded; suggest never blocks; off drops a packaged rule. step pre_check is a bounded review of the task and its plan before writing; author means the role writes the change. A project replaces a rule of the same role, or adds one, in .agentrof/role-routing.json with the same rules shape.",
+  "description": "Fast-lane role routing: which team role takes part in a task, and when. A rule matches a task of one of its kinds when any trigger hits: the task size, a file the task names or changes (shell globs, * crosses /), or a keyword in its title or text (whole word, plural allowed). mode require blocks open-pr until the role's verdict is recorded; suggest never blocks; off drops a packaged rule. pre_check_triggers names, per task size, the trigger kinds (size, path, keyword) that may route a rule at that size; a size with none routes no role. spawn_modes are the modes whose roles start and approve list in spawn, the roles the flow spawns on its own; a role of another mode spawns only when the owner asks. model_class, when a rule names one, is the purpose class its pre-check spawn runs on. step pre_check is a bounded review of the task and its plan before writing; author means the role writes the change. A project replaces a rule of the same role, or adds one, in role_routing of workspace/config.json with the same rules shape; pre_check_triggers and spawn_modes there replace the packaged ones.",
+  "pre_check_triggers": {"s": [], "m": ["path"], "l": ["size", "path", "keyword"]},
+  "spawn_modes": ["require"],
   "rules": [
     {
       "role": "software-architect",
@@ -8,9 +10,9 @@
       "kinds": ["build"],
       "sizes": ["l"],
       "path_globs": ["*migrations/*", "*migration*", "*.sql", "*schema*", "*models/*", "*models.py", "*entities/*", "*entity*", "*.prisma", "*openapi*", "*swagger*", "*.proto", "*.graphql", "*contracts/*", "*package.json", "*pyproject.toml", "*go.mod", "*Cargo.toml", "*pom.xml", "*build.gradle*"],
-      "keywords": ["table", "schema", "migration", "data model", "model", "entity", "column", "database", "new service", "new module", "new package", "new app", "new application", "interface", "contract", "public api", "breaking change", "dependency", "refactor"],
+      "model_class": "routine_review",
       "time_budget_minutes": 3,
-      "ask": "Check the task and its plan against the architecture records and the solution design: data model and schema changes, module and service boundaries, public interfaces and contracts, cross-component dependencies. Return go, or changes with a reason for each; a finding that is not critical becomes an issue instead of a change."
+      "ask": "Check the task and its plan against the architecture records and the solution design: data model and schema changes, module and service boundaries, public interfaces and contracts, cross-component dependencies. Return go, or changes with a reason for each; a minor finding becomes an issue instead of a change."
     },
     {
       "role": "solution-architect",
@@ -29,16 +31,6 @@
       "keywords": ["business rule", "workflow", "approval", "policy", "calculation", "status transition"],
       "time_budget_minutes": 3,
       "ask": "Check the acceptance criteria against the approved analysis: business rules, process steps and edge cases. Return go, or changes with a reason for each."
-    },
-    {
-      "role": "ux-designer",
-      "mode": "suggest",
-      "step": "pre_check",
-      "kinds": ["build"],
-      "path_globs": ["*.tsx", "*.jsx", "*.vue", "*.svelte", "*.css", "*.scss"],
-      "keywords": ["screen", "page", "form", "layout", "dialog", "ui", "ux", "navigation"],
-      "time_budget_minutes": 3,
-      "ask": "Check the planned screen change against the design system and the approved Experience package. Return go, or changes with a reason for each."
     },
     {
       "role": "qa-engineer",

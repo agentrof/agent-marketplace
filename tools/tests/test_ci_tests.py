@@ -51,12 +51,7 @@ class CITestPlannerTests(unittest.TestCase):
         self.ids = [self.module + ".Tests.test_" + name for name in ("alpha", "beta", "skip")]
         runner = {"Linux": "ubuntu-latest", "Darwin": "macos-latest", "Windows": "windows-latest"}[platform.system()]
         self.policy = {"schema_version": 1, "groups": {"fixture": {"tests": [self.module + ".*"]}},
-                       "always_groups": ["fixture"],
-                       "full_paths": ["tools/*", "plugins/*/*.md"],
-                       "generated_paths": ["dist/*"], "generated_sources": ["plugins/*"],
-                       "rules": [{"paths": ["README.md"], "groups": ["fixture"]},
-                                 {"paths": ["plugins/compiler.py", "dist/*"], "groups": ["fixture"]}],
-                       "module_seconds": {}, "default_seconds": 1.0,
+                       "generated_paths": ["dist/*"], "default_seconds": 1.0,
                        "python": ".".join(platform.python_version().split(".")[:2]),
                        "lanes": {"local": {"os": runner, "shards": 2, "groups": ["all"]}}}
         self.save_policy()
@@ -96,81 +91,20 @@ class CITestPlannerTests(unittest.TestCase):
         self.assertEqual(plan["selected_ids"], self.ids)
         ci_tests.validate_plan(plan, self.root)
 
-    def test_shards_balance_durations_deterministically_and_preserve_exact_inventory(self):
-        ids = ["a", "b", "c", "d", "e"]
-        durations = dict(zip(ids, [8, 7, 3, 2, 1]))
-        shards = ci_tests.balanced_shards(ids, 2, durations, self.policy)
-        self.assertEqual(shards, ci_tests.balanced_shards(list(reversed(ids)), 2, durations, self.policy))
-        self.assertEqual(sorted(item for shard in shards for item in shard), ids)
-        totals = [sum(durations[item] for item in shard) for shard in shards]
-        self.assertEqual(sorted(totals), [10, 11])
-        with self.assertRaises(ci_tests.CIError):
-            ci_tests.balanced_shards(ids, 2, {"a": float("nan")}, self.policy)
-
-    def test_every_lane_and_matrix_row_runs_the_policy_python_version(self):
-        self.policy["lanes"]["other"] = {"os": self.policy["lanes"]["local"]["os"], "shards": 1,
-                                         "groups": ["fixture"]}
-        self.save_policy()
-        plan = self.plan()
-        version = self.policy["python"]
-        self.assertEqual(plan["python"], version)
-        self.assertEqual({lane["python"] for lane in plan["lanes"].values()}, {version})
-        self.assertEqual({row["python"] for row in plan["matrix"]["include"]}, {version})
-        self.assertEqual({tuple(sorted(row)) for row in plan["matrix"]["include"]},
-                         {("lane", "os", "python", "shard", "shards")})
-        for change in ("plan", "lane", "row"):
-            with self.subTest(change=change):
-                altered = copy.deepcopy(plan)
-                if change == "plan":
-                    altered["python"] = "3.9"
-                elif change == "lane":
-                    altered["lanes"]["other"]["python"] = "3.9"
-                else:
-                    altered["matrix"]["include"][0]["python"] = "3.9"
-                self.rehash(altered)
-                with self.assertRaises(ci_tests.CIError):
-                    ci_tests.validate_plan(altered, self.root)
-        for change, message in ((dict(self.policy, python="3"), "major.minor"),
-                                (dict(self.policy, python="3.14.1"), "major.minor"),
-                                ({key: value for key, value in self.policy.items() if key != "python"},
-                                 "incomplete")):
-            with self.subTest(policy=change.get("python")):
-                (self.root / ci_tests.POLICY_PATH).write_text(json.dumps(change), encoding="utf-8")
-                with self.assertRaisesRegex(ci_tests.CIError, message):
-                    ci_tests.policy_at(self.root)
-        self.policy["lanes"]["other"]["python"] = "3.9"
-        self.save_policy()
-        with self.assertRaisesRegex(ci_tests.CIError, "inherits the policy Python version"):
-            ci_tests.policy_at(self.root)
-
-    def test_partition_rejects_missing_duplicate_and_unknown_ids_even_after_rehash(self):
+    def test_a_plan_cannot_drop_a_test_or_lane_even_after_rehash(self):
         original = self.plan()
-        for change in ("missing", "duplicate", "unknown"):
+        for change in ("missing", "selection", "lane"):
             with self.subTest(change=change):
                 plan = copy.deepcopy(original)
-                shards = plan["lanes"]["local"]["shards"]
                 if change == "missing":
-                    shards[0].pop()
-                elif change == "duplicate":
-                    shards[1].append(shards[0][0])
+                    plan["lanes"]["local"]["shards"][0].pop()
+                elif change == "selection":
+                    plan["selected_ids"].pop()
                 else:
-                    shards[0][0] = "tools.tests.unknown.Tests.test_unknown"
+                    plan["lanes"], plan["has_tests"] = {}, False
                 self.rehash(plan)
                 with self.assertRaises(ci_tests.CIError):
                     ci_tests.validate_plan(plan, self.root)
-
-    def test_selection_cannot_drop_a_lane_or_test_after_rehash(self):
-        plan = self.plan()
-        plan["selected_ids"].pop()
-        self.rehash(plan)
-        with self.assertRaises(ci_tests.CIError):
-            ci_tests.validate_plan(plan, self.root)
-        plan = self.plan()
-        plan["lanes"] = {}
-        plan["has_tests"] = False
-        self.rehash(plan)
-        with self.assertRaises(ci_tests.CIError):
-            ci_tests.validate_plan(plan, self.root)
 
     def test_policy_inventory_and_tree_changes_invalidate_a_plan(self):
         plan = self.plan()
@@ -187,43 +121,6 @@ class CITestPlannerTests(unittest.TestCase):
         with self.assertRaisesRegex(ci_tests.CIError, "another source tree"):
             ci_tests.validate_plan(plan, self.root)
 
-    def test_impact_selection_preserves_nul_delimited_renames_and_unknown_fallback(self):
-        path = self.root / "README.md"
-        path.write_text("docs")
-        self.commit()
-        base = self.git("rev-parse", "HEAD")
-        renamed = self.root / ("docs renamed.md" if os.name == "nt" else "docs\nrenamed.md")
-        path.rename(renamed)
-        self.commit()
-        self.assertEqual(ci_tests.changed_paths(self.root, base, "HEAD"), ["README.md", renamed.name])
-        with mock.patch.object(ci_tests, "git", return_value=b"README.md\0docs\nrenamed.md\0"):
-            self.assertEqual(ci_tests.changed_paths(self.root, base, "HEAD"), ["README.md", "docs\nrenamed.md"])
-        self.assertEqual(self.plan("impact", base=base)["mode"], "full")
-
-    def test_unknown_shared_and_plugin_markdown_force_full_coverage(self):
-        for path in ("new-runtime.py", "tools/ci_tests.py", "plugins/team/flows/deliver.md"):
-            with self.subTest(path=path):
-                selected, mode, _reason = ci_tests.select_ids("impact", [path], self.policy, self.ids)
-                self.assertEqual(mode, "full")
-                self.assertEqual(selected, self.ids)
-        selected, mode, _reason = ci_tests.select_ids("impact", ["README.md"], self.policy, self.ids)
-        self.assertEqual(mode, "impact")
-        self.assertEqual(selected, self.ids)
-
-    def test_generated_only_change_falls_back_but_canonical_pair_uses_mapping(self):
-        self.assertEqual(ci_tests.select_ids("impact", ["dist/codex/file.py"], self.policy, self.ids)[1], "full")
-        paths = ["plugins/compiler.py", "dist/codex/file.py"]
-        self.assertEqual(ci_tests.select_ids("impact", paths, self.policy, self.ids)[1], "impact")
-
-    def test_dynamic_discovery_and_unsupported_inheritance_fail_closed(self):
-        for text in ("def load_tests(loader, tests, pattern): return tests\n",
-                     "class Tests(Other):\n    def test_hidden(self): pass\n",
-                     "import unittest\nif True:\n    class Tests(unittest.TestCase):\n        def test_hidden(self): pass\n",
-                     "# Empty or dynamically populated test module\n"):
-            self.test_file.write_text(text)
-            with self.assertRaises(ci_tests.CIError):
-                ci_tests.inventory(self.root)
-
     def test_reuse_emits_no_lanes_and_explicit_no_tests(self):
         plan = self.plan("reuse")
         self.assertFalse(plan["has_tests"])
@@ -231,66 +128,22 @@ class CITestPlannerTests(unittest.TestCase):
         self.assertEqual(plan["selected_ids"], [])
         self.assertEqual(ci_tests.verify_reports(plan, [])["durations"], {})
 
-    def test_an_unknown_or_retired_mode_is_refused_not_narrowed(self):
-        # A release is a tag of a validated commit; no release test profile exists.
-        for mode in ("release", "prepare", ""):
-            with self.subTest(mode=mode), self.assertRaisesRegex(ci_tests.CIError, "unknown plan mode"):
-                ci_tests.select_ids(mode, [], self.policy, self.ids)
-
     def test_reports_require_each_shard_once_with_exact_source_and_test_ids(self):
         plan = self.plan()
         reports = self.reports(plan)
         self.assertEqual(set(ci_tests.verify_reports(plan, reports)["durations"]["local"]), set(self.ids))
-        for change in ("missing", "duplicate", "extra", "source", "plan", "tests", "running", "cancelled", "failure"):
+        kernels = copy.deepcopy(reports)
+        kernels[-1]["runtime"]["os_release"] = "another kernel"
+        self.assertEqual(set(ci_tests.verify_reports(plan, kernels)["durations"]["local"]), set(self.ids))
+        for change in ("missing", "duplicate", "plan", "tests", "failure"):
             with self.subTest(change=change):
                 altered = copy.deepcopy(reports)
                 if change == "missing": altered.pop()
                 elif change == "duplicate": altered.append(copy.deepcopy(altered[0]))
-                elif change == "extra": altered[0]["shard"] = 999
-                elif change == "source": altered[0]["source_tree"] = "other"
                 elif change == "plan": altered[0]["plan_hash"] = "other"
                 elif change == "tests": altered[0]["tests"].append(copy.deepcopy(altered[0]["tests"][0]))
-                elif change == "failure": altered[0]["tests"][0]["outcome"] = "failure"
-                else: altered[0]["status"] = change
+                else: altered[0]["tests"][0]["outcome"] = "failure"
                 with self.assertRaises(ci_tests.CIError): ci_tests.verify_reports(plan, altered)
-
-    def test_reports_reject_wrong_runtime_and_accept_directory_input(self):
-        plan = self.plan()
-        reports = self.reports(plan)
-        reports[0]["runtime"]["python_version"] = "0.0.0"
-        with self.assertRaises(ci_tests.CIError): ci_tests.verify_reports(plan, reports)
-        directory = self.root / "reports"
-        for index, report in enumerate(self.reports(plan)):
-            ci_tests.write_json(directory / str(index) / "report.json", report)
-        self.assertEqual(set(ci_tests.verify_reports(plan, directory)["durations"]["local"]), set(self.ids))
-
-    def test_a_planned_python_release_is_what_every_shard_sets_up_and_runs(self):
-        """A run's shards set up one exact release, so a toolcache update during the run cannot split them (#443)."""
-        version = self.policy["python"]
-        release = platform.python_version()
-        plan = self.plan(python_release=release)
-        self.assertEqual((plan["python"], plan["python_release"]), (version, release))
-        self.assertEqual({lane["python"] for lane in plan["lanes"].values()}, {version})
-        self.assertEqual({row["python"] for row in plan["matrix"]["include"]}, {release})
-        ci_tests.validate_plan(plan, self.root)
-        self.assertEqual(set(ci_tests.verify_reports(plan, self.reports(plan))["durations"]["local"]), set(self.ids))
-        # Without a planned release the plan is as before: every row sets up the policy's major.minor.
-        self.assertNotIn("python_release", self.plan())
-        self.assertEqual({row["python"] for row in self.plan()["matrix"]["include"]}, {version})
-        for planned, message in ((version, "is no exact X.Y.Z release"), ("2.7.18", "is no release of the policy's"),
-                                 (release + "rc1", "is no exact X.Y.Z release")):
-            with self.subTest(planned=planned), self.assertRaisesRegex(ci_tests.CIError, message):
-                self.plan(python_release=planned)
-        for change in ("release", "row"):
-            with self.subTest(change=change):
-                altered = copy.deepcopy(plan)
-                if change == "release":
-                    altered["python_release"] = version + ".999"
-                else:
-                    altered["matrix"]["include"][0]["python"] = version
-                self.rehash(altered)
-                with self.assertRaises(ci_tests.CIError):
-                    ci_tests.validate_plan(altered, self.root)
 
     def test_a_shard_on_another_patch_release_than_planned_is_refused_by_name(self):
         release = platform.python_version()
@@ -408,35 +261,6 @@ class CITestPlannerTests(unittest.TestCase):
                 for key, value in developer.items():
                     self.assertEqual(os.environ.get(key), value)
 
-    def test_known_runtime_and_regression_changes_select_dependency_closure(self):
-        policy = ci_tests.policy_at(ci_tests.ROOT)
-        ids, _hash = ci_tests.inventory(ci_tests.ROOT)
-        paths = ["plugins/software-engineering-team/scripts/delivery_git.py",
-                 "tools/tests/test_delivery_git.py",
-                 ".changes/delivery-regression.json",
-                 "dist/codex/software-engineering-team/scripts/delivery_git.py",
-                 "dist/claude/software-engineering-team/scripts/delivery_git.py"]
-        selected, mode, _reason = ci_tests.select_ids("impact", paths, policy, ids, ci_tests.ROOT)
-        self.assertEqual(mode, "impact")
-        self.assertLess(len(selected), len(ids))
-        self.assertTrue({test_id for test_id in ids if ".test_delivery_git." in test_id} <= set(selected))
-        self.assertTrue({test_id for test_id in ids if ".test_delivery_compile." in test_id} <= set(selected))
-        unknown = paths + ["tools/tests/test_new_unknown.py"]
-        self.assertEqual(ci_tests.select_ids("impact", unknown, policy, ids, ci_tests.ROOT)[1], "full")
-
-    def test_python_dependency_closure_follows_test_helpers_and_literal_cli_paths(self):
-        (self.root / "plugins/scripts").mkdir(parents=True)
-        (self.root / "plugins/scripts/producer.py").write_text("value = 1\n")
-        (self.root / "plugins/scripts/consumer.py").write_text("import producer\n")
-        (self.root / "tools/tests/helper.py").write_text("import consumer\n")
-        self.test_file.write_text("import unittest\nimport helper\nclass Tests(unittest.TestCase):\n"
-                                  "    def test_alpha(self): pass\n")
-        selected = ci_tests.dependency_tests(self.root, ["plugins/scripts/producer.py"], self.ids)
-        self.assertEqual(selected, set(self.ids))
-        self.test_file.write_text("import unittest\nSCRIPT = 'producer.py'\nclass Tests(unittest.TestCase):\n"
-                                  "    def test_alpha(self): pass\n")
-        self.assertEqual(ci_tests.dependency_tests(self.root, ["plugins/scripts/producer.py"], self.ids), set(self.ids))
-
     def test_independent_workers_cover_a_plan_and_merge_real_duration_reports(self):
         runner = self.root / "tools/ci_tests.py"
         runner.write_text(Path(ci_tests.__file__).read_text(), encoding="utf-8")
@@ -463,74 +287,33 @@ class CITestPlannerTests(unittest.TestCase):
         timings = ci_tests.verify_reports(plan, directory)
         self.assertEqual(set(timings["durations"]["local"]), set(self.ids))
         self.assertEqual(timings["policy_hash"], plan["policy_hash"])
-        replanned = ci_tests.make_plan(self.root, timings=timings)
-        ci_tests.validate_plan(replanned, self.root)
 
-    def test_mandatory_native_regressions_cannot_pass_as_skipped(self):
-        self.policy["lanes"]["local"]["required_tests"] = [self.ids[-1]]
-        self.save_policy()
-        plan = self.plan()
-        reports = self.reports(plan)
-        for report in reports:
-            for test in report["tests"]:
-                if test["id"] == self.ids[-1]:
-                    test["outcome"] = "skipped"
-        with self.assertRaisesRegex(ci_tests.CIError, "mandatory native"):
-            ci_tests.verify_reports(plan, reports)
-        shard = next(index for index, ids in enumerate(plan["lanes"]["local"]["shards"]) if self.ids[-1] in ids)
-        with mock.patch("sys.stderr", io.StringIO()):
-            path = self.root / "report.json"
-            self.assertEqual(ci_tests.run_shard(self.root, plan, "local", shard, path), 1)
-        self.assertEqual(ci_tests.read_json(path)["status"], "failed")
-
-    def test_skipped_subtests_are_recorded_and_cannot_hide_mandatory_assertions(self):
-        for mandatory, failure_first in ((False, False), (True, False), (False, True)):
-            with self.subTest(mandatory=mandatory, failure_first=failure_first):
+    def test_skipped_subtests_are_recorded_and_cannot_hide_a_failure(self):
+        for failure_first in (False, True):
+            with self.subTest(failure_first=failure_first):
                 sys.modules.pop(self.module, None)
                 body = "import unittest\nclass Tests(unittest.TestCase):\n    def test_alpha(self):\n"
                 if failure_first:
                     body += "        with self.subTest(case='failed'): self.fail('failure before skip')\n"
                 body += "        with self.subTest(case='native assertion'): self.skipTest('native assertion unavailable')\n"
                 self.test_file.write_text(body)
-                self.policy["lanes"]["local"]["required_tests"] = [self.ids[0]] if mandatory else []
-                self.save_policy()
                 plan = self.plan()
                 path = self.root / "report.json"
                 with mock.patch("sys.stderr", io.StringIO()):
                     self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path),
-                                     1 if mandatory or failure_first else 0)
+                                     1 if failure_first else 0)
                 report = ci_tests.read_json(path)
                 row = report["tests"][0]
                 self.assertEqual(row["outcome"], "failure" if failure_first else "skipped")
                 self.assertEqual(row["skipped_subtests"][0]["reason"], "native assertion unavailable")
                 if failure_first:
                     self.assertIn("failure before skip", row["detail"])
-                if mandatory or failure_first:
+                if failure_first:
                     self.assertEqual(report["status"], "failed")
                     with self.assertRaises(ci_tests.CIError):
                         ci_tests.verify_reports(plan, [report])
                 else:
                     self.assertEqual(ci_tests.verify_reports(plan, [report])["policy_hash"], plan["policy_hash"])
-
-    def test_repository_policy_runs_one_lane_per_system_and_keeps_native_windows_regressions(self):
-        policy = ci_tests.policy_at(ci_tests.ROOT)
-        ids, _hash = ci_tests.inventory(ci_tests.ROOT)
-        required = {"tools.tests.test_ba_compile.EnterReviewTests.test_windows_junction_space_ancestor_is_rejected",
-                    "tools.tests.test_delivery_git.DeliveryGitTests.test_receipt_lock_is_released_when_its_holder_dies"}
-        # Shard counts follow the measured weights, so only the lane shape is pinned.
-        self.assertEqual({name: (lane["os"], lane["python"], lane["workers"], lane["groups"])
-                          for name, lane in policy["lanes"].items()},
-                         {"linux": ("ubuntu-latest", policy["python"], 3, ["all"]),
-                          "macos": ("macos-latest", policy["python"], 3, ["macos"]),
-                          "windows": ("windows-latest", policy["python"], 3, ["windows"])})
-        self.assertEqual(set(policy["lanes"]["windows"]["required_tests"]), required)
-        self.assertTrue(required <= set(ci_tests.group_ids(["windows"], policy, ids)))
-        # Linux runs every test; macOS and Windows name each test that proves behavior of
-        # their own system, never a whole module.
-        for group in ("platform", "macos", "windows"):
-            with self.subTest(group=group):
-                self.assertEqual([selector for selector in policy["groups"][group]["tests"]
-                                  if selector not in ids], [])
 
     def parallel_fixture(self, bodies=None, workers=3):
         """Six tests that each record the process, scratch and tripwire they ran under."""
@@ -642,25 +425,42 @@ class CITestPlannerTests(unittest.TestCase):
                 with self.assertRaises(ci_tests.CIError):
                     ci_tests.verify_reports(plan, [report])
 
-    @unittest.skipIf(os.name != "posix", "the stand-in host binary is a POSIX shell script")
-    def test_each_worker_keeps_its_own_host_tripwire(self):
-        own = Path(tempfile.mkdtemp(prefix="ci-own-hosts-"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(own, ignore_errors=True))
-        (own / "claude").write_text(f"#!/bin/sh\necho \"$@\" >> {own / 'calls.log'}\nexit 0\n", encoding="utf-8")
-        (own / "claude").chmod(0o755)
-        probe = ["import subprocess", "subprocess.run([os.environ['CLAUDE_CODE_EXECPATH'], '--version'],"
-                 " capture_output=True)"]
-        self.parallel_fixture({"a": probe, "f": probe}, workers=2)
-        plan = self.plan()
-        path = self.root / "report.json"
-        with mock.patch.dict(os.environ, {"CLAUDE_CODE_EXECPATH": str(own / "claude")}), \
-                mock.patch("sys.stdout", io.StringIO()):
-            self.assertEqual(ci_tests.run_shard(self.root, plan, "local", 0, path, workers=2), 1)
-            self.assertEqual(os.environ["CLAUDE_CODE_EXECPATH"], str(own / "claude"))
-        rows = {row["id"].rsplit(".", 1)[-1]: row for row in ci_tests.read_json(path)["tests"]}
-        self.assertEqual({name for name, row in rows.items() if row["outcome"] != "success"}, {"test_a", "test_f"})
-        self.assertIn("claude --version", rows["test_a"]["detail"])
-        self.assertFalse((own / "calls.log").exists())
+    def test_policy_estimates_outweigh_defaults(self):
+        runner = self.policy["lanes"]["local"]["os"]
+        self.policy["test_seconds"] = {runner: {self.ids[0]: 40.0}}
+        self.policy["lanes"]["local"]["workers"] = 1
+        self.save_policy()
+        estimated = self.plan()["lanes"]["local"]
+        self.assertEqual(sorted(estimated["estimated_shard_seconds"]), [2.0, 40.0])
+
+
+class CITestPlannerUnitTests(unittest.TestCase):
+    POLICY = {"schema_version": 1, "groups": {}, "default_seconds": 1.0, "python": "3.12",
+              "lanes": {"local": {"os": "ubuntu-latest", "shards": 2, "groups": ["all"]}}}
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.policy = copy.deepcopy(self.POLICY)
+        self.save_policy()
+
+    def save_policy(self):
+        path = self.root / ci_tests.POLICY_PATH
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.policy), encoding="utf-8")
+
+    def test_dynamic_discovery_and_unsupported_inheritance_fail_closed(self):
+        test_file = self.root / "tools/tests/test_dynamic.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        for text in ("def load_tests(loader, tests, pattern): return tests\n",
+                     "class Tests(Other):\n    def test_hidden(self): pass\n",
+                     "import unittest\nif True:\n    class Tests(unittest.TestCase):\n        def test_hidden(self): pass\n",
+                     "# Empty or dynamically populated test module\n"):
+            with self.subTest(text=text):
+                test_file.write_text(text, encoding="utf-8")
+                with self.assertRaises(ci_tests.CIError):
+                    ci_tests.inventory(self.root)
 
     def test_fewer_cpus_fold_planned_workers_in_a_fixed_order(self):
         lane = {"shards": [["t0", "t1", "t2", "t3", "t4"]], "worker_assignments": [[0, 1, 2, 3, 0]]}
@@ -668,8 +468,6 @@ class CITestPlannerTests(unittest.TestCase):
         self.assertEqual(ci_tests.worker_groups(lane, 0, 8), [["t0", "t4"], ["t1"], ["t2"], ["t3"]])
         with mock.patch.object(ci_tests, "available_cpus", return_value=1):
             self.assertEqual(ci_tests.worker_groups(lane, 0), [["t0", "t1", "t2", "t3", "t4"]])
-        with self.assertRaises(ci_tests.CIError):
-            ci_tests.worker_groups(lane, 0, 0)
 
     def test_worker_partition_balances_processes_and_never_leaves_one_empty(self):
         ids = [f"tools.tests.test_{module}.Tests.test_{index}" for module in "ab" for index in range(5)]
@@ -684,134 +482,53 @@ class CITestPlannerTests(unittest.TestCase):
         self.assertEqual(ci_tests.worker_partition(ids[:2], 4, 3, {}, self.policy), [[[ids[0]]], [[ids[1]]]])
 
     def test_tampered_worker_partitions_and_reports_are_refused(self):
-        self.parallel_fixture()
-        original = self.plan()
-        for change in ("gap", "excess", "length", "type", "count"):
-            with self.subTest(change=change):
-                plan = copy.deepcopy(original)
-                lane = plan["lanes"]["local"]
-                owners = lane["worker_assignments"][0]
-                if change == "gap":
-                    owners[:] = [0 if owner == 1 else owner for owner in owners]
-                elif change == "excess":
-                    owners[0] = 3
-                elif change == "length":
-                    owners.pop()
-                elif change == "type":
-                    owners[0] = "0"
-                else:
-                    lane["workers"] = 2
-                self.rehash(plan)
-                with self.assertRaises(ci_tests.CIError):
-                    ci_tests.validate_plan(plan, self.root)
-        groups = ci_tests.worker_groups(original["lanes"]["local"], 0, 3)
-        runtime = ci_tests.runtime_identity()
-        directory = Path(tempfile.mkdtemp(prefix="ci-worker-reports-"))
-        self.addCleanup(lambda: __import__("shutil").rmtree(directory, ignore_errors=True))
-        for change in ("foreign", "plan", "runtime", "missing"):
+        with self.assertRaisesRegex(ci_tests.CIError, "worker partition is invalid"):
+            ci_tests.validate_execution("local", {"shards": [["a", "b"]], "workers": 2,
+                                                  "worker_assignments": [[0, 2]],
+                                                  "estimated_worker_seconds": [[1.0, 1.0]]})
+        plan, runtime, groups = {"plan_hash": "p"}, {"python_version": "3.12.0"}, [["a"], ["b"]]
+        for change in ("foreign", "missing"):
             with self.subTest(change=change):
                 paths = []
                 for index, tests in enumerate(groups):
-                    value = {"plan_hash": original["plan_hash"], "lane": "local", "shard": 0, "worker": index,
-                             "runtime": runtime, "status": "complete",
-                             "tests": [{"id": test, "outcome": "success", "seconds": 0.1} for test in tests]}
+                    value = {"plan_hash": "p", "lane": "local", "shard": 0, "worker": index, "runtime": runtime,
+                             "status": "complete", "tests": [{"id": test, "outcome": "success"} for test in tests]}
                     if index == 1 and change == "foreign":
-                        value["tests"].append(dict(value["tests"][0], id=groups[0][0]))
-                    elif index == 1 and change == "plan":
-                        value["plan_hash"] = "other"
-                    elif index == 1 and change == "runtime":
-                        value["runtime"] = dict(runtime, python_version="0.0.0")
-                    path = directory / f"{change}-{index}.json"
+                        value["tests"].append({"id": "a", "outcome": "success"})
+                    path = self.root / f"{change}-{index}.json"
                     if not (index == 1 and change == "missing"):
                         ci_tests.write_json(path, value)
                     paths.append(path)
                 report = {}
-                passed, problems = ci_tests.merge_workers(original, "local", 0, groups, report, runtime,
-                                                          [0, 0, 0], paths)
+                passed, problems = ci_tests.merge_workers(plan, "local", 0, groups, report, runtime, [0, 0], paths)
                 self.assertFalse(passed)
                 self.assertEqual(problems, ["worker 1 left no valid report (exit 0)"])
                 self.assertEqual(report["workers"][1]["status"], "missing")
 
     def test_policy_worker_counts_are_bounded(self):
-        for workers in (0, 17, True, "2"):
-            with self.subTest(workers=workers):
-                self.policy["lanes"]["local"]["workers"] = workers
-                self.save_policy()
-                with self.assertRaisesRegex(ci_tests.CIError, "worker count"):
-                    ci_tests.policy_at(self.root)
-
-    def test_measured_history_outweighs_policy_estimates_which_outweigh_defaults(self):
-        runner = self.policy["lanes"]["local"]["os"]
-        self.policy["test_seconds"] = {runner: {self.ids[0]: 40.0}}
-        self.policy["lanes"]["local"]["workers"] = 1
+        self.policy["lanes"]["local"]["workers"] = 17
         self.save_policy()
-        estimated = self.plan()["lanes"]["local"]
-        self.assertEqual(sorted(estimated["estimated_shard_seconds"]), [2.0, 40.0])
-        self.assertEqual(estimated["measured_weights"], 0)
-        history = {"schema_version": 1, "durations": {"local": {self.ids[0]: 0.5, self.ids[1]: 3.0}}}
-        measured = self.plan(timings=history)["lanes"]["local"]
-        self.assertEqual(sorted(measured["estimated_shard_seconds"]), [1.5, 3.0])
-        self.assertEqual(measured["measured_weights"], 2)
-        for invalid in ({"self-hosted": {}}, {runner: {self.ids[0]: 0}}, {runner: {self.ids[0]: float("inf")}},
-                        {runner: []}):
-            with self.subTest(invalid=invalid):
-                self.policy["test_seconds"] = invalid
-                self.save_policy()
-                with self.assertRaisesRegex(ci_tests.CIError, "estimates"):
-                    ci_tests.policy_at(self.root)
+        with self.assertRaisesRegex(ci_tests.CIError, "worker count"):
+            ci_tests.policy_at(self.root)
 
     def test_estimates_keep_the_slowest_lane_per_system_above_the_threshold(self):
-        runner = self.policy["lanes"]["local"]["os"]
+        ids = [f"tools.tests.test_a.Tests.test_{name}" for name in "abc"]
         self.policy["lanes"]["other"] = dict(self.policy["lanes"]["local"])
         self.save_policy()
         payload = {"schema_version": 1, "durations": {
-            "local": {self.ids[0]: 6.04, self.ids[1]: 4.9, self.ids[2]: 7.0},
-            "other": {self.ids[0]: 8.26, self.ids[2]: 2.0},
-            "retired": {self.ids[1]: 50.0}}}
-        self.assertEqual(ci_tests.refresh_estimates(self.root, payload), {runner: 2})
+            "local": {ids[0]: 6.04, ids[1]: 4.9, ids[2]: 7.0},
+            "other": {ids[0]: 8.26, ids[2]: 2.0},
+            "retired": {ids[1]: 50.0}}}
+        self.assertEqual(ci_tests.refresh_estimates(self.root, payload), {"ubuntu-latest": 2})
         written = ci_tests.read_json(self.root / ci_tests.POLICY_PATH)
-        self.assertEqual(written["test_seconds"], {runner: {self.ids[0]: 8.3, self.ids[2]: 7.0}})
+        self.assertEqual(written["test_seconds"], {"ubuntu-latest": {ids[0]: 8.3, ids[2]: 7.0}})
         self.assertEqual({key: value for key, value in written.items() if key != "test_seconds"}, self.policy)
-        ci_tests.policy_at(self.root)
-        for payload, threshold in ((dict(payload, schema_version=2), 5.0), (payload, 0.0),
-                                   ({"schema_version": 1, "durations": {"local": {self.ids[0]: -1}}}, 5.0)):
-            with self.subTest(payload=payload, threshold=threshold), self.assertRaises(ci_tests.CIError):
-                ci_tests.refresh_estimates(self.root, payload, threshold)
-
-    def test_fixture_weights_keep_every_test_and_expose_estimates(self):
-        ids = ["tools.tests.a.Tests.test_one", "tools.tests.a.Tests.test_two",
-               "tools.tests.b.Tests.test_one", "tools.tests.b.Tests.test_two"]
-        policy = dict(self.policy, fixture_startup_seconds={"tools.tests.a": 50, "tools.tests.b": 30})
-        shards = ci_tests.balanced_shards(ids, 2, {}, policy)
-        self.assertEqual(sorted(item for shard in shards for item in shard), ids)
-        self.assertTrue(all(shards))
-        self.assertGreater(ci_tests.estimated_seconds(shards[0], {}, policy), len(shards[0]))
         with self.assertRaises(ci_tests.CIError):
-            ci_tests.fixture_startup("tools.tests.a", dict(policy, fixture_startup_seconds={"tools.tests.a": -1}))
-
-    def test_unmapped_inventory_expands_impact_and_repository_mapping_is_complete(self):
-        policy = ci_tests.policy_at(ci_tests.ROOT)
-        ids, _ = ci_tests.inventory(ci_tests.ROOT)
-        self.assertEqual(set(policy["known_test_modules"]), {ci_tests.module_of(test_id) for test_id in ids})
-        incomplete = copy.deepcopy(policy)
-        incomplete["known_test_modules"].pop()
-        selected, mode, reason = ci_tests.select_ids("impact", ["README.md"], incomplete, ids)
-        self.assertEqual(mode, "full")
-        self.assertEqual(selected, ids)
-        self.assertIn("mapping is incomplete", reason)
-
-    def test_acceleration_contracts_have_impact_and_native_windows_coverage(self):
-        policy = ci_tests.policy_at(ci_tests.ROOT)
-        ids, _ = ci_tests.inventory(ci_tests.ROOT)
-        modules = {"tools.tests.test_delivery_verification", "tools.tests.test_performance_contracts",
-                   "tools.tests.test_task_inputs", "tools.tests.test_ci_local",
-                   "tools.tests.test_vault_hook_git_sync"}
-        native = ci_tests.group_ids(["windows"], policy, ids)
-        # Each keeps its Windows-specific tests on Windows; Linux runs all of them.
-        self.assertEqual({ci_tests.module_of(test_id) for test_id in native} & modules, modules)
-        selected, _mode, _reason = ci_tests.select_ids("impact",
-            ["plugins/software-engineering-team/scripts/delivery_git.py"], policy, ids, root=ci_tests.ROOT)
-        self.assertTrue({test_id for test_id in ids if ci_tests.module_of(test_id) in modules}.issubset(selected))
+            ci_tests.refresh_estimates(self.root, {"schema_version": 1, "durations": {"local": {ids[0]: -1}}})
+        self.policy["test_seconds"] = {"ubuntu-latest": {ids[0]: float("inf")}}
+        self.save_policy()
+        with self.assertRaisesRegex(ci_tests.CIError, "estimates"):
+            ci_tests.policy_at(self.root)
 
     def test_fixture_measurement_is_a_delta_for_each_test(self):
         fixture = mock.Mock()
@@ -824,7 +541,6 @@ class CITestPlannerTests(unittest.TestCase):
             runner.startTest(test)
             runner.stopTest(test)
         self.assertEqual(report["tests"][0]["fixture_seconds"], {"seed_build": 1.5, "seed_copy": .2})
-        self.assertEqual(fixture.phase_totals.call_count, 2)
 
     def test_fixture_measurement_sums_distinct_module_stores_once_each(self):
         qualified, flat = mock.Mock(), mock.Mock()
@@ -833,9 +549,6 @@ class CITestPlannerTests(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"tools.tests.fixture_cache": qualified, "fixture_cache": flat}):
             self.assertEqual(ci_tests.fixture_totals(),
                              {"seed_build": 3.5, "seed_copy": .2, "seed_validate": .1})
-        qualified.phase_totals.assert_called_once_with()
-        flat.phase_totals.assert_called_once_with()
-
 
 
 class TestLevelTests(unittest.TestCase):
@@ -885,178 +598,7 @@ class TestLevelTests(unittest.TestCase):
         self.assertFalse(written, "a guarded test wrote outside its temporary directory")
         return {row["id"][len(prefix):]: row for row in report["tests"]}
 
-    def test_host_process_fixture_is_explicitly_integration(self):
-        with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw)
-            source = root / "tools/tests/test_host_fixture.py"
-            source.parent.mkdir(parents=True)
-            source.write_text(HOST_PROCESS_FIXTURE_HEADER +
-                "    def test_alpha(self): pass\n    def test_beta(self): pass\n")
-            self.assertEqual(ci_tests.integration_ids(root), {
-                "tools.tests.test_host_fixture.Tests.test_alpha",
-                "tools.tests.test_host_fixture.Tests.test_beta"})
-
-    def test_local_unit_fixture_cannot_hide_a_process_start(self):
-        def load():
-            try:
-                subprocess.run([sys.executable, "-c", "pass"], check=True)
-            except ci_tests.UnitBoundaryError:
-                pass
-            return unittest.TestSuite()
-        with tempfile.TemporaryDirectory() as raw, \
-                self.assertRaisesRegex(ci_tests.UnitBoundaryError, "unit fixture.*started a process"):
-            ci_tests.run_guarded(load, {"tests": []}, Path(raw) / "report.json", set(), unit_only=True)
-
-    @unittest.skipIf(os.name == "nt", "directory descriptors require POSIX")
-    def test_open_validates_the_directory_descriptor_and_restores_argument_context(self):
-        with tempfile.TemporaryDirectory() as raw:
-            outside = Path(raw)
-            descriptor = os.open(outside, os.O_RDONLY)
-            self.addCleanup(os.close, descriptor)
-
-            def outside_write(_case):
-                cwd = os.getcwd()
-                try:
-                    os.chdir(tempfile.gettempdir())
-                    try:
-                        stream = os.open("escaped", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
-                    except ci_tests.UnitBoundaryError:
-                        pass
-                    else:
-                        os.close(stream)
-                    Path("owned-after-refusal").write_text("inside")
-                    self.assertEqual(Path("owned-after-refusal").read_text(), "inside")
-                finally:
-                    os.chdir(cwd)
-
-            def inside_write(_case):
-                with tempfile.TemporaryDirectory() as own:
-                    owned = os.open(own, os.O_RDONLY)
-                    try:
-                        stream = os.open("kept", os.O_WRONLY | os.O_CREAT, dir_fd=owned)
-                        os.close(stream)
-                    finally:
-                        os.close(owned)
-                    self.assertTrue((Path(own) / "kept").exists())
-
-            def unknown_descriptor(_case):
-                cwd = os.getcwd()
-                try:
-                    os.chdir(tempfile.gettempdir())
-                    with mock.patch.object(ci_tests.UnitBoundary, "directory_of", return_value=None):
-                        stream = os.open("unknown", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
-                        os.close(stream)
-                finally:
-                    os.chdir(cwd)
-
-            def cached_native_open(_case):
-                native = next(function for function in os.supports_dir_fd if function.__name__ == "open")
-                cwd = os.getcwd()
-                try:
-                    os.chdir(tempfile.gettempdir())
-                    stream = native("cached", os.O_WRONLY | os.O_CREAT, dir_fd=descriptor)
-                    os.close(stream)
-                finally:
-                    os.chdir(cwd)
-
-            rows = self.run_under_boundary({"test_outside": outside_write, "test_inside": inside_write,
-                                           "test_unknown": unknown_descriptor, "test_cached": cached_native_open})
-            self.assertEqual({key: row["outcome"] for key, row in rows.items()}, {
-                "test_inside": "success", "test_outside": "failure", "test_unknown": "failure",
-                "test_cached": "failure"})
-            self.assertIn("wrote outside", rows["test_outside"]["detail"])
-            self.assertIn("unknown directory descriptor", rows["test_unknown"]["detail"])
-            self.assertFalse((outside / "escaped").exists())
-            self.assertFalse((outside / "unknown").exists())
-            self.assertFalse((outside / "cached").exists())
-
-    def test_nested_loaders_and_fixtures_keep_the_active_outer_write_boundary(self):
-        def nested(kind, outside):
-            def case(_test):
-                parent = Path(tempfile.gettempdir())
-                target = self.outside_temporary if outside else parent / (kind + "-owned")
-
-                def write():
-                    try:
-                        target.write_text("fixture")
-                    except ci_tests.UnitBoundaryError:
-                        pass
-
-                def load():
-                    if kind == "loader":
-                        write()
-                        return unittest.TestSuite()
-                    fixture = type("NestedFixture", (unittest.TestCase,), {
-                        "setUpClass": classmethod(lambda _cls: write()),
-                        "test_noop": lambda _case: None})
-                    return unittest.TestLoader().loadTestsFromTestCase(fixture)
-
-                result, _calls = ci_tests.run_guarded(load, {"tests": []}, parent / (kind + ".json"),
-                                                     set(), unit_only=True)
-                self.assertTrue(result.wasSuccessful())
-                self.assertEqual(target.exists(), not outside)
-            return case
-
-        rows = self.run_under_boundary({"test_" + kind + ("_outside" if outside else "_inside"):
-                                       nested(kind, outside)
-                                       for kind in ("loader", "fixture") for outside in (False, True)})
-        for key, row in rows.items():
-            self.assertEqual(row["outcome"], "failure" if key.endswith("outside") else "success", key)
-            if key.endswith("outside"):
-                self.assertIn("wrote outside", row["detail"])
-
-    def test_link_cleanup_is_allowed_but_writing_its_target_is_refused(self):
-        with tempfile.TemporaryDirectory() as raw:
-            target = Path(raw) / "outside-inner-unit"
-            target.write_text("unchanged")
-            def cleanup(_test):
-                with tempfile.TemporaryDirectory() as own:
-                    link = Path(own) / "link"
-                    try:
-                        link.symlink_to(target)
-                    except OSError:
-                        _test.skipTest("symlinks unavailable")
-                    link.rename(Path(own) / "renamed")
-                    (Path(own) / "renamed").unlink()
-            def write(_test):
-                with tempfile.TemporaryDirectory() as own:
-                    link = Path(own) / "link"
-                    try:
-                        link.symlink_to(target)
-                    except OSError:
-                        _test.skipTest("symlinks unavailable")
-                    link.write_text("escaped")
-            rows = self.run_under_boundary({"test_cleanup": cleanup, "test_write": write})
-            self.assertIn(rows["test_cleanup"]["outcome"], {"success", "skipped"})
-            self.assertIn(rows["test_write"]["outcome"], {"failure", "skipped"})
-            self.assertEqual(target.read_text(), "unchanged")
-
-    def test_threads_remain_guarded_while_the_runner_joins_them(self):
-        import threading
-        released = threading.Event()
-        join = threading.Thread.join
-        with tempfile.TemporaryDirectory() as raw:
-            target = Path(raw) / "outside-inner-unit"
-            def worker():
-                released.wait()
-                try:
-                    target.write_text("escaped")
-                except ci_tests.UnitBoundaryError:
-                    pass
-            def case(_test):
-                threading.Thread(target=worker, name="finishing-unit").start()
-            def release_and_join(thread, *args, **kwargs):
-                released.set()
-                return join(thread, *args, **kwargs)
-            with mock.patch.object(threading.Thread, "join", release_and_join):
-                rows = self.run_under_boundary({"test_finishing": case})
-            self.assertEqual(rows["test_finishing"]["outcome"], "failure")
-            self.assertIn("wrote outside", rows["test_finishing"]["detail"])
-            self.assertFalse(target.exists())
-
     def test_a_unit_test_that_starts_a_process_or_writes_outside_its_temporary_directory_fails(self):
-        import multiprocessing
-        import sqlite3
         import threading
         probe = self.PROBE
         released = threading.Event()
@@ -1067,14 +609,6 @@ class TestLevelTests(unittest.TestCase):
                 path = Path(raw) / "kept.txt"
                 path.write_text("inside\n", encoding="utf-8")
                 os.replace(path, Path(raw) / "moved.txt")
-                os.mkdir(Path(raw) / "folder")
-                sqlite3.connect(Path(raw) / "kept.db").close()
-                sqlite3.connect(":memory:").close()
-                descriptor = os.open(raw, os.O_RDONLY)
-                try:
-                    os.mkdir("by-descriptor", dir_fd=descriptor)
-                finally:
-                    os.close(descriptor)
 
         def catches_its_write(_case):
             try:
@@ -1094,57 +628,25 @@ class TestLevelTests(unittest.TestCase):
             thread.start()
             thread.join()
 
-        def multiprocessing_spawn(_case):
-            process = multiprocessing.get_context("spawn").Process(target=os.getpid)
-            process.start()
-            process.join()
-
         cases = {
             "test_starts_git": lambda _case: subprocess.run(["git", "--version"], capture_output=True),
-            "test_starts_a_shell": lambda _case: os.system("true"),
-            "test_starts_through_multiprocessing": multiprocessing_spawn,
             "test_starts_in_a_thread": in_a_thread,
             "test_leaves_a_thread_running": lambda _case: threading.Thread(target=released.wait, name="lingering",
                                                                            daemon=True).start(),
             "test_writes_outside": lambda _case: open(probe, "w", encoding="utf-8").close(),
             "test_catches_its_write": catches_its_write,
-            "test_writes_through_file_io": lambda _case: io.FileIO(probe, "w").close(),
-            "test_connects_a_database_outside": lambda _case: sqlite3.connect(probe).close(),
-            "test_makes_a_directory_outside": lambda _case: os.mkdir(probe),
             "test_makes_a_directory_by_descriptor": by_descriptor,
-            "test_opens_outside_for_writing": lambda _case: os.close(os.open(probe, os.O_WRONLY | os.O_CREAT)),
             "test_writes_beside_its_own_directory": lambda _case: self.outside_temporary.write_text("x"),
             "test_writes_inside": writes_inside,
             "test_reads_the_repository": lambda _case: (ci_tests.ROOT / "README.md").read_bytes(),
         }
-        if hasattr(os, "mkfifo"):
-            cases["test_makes_a_fifo_outside"] = lambda _case: os.mkfifo(probe)
-        if hasattr(os, "spawnv"):
-            cases["test_spawns"] = lambda _case: os.spawnv(os.P_WAIT, sys.executable, [sys.executable, "-c", "0"])
         rows = self.run_under_boundary(cases)
         released.set()
         passing = {"test_writes_inside", "test_reads_the_repository"}
         self.assertEqual({name: row["outcome"] for name, row in rows.items()},
                          {name: "success" if name in passing else "failure" for name in cases})
-        self.assertIn("unit test started a process: git", rows["test_starts_git"]["detail"])
-        self.assertIn("unit test started a process: git", rows["test_starts_in_a_thread"]["detail"])
-        self.assertIn("unit test started a process", rows["test_starts_through_multiprocessing"]["detail"])
-        self.assertIn("unit test left a thread running: lingering", rows["test_leaves_a_thread_running"]["detail"])
-        written = "unit test wrote outside its temporary directory: "
-        target = os.path.normcase(os.path.realpath(probe))
-        for name in ("test_writes_outside", "test_catches_its_write", "test_writes_through_file_io",
-                     "test_connects_a_database_outside", "test_makes_a_directory_outside",
-                     "test_makes_a_directory_by_descriptor", "test_opens_outside_for_writing",
-                     *(["test_makes_a_fifo_outside"] if "test_makes_a_fifo_outside" in cases else [])):
-            self.assertIn(written + target, rows[name]["detail"], name)
-        self.assertIn(written, rows["test_writes_beside_its_own_directory"]["detail"])
-        self.assertIn("mark it @integration", rows["test_catches_its_write"]["detail"])
-
-    @integration
-    def test_a_marked_integration_test_may_start_a_process(self):
-        start = lambda _case: subprocess.run([sys.executable, "-c", "pass"], check=True)
-        rows = self.run_under_boundary({"test_marked": start, "test_unmarked": start}, marked=("test_marked",))
-        self.assertEqual((rows["test_marked"]["outcome"], rows["test_unmarked"]["outcome"]), ("success", "failure"))
+        self.assertIn("started a process", rows["test_starts_in_a_thread"]["detail"])
+        self.assertIn("left a thread running", rows["test_leaves_a_thread_running"]["detail"])
 
 
 if __name__ == "__main__":

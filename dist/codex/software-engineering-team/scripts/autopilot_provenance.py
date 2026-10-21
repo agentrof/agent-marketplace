@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mark the bytes the packaged autopilot writer last put in its authority files.
 
-The vault hook puts back a grant or arming record that a shell command added,
+The autopilot guard hook puts back a grant or arming record that a shell command added,
 judged from the command's pre and post snapshots. A packaged write that lands
 while an unrelated long command runs falls inside that command's snapshots too.
 Before each write of ``grant.json`` or ``arming.json``, autopilot.py and its
@@ -23,7 +23,7 @@ from pathlib import Path
 
 def marks_root() -> Path:
     user = getattr(os, "getuid", lambda: 0)()
-    base = Path(tempfile.gettempdir()) / f"agentrof-vault-hook-{user}"
+    base = Path(tempfile.gettempdir()) / f"agentrof-autopilot-guard-{user}"
     root = base / "autopilot-writes"
     for path in (base, root):
         if path.is_symlink():

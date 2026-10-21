@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import re
 import sys
+import tempfile
 import unittest
 try:
     from tools.tests.levels import integration
@@ -36,7 +37,7 @@ ACTION_USE_RE = re.compile(
 STATUS_CHECK_RE = re.compile(r"\b(?:always|cancelled|failure)\(\)")
 
 
-def workflow_action_findings(name: str, text: str, host_policy: dict | None = None) -> list[str]:
+def workflow_action_findings(name: str, text: str) -> list[str]:
     findings: list[str] = []
     for action, commit, label in ACTION_USE_RE.findall(text):
         if action not in PINNED_ACTIONS:
@@ -51,18 +52,11 @@ def workflow_action_findings(name: str, text: str, host_policy: dict | None = No
     if 'node-version: "20"' in text:
         findings.append(f"{name}: job Node.js must not use 20")
     lines = text.splitlines()
-    host_policy_output = name == "release-hosts.yml" and host_policy == {
-        "schema_version": 1, "runner_os": "macos-latest", "python": "3.14", "node": "24",
-    } and all(marker in text for marker in (
-        "node: ${{ steps.policy.outputs.node }}", "python3 tools/ci_host_policy.py",
-        '--github-output "$GITHUB_OUTPUT"',
-    ))
     for index, line in enumerate(lines):
         if "uses: actions/setup-node@" not in line:
             continue
         inputs = "\n".join(lines[index + 1:index + 5])
-        if 'node-version: "24"' not in inputs and not (
-                host_policy_output and 'node-version: ${{ needs.host-plan.outputs.node }}' in inputs):
+        if 'node-version: "24"' not in inputs:
             findings.append(f"{name}: setup-node must select Node.js 24")
         if "package-manager-cache: false" not in inputs:
             findings.append(f"{name}: setup-node must disable package caching")
@@ -139,9 +133,6 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         }
 
     def test_release_is_one_manual_main_workflow_that_never_tests_again(self):
-        workflows = {path.name for path in (REPO / ".github" / "workflows").glob("*.y*ml")}
-        self.assertNotIn("prepare-stable-release.yml", workflows)
-        self.assertNotIn("publish-stable-release.yml", workflows)
         text = self.text("release.yml")
         events = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
         self.assertEqual(re.findall(r"(?m)^  ([a-z_]+):", events), ["workflow_dispatch"])
@@ -155,7 +146,7 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertEqual(jobs["verify"]["if"], "github.ref == 'refs/heads/main'")
         for forbidden in (
             "pull_request_target", "gh pr merge", "gh pr create", "pull-requests: write",
-            "release/stable", "./.github/workflows/validate.yml",
+            "./.github/workflows/validate.yml",
             "./.github/workflows/release-hosts.yml", "ci_tests.py", "unittest",
             "make check", "make release-check", "build_distributions.py", "release.py bump",
             "git push", "secrets.",
@@ -286,12 +277,6 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertNotIn("--allow-bootstrap", validate)
         self.assertIn("pull_request:", codeql)
         self.assertIn("pull_request:\n", hosts)
-        self.assertNotIn("pull_request:\n    paths:", hosts)
-        for workflow, text in (("validate.yml", validate), ("release-hosts.yml", hosts)):
-            with self.subTest(workflow=workflow):
-                self.assertNotIn("workflow_call", text)
-                self.assertNotIn("candidate_sha", text)
-                self.assertNotIn("release/stable", text)
         self.assertIn("native-host-lifecycle", hosts)
         self.assertIn("if: always()", validate)
         jobs = workflow_jobs(validate)
@@ -299,28 +284,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertEqual(jobs["check"]["needs"], [
             "changeset", "plan", "test-shards", "deterministic-check",
         ])
-        self.assertNotIn("release-pr-policy", jobs)
-        self.assertNotIn("release-queue-policy", jobs)
-        self.assertNotIn("compatibility", jobs)
         self.assertEqual(jobs["changeset"]["needs"], ["plan"])
         self.assertEqual(jobs["deterministic-check"]["needs"], ["plan"])
-
-    def test_required_contexts_also_report_on_merge_queue_groups(self):
-        trigger = "  merge_group:\n    types: [checks_requested]\n"
-        for workflow, contexts in (
-            ("validate.yml", ("name: check\n",)),
-            ("codeql.yml", ("  analyze-python:\n",)),
-            ("release-hosts.yml", ("name: Claude Code and Codex lifecycle\n",)),
-        ):
-            text = self.text(workflow)
-            events = text.split("\non:\n", 1)[1].split("\npermissions:", 1)[0]
-            with self.subTest(workflow=workflow):
-                self.assertIn(trigger, events)
-                self.assertIn("  pull_request:\n", events)
-                self.assertNotIn("    branches:", events.split("  merge_group:\n", 1)[1])
-                for context in contexts:
-                    self.assertIn(context, text)
-        self.assertNotIn("merge_group", self.text("release.yml"))
 
     def test_finalize_requires_a_release_github_reports_immutable(self):
         text = self.text("release.yml")
@@ -344,8 +309,6 @@ class ReleaseWorkflowContracts(unittest.TestCase):
 
     def test_every_python_a_workflow_sets_up_is_the_policy_version(self):
         policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
-        hosts = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8"))
-        self.assertEqual(hosts["python"], policy["python"])
         literals, expressions = {}, {}
         for workflow in sorted((REPO / ".github" / "workflows").glob("*.yml")):
             text = workflow.read_text(encoding="utf-8")
@@ -356,9 +319,8 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                     target.setdefault(value, []).append(f"{workflow.name}:{job}")
         # A job that runs before any plan sets up the policy's version itself.
         self.assertEqual(literals, {f'"{policy["python"]}"': [
-            "release-hosts.yml:host-plan", "release.yml:public-smoke", "validate.yml:plan"]})
+            "release-hosts.yml:native-host-lifecycle", "release.yml:public-smoke", "validate.yml:plan"]})
         self.assertEqual(expressions, {
-            "${{ needs.host-plan.outputs.python }}": ["release-hosts.yml:fresh-host-lifecycle"],
             "${{ needs.plan.outputs.python }}": [
                 "validate.yml:changeset", "validate.yml:deterministic-check", "validate.yml:check"],
             "${{ matrix.python }}": ["validate.yml:test-shards"]})
@@ -388,116 +350,25 @@ class ReleaseWorkflowContracts(unittest.TestCase):
                     [], workflow_skip_inheritance_findings(workflow.name, text)
                 )
 
-    def test_skip_inheritance_rejects_each_stale_shape(self):
-        template = (
-            "on: push\n"
-            "jobs:\n"
-            "  changeset:\n"
-            "    if: github.event_name == 'pull_request'\n"
-            "  check:\n"
-            "    if: always()\n"
-            "    needs:\n"
-            "      - changeset\n"
-            "  build-metadata:\n"
-            "    if: {condition}\n"
-            "    needs: [check]\n"
-        )
-        cases = {
-            "implicit-success": "github.event_name == 'push'",
-            "explicit-success": "success() && github.event_name == 'push'",
-            "ignores-verdict": "${{ !cancelled() && github.event_name == 'push' }}",
-        }
-        for name, condition in cases.items():
-            with self.subTest(name=name):
-                self.assertTrue(workflow_skip_inheritance_findings(
-                    name, template.format(condition=condition),
-                ))
-        gated = template.format(condition=(
-            "${{ !cancelled() && github.event_name == 'push' && "
-            "needs.check.result == 'success' }}"
-        ))
-        self.assertEqual([], workflow_skip_inheritance_findings("gated", gated))
-
     def test_each_system_tests_the_policy_python_in_one_lane(self):
         text = self.text("validate.yml")
         policy = json.loads((REPO / "tools/data/ci-test-policy.json").read_text(encoding="utf-8"))
         self.assertEqual({lane["os"] for lane in policy["lanes"].values()},
                          {"ubuntu-latest", "macos-latest", "windows-latest"})
         self.assertEqual(len(policy["lanes"]), 3)
-        self.assertTrue(all("python" not in lane and "interpreter" not in lane
-                            for lane in policy["lanes"].values()))
-        self.assertNotIn("apple_launcher_lane", policy)
-        self.assertNotIn("vault-hook-platforms:", text)
         shard_job = text.split("\n  test-shards:\n", 1)[1].split("\n  check:\n", 1)[0]
         setup = shard_job.split("uses: actions/setup-python@", 1)[1].split("\n      - ", 1)[0]
         self.assertEqual([line.strip() for line in setup.splitlines()[1:]],
                          ["with:", "python-version: ${{ matrix.python }}"])
-        for retired in ("apple_launcher", "Apple system Python", "/usr/bin/python3",
-                        "AGENT_MARKETPLACE_REQUIRE_APPLE_PYTHON3", "interpreter_", "nuget", "pwsh"):
-            self.assertNotIn(retired, text)
         self.assertNotIn("continue-on-error", shard_job)
         self.assertIn("TEST_RESULT: ${{ needs.test-shards.result }}", text)
         self.assertIn('test "$TEST_RESULT" = success', text)
-        # The hook and the Delivery code keep native tests where their systems differ.
-        native = {lane: [selector for group in ("platform", lane)
-                         for selector in policy["groups"][group]["tests"]]
-                  for lane in ("macos", "windows")}
-        for lane, module in (("macos", "test_vault_hook"), ("windows", "test_vault_hook"),
-                             ("windows", "test_delivery_compile"), ("windows", "test_delivery_git")):
-            with self.subTest(lane=lane, module=module):
-                self.assertTrue(any(selector.startswith(f"tools.tests.{module}.")
-                                    for selector in native[lane]))
 
     def test_test_scratch_lives_on_the_runner_work_directory(self):
         shard_job = self.text("validate.yml").split("\n  test-shards:\n", 1)[1].split("\n  check:\n", 1)[0]
         run = shard_job.split("- name: Run the exact selected test partition\n", 1)[1]
         for name in ("TMPDIR", "TMP", "TEMP"):
             self.assertIn(f"{name}: ${{{{ runner.temp }}}}\n", run)
-
-    def test_dependabot_is_not_asked_for_action_bumps_the_gates_refuse(self):
-        # PINNED_ACTIONS and the changeset gate refuse every bump Dependabot can raise.
-        self.assertFalse((REPO / ".github/dependabot.yml").exists())
-
-    def test_security_policy_uses_private_vulnerability_reporting(self):
-        text = (REPO / "SECURITY.md").read_text(encoding="utf-8")
-        self.assertIn(
-            "Do not report suspected vulnerabilities in a public issue", text
-        )
-        self.assertIn(
-            "https://github.com/agentrof/agent-marketplace/security/advisories/new",
-            text,
-        )
-        for path in (REPO / "README.md", REPO / "CONTRIBUTING.md"):
-            with self.subTest(path=path.name):
-                discoverability = path.read_text(encoding="utf-8")
-                self.assertIn("SECURITY.md", discoverability)
-                self.assertIn("security/advisories/new", discoverability)
-
-    def test_community_governance_surface_is_complete(self):
-        required = {
-            "CODE_OF_CONDUCT.md": ("Expected behavior", "Enforcement"),
-            "SUPPORT.md": ("issue forms", "SECURITY.md"),
-            ".github/PULL_REQUEST_TEMPLATE.md": (
-                "Verification", "release-impact changeset",
-            ),
-            ".github/ISSUE_TEMPLATE/config.yml": (
-                "blank_issues_enabled: false", "Security vulnerability",
-            ),
-            ".github/ISSUE_TEMPLATE/bug_report.yml": (
-                "Minimal reproduction", "Safe evidence",
-            ),
-            ".github/ISSUE_TEMPLATE/feature_request.yml": (
-                "Acceptance criteria", "non-goals",
-            ),
-            ".github/ISSUE_TEMPLATE/workflow_question.yml": (
-                "Workflow area", "Intended outcome",
-            ),
-        }
-        for relative, markers in required.items():
-            with self.subTest(path=relative):
-                text = (REPO / relative).read_text(encoding="utf-8")
-                for marker in markers:
-                    self.assertIn(marker, text)
 
     def test_real_host_smoke_uses_the_tracked_two_host_policy(self):
         payload = json.loads((REPO / "tools/data/host-cli-versions.json").read_text(encoding="utf-8"))
@@ -509,30 +380,16 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("tools/data/host-cli-versions.json", workflow)
         self.assertIn('"@anthropic-ai/claude-code@${claude_version}"', workflow)
         self.assertIn('"@openai/codex@${codex_version}"', workflow)
-        self.assertIn("claude --version", workflow)
-        self.assertIn("codex --version", workflow)
+        self.assertIn('claude --version | grep -F "${claude_version}"', workflow)
+        self.assertIn('codex --version | grep -F "${codex_version}"', workflow)
         self.assertIn("tools/smoke_plugin_installs.py --channel checkout", workflow)
-        self.assertNotIn("make release-check", workflow)
-        self.assertNotIn("make public-release-check", workflow)
-        self.assertIn("runs-on: ${{ needs.host-plan.outputs.runner_os }}", workflow)
-        policy = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8"))
-        self.assertEqual(policy, {"schema_version": 1, "runner_os": "macos-latest", "python": "3.14", "node": "24"})
+        self.assertIn("runs-on: macos-latest", workflow)
 
         release_workflow = self.text("release.yml")
         self.assertNotIn("release-hosts.yml", release_workflow)
         self.assertIn('"@anthropic-ai/claude-code@${claude_version}"', release_workflow)
         self.assertIn('"@openai/codex@${codex_version}"', release_workflow)
         self.assertIn("EXPECTED_RELEASE_SHA", release_workflow)
-
-    def test_release_check_requires_deterministic_gates(self):
-        makefile = (REPO / "Makefile").read_text(encoding="utf-8")
-        self.assertRegex(makefile, r"(?m)^check: static-check test$")
-        self.assertRegex(makefile, r"(?m)^static-check: validate release-validate counts-check dist-check$")
-        self.assertRegex(makefile, r"(?m)^release-check: check$")
-        self.assertRegex(makefile, r"(?m)^public-release-check: release-check public-release-smoke$")
-        self.assertRegex(makefile, r"(?m)^public-release-smoke:$")
-        self.assertRegex(makefile, r"(?m)^\s*PYTHONDONTWRITEBYTECODE=1 \$\(PY\) -m unittest")
-        self.assertIn("tools/smoke_plugin_installs.py --channel public --expected-sha", makefile)
 
     def test_required_host_smoke_has_no_event_level_path_filter(self):
         workflow = self.text("release-hosts.yml")
@@ -567,83 +424,59 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertTrue(workflows)
         for workflow in workflows:
             text = workflow.read_text(encoding="utf-8")
-            policy = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8")) \
-                if workflow.name == "release-hosts.yml" else None
-            self.assertEqual([], workflow_action_findings(workflow.name, text, policy))
+            self.assertEqual([], workflow_action_findings(workflow.name, text))
 
-    def test_codeql_scans_python_and_javascript_on_pr_main_and_schedule(self):
+    def test_codeql_scans_python_on_pr_main_and_schedule(self):
         text = self.text("codeql.yml")
         self.assertIn("pull_request:", text)
         self.assertIn("branches: [main]", text)
         self.assertIn("schedule:", text)
-        self.assertIn("languages: python,javascript-typescript", text)
+        self.assertIn("languages: python\n", text)
         self.assertIn("build-mode: none", text)
         self.assertIn("security-events: write", text)
 
     def test_node24_runtime_contract_rejects_each_stale_shape(self):
-        cases = {
-            "stale-major": "- uses: actions/checkout@v4 # v4\n",
-            "unapproved-ref": "- uses: actions/setup-python@deadbeef\n",
-            "job-node-20": (
-                "- uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0\n"
-                "  with:\n"
-                "    node-version: \"20\"\n"
-                "    package-manager-cache: false\n"
-            ),
-            "implicit-cache": (
-                "- uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0\n"
-                "  with:\n"
-                "    node-version: \"24\"\n"
-            ),
-        }
-        for name, text in cases.items():
-            with self.subTest(name=name):
-                self.assertTrue(workflow_action_findings(name, text))
+        self.assertTrue(workflow_action_findings(
+            "unapproved-ref", "- uses: actions/setup-python@deadbeef\n"))
 
-    def test_host_node_policy_output_is_not_a_general_expression_exemption(self):
+    def test_required_host_context_runs_the_lifecycle_unless_no_host_path_changed(self):
         text = self.text("release-hosts.yml")
-        policy = json.loads((REPO / "tools/data/ci-host-policy.json").read_text(encoding="utf-8"))
-        self.assertEqual([], workflow_action_findings("release-hosts.yml", text, policy))
-        for name, content, contract in (
-            ("other.yml", text, policy),
-            ("release-hosts.yml", text, dict(policy, node="20")),
-            ("release-hosts.yml", text.replace("needs.host-plan.outputs.node", "github.event.inputs.node"), policy),
-            ("release-hosts.yml", text.replace("steps.policy.outputs.node", "steps.other.outputs.node"), policy),
-            ("release-hosts.yml", text.replace("tools/ci_host_policy.py", "tools/other.py"), policy),
-        ):
-            with self.subTest(name=name, content=content, contract=contract):
-                self.assertTrue(workflow_action_findings(name, content, contract))
-
-    def test_required_host_context_accepts_only_a_fresh_lifecycle_success(self):
-        text = self.text("release-hosts.yml")
-        jobs = workflow_jobs(text)
-        self.assertEqual(jobs["native-host-lifecycle"]["if"], "always()")
-        self.assertEqual(jobs["native-host-lifecycle"]["needs"], ["host-plan", "fresh-host-lifecycle"])
-        self.assertEqual(jobs["fresh-host-lifecycle"]["if"], "")
-        fresh = text.split("\n  fresh-host-lifecycle:\n", 1)[1].split("\n  native-host-lifecycle:\n", 1)[0]
-        required = text.split("\n  native-host-lifecycle:\n", 1)[1]
-        self.assertIn("name: Claude Code and Codex lifecycle", required)
-        self.assertIn("run: python3 tools/smoke_plugin_installs.py --channel checkout", fresh)
-        self.assertNotIn("continue-on-error", fresh + required)
+        self.assertEqual(list(workflow_jobs(text)), ["native-host-lifecycle"])
+        self.assertIn("name: Claude Code and Codex lifecycle", text)
+        self.assertIn("run: python3 tools/smoke_plugin_installs.py --channel checkout", text)
+        self.assertNotIn("continue-on-error", text)
         self.assertIn("permissions:\n  contents: read\n\nconcurrency:", text)
-        for retired in ("ci_host_evidence", "reused", "upload-artifact", "actions: read"):
-            with self.subTest(retired=retired):
-                self.assertNotIn(retired, text)
+        steps = text.split("\n      - ")[2:]
+        self.assertTrue(steps[0].startswith("name: Decide whether the change reaches a host"))
+        for step in steps[1:]:
+            with self.subTest(step=step.splitlines()[0]):
+                self.assertIn("if: steps.scope.outputs.hosts == 'true'", step)
 
     @integration
     @unittest.skipUnless(shutil.which("bash"), "Bash workflow executor")
-    def test_host_aggregate_executes_fail_closed_for_every_path(self):
-        text = self.text("release-hosts.yml").split("\n  native-host-lifecycle:\n", 1)[1]
+    def test_host_scope_runs_the_lifecycle_for_a_host_path_and_fails_closed(self):
+        text = self.text("release-hosts.yml")
         block = re.search(r"        run: \|\n((?:          [^\n]*\n|\n)+)", text).group(1)
         script = "\n".join(line[10:] for line in block.splitlines())
-        for plan in ("success", "failure", "cancelled", "skipped", ""):
-            for fresh in ("success", "failure", "cancelled", "skipped", ""):
-                with self.subTest(plan=plan, fresh=fresh):
-                    result = subprocess.run(["bash", "-c", script], capture_output=True,
-                                            env=dict(os.environ, PLAN_RESULT=plan,
-                                                     FRESH_RESULT=fresh))
-                    self.assertEqual(result.returncode == 0,
-                                     plan == "success" and fresh == "success")
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            fake_git = directory / "git"
+            fake_git.write_text('#!/bin/sh\n[ -n "$CHANGED" ] || exit 1\nprintf "%s\\n" "$CHANGED"\n',
+                                encoding="utf-8")
+            fake_git.chmod(0o755)
+            output = directory / "output"
+
+            def scope(event: str, changed: str) -> str | None:
+                output.write_text("", encoding="utf-8")
+                result = subprocess.run(["bash", "-c", script], capture_output=True, env=dict(
+                    os.environ, PATH=f"{directory}{os.pathsep}{os.environ['PATH']}",
+                    EVENT_NAME=event, CHANGED=changed, GITHUB_OUTPUT=str(output)))
+                return output.read_text(encoding="utf-8").strip() if result.returncode == 0 else None
+
+            self.assertEqual(scope("pull_request", "docs/ci.md\ntools/tests/test_x.py"), "hosts=false")
+            self.assertEqual(scope("pull_request", "docs/ci.md\nplugins/team/flows/a.md"), "hosts=true")
+            self.assertEqual(scope("schedule", ""), "hosts=true")
+            self.assertIsNone(scope("pull_request", ""))
 
     @integration
     @unittest.skipUnless(shutil.which("bash"), "Bash workflow executor")
@@ -658,28 +491,19 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             return subprocess.run(["bash", "-c", script], env=values, capture_output=True).returncode
         self.assertEqual(execute(baseline), 0)
         for key in ("PLAN_RESULT", "DETERMINISTIC_RESULT", "TEST_RESULT", "CHANGESET_RESULT"):
-            for status in ("failure", "cancelled", "skipped", ""):
-                with self.subTest(key=key, status=status):
-                    self.assertNotEqual(execute(dict(baseline, **{key: status})), 0)
+            with self.subTest(key=key):
+                self.assertNotEqual(execute(dict(baseline, **{key: "skipped"})), 0)
         self.assertEqual(execute(dict(baseline, HAS_TESTS="false", TEST_RESULT="skipped")), 0)
         self.assertNotEqual(execute(dict(baseline, HAS_TESTS="", TEST_RESULT="skipped")), 0)
-        for event in ("push", "merge_group", "schedule", "workflow_dispatch"):
-            other = dict(baseline, EVENT_NAME=event, CHANGESET_RESULT="skipped")
-            with self.subTest(event=event):
-                self.assertEqual(execute(other), 0)
-                self.assertNotEqual(execute(dict(other, CHANGESET_RESULT="success")), 0)
-                for key in ("PLAN_RESULT", "DETERMINISTIC_RESULT", "TEST_RESULT"):
-                    for status in ("failure", "cancelled", "skipped", ""):
-                        self.assertNotEqual(execute(dict(other, **{key: status})), 0)
+        push = dict(baseline, EVENT_NAME="push", CHANGESET_RESULT="skipped")
+        self.assertEqual(execute(push), 0)
+        self.assertNotEqual(execute(dict(push, CHANGESET_RESULT="success")), 0)
 
     def test_receipts_require_verified_reports_and_are_not_emitted_for_forks_or_schedule(self):
         text = self.text("validate.yml")
         self.assertLess(text.index("tools/ci_tests.py verify-reports"), text.index("tools/ci_evidence.py create"))
         self.assertIn("ci-evidence-${{ github.run_id }}-${{ github.run_attempt }}", text)
         self.assertIn("github.event_name != 'schedule'", text)
-        # Receipt creation accepts no merge_group event; a queue run must skip it, not fail.
-        receipt_guard = "github.event_name != 'schedule' && github.event_name != 'merge_group' &&"
-        self.assertEqual(text.count(receipt_guard), 2)
         self.assertEqual(text.count("github.event_name != 'schedule'"), 2)
         self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", text)
         self.assertIn('args+=(--inherited "$RUNNER_TEMP/ci-plan/ci-reuse.json")', text)

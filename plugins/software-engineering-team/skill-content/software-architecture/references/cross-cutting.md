@@ -14,12 +14,12 @@ Defaults and obligations for concerns that span modules. Every rule lands in a n
 - Inside one store, use the store's transaction. Hard DON'T: never deploy outbox relays or saga machinery for writes inside a single store; that is a transaction wearing a costume, and it trades away atomicity for nothing.
 - Outbox, for reliably propagating facts: the state change and the event record are written in the same local transaction; a relay publishes afterwards. Delivery becomes at-least-once, so every consumer is idempotent. Choose when the workflow is "commit, then inform".
 - Saga, for multi-step workflows with rollback semantics: a sequence of local transactions, each with a declared compensation, run by one owning orchestrator or an explicit event chain. A step without a compensation is a design gap, not a detail for later. Choose when steps across modules or stores must all complete or all be undone.
-- Decision test: IF the second write can lag the first by seconds without breaking a business rule, THEN outbox suffices; IF a later failure must undo earlier writes, THEN saga. Either choice is a decision record, and any data these paths copy carries the constitution's snapshot declaration.
+- Decision test: IF the second write can lag the first by seconds without breaking a business rule, THEN outbox suffices; IF a later failure must undo earlier writes, THEN saga. Either choice is a decision record, and any data these paths copy carries a snapshot declaration: its refresh path and staleness tolerance.
 
 ## Caching
 
 - A cache exists only with a declared invalidation path: event-driven invalidation, TTL with an accepted staleness tolerance, or write-through. "We flush it manually when it looks stale" is an undeclared cache and fails the design gate.
-- The record names four things: what is cached, where it lives, the invalidation trigger, and the staleness tolerance. A cached copy of mutable data is a snapshot under the constitution rule; undeclared, it is a violation, not a speedup.
+- The record names four things: what is cached, where it lives, the invalidation trigger, and the staleness tolerance. A cached copy of mutable data is a snapshot that needs that declaration; undeclared, it is a violation, not a speedup.
 - Decision test: IF the invalidation trigger cannot be named in one sentence, THEN the cache is not designed yet; do not bank its latency win against a budget.
 
 ## Resilience Obligations at Seams
@@ -46,4 +46,4 @@ Every cross-module or external call declares these as interface obligations in t
 2. Name the principals (user roles, service identities, anonymous) that can reach each entry point.
 3. Trace each data classification crossing a boundary: what leaves, to whom, where it is logged.
 4. At each crossing check: authentication demanded, authorization declared (role plus object condition), input validated at the boundary, secrets absent from payloads and logs.
-5. Output an attack-surface delta: entry points touched, protection status and new data exposures. Attach it to the active Delivery Item and persist it in the owning component or module security facet under `workspace/docs/system-architecture/components/<component>/.../security/<scope>/threat-model.md`, so the security picture accumulates instead of dying with the escalation.
+5. Output an attack-surface delta: entry points touched, protection status and new data exposures. Attach it to the task and persist it in the owning component or module security facet under `workspace/docs/system-architecture/components/<component>/.../security/<scope>/threat-model.md`, so the security picture accumulates instead of dying with the escalation.

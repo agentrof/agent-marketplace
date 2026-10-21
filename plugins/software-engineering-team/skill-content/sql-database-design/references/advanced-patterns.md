@@ -34,5 +34,5 @@
 
 ## Row-Level Security
 
-- Where the engine supports policies, multi-tenant isolation can live in the database: enable row security on the table and write policies keyed on the tenant or user context.
-- Design impact: every table under a policy needs the tenant key column, indexed, usually leading compound indexes.
+- Where the engine supports policies, multi-tenant isolation lives in the database: enable row security on the table and write policies keyed on the tenant or user context.
+- Design impact: every table under a policy needs the tenant key column, indexed, usually leading compound indexes. The full rule set is the [multi-tenancy](multi-tenancy.md) reference.

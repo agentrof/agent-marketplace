@@ -86,9 +86,8 @@ difference is structural, not cosmetic:
 - border-led vs shadow-led depth
 - data-first vs marketing-first layout
 
-Seed each candidate from a different style emphasis (the product row's
-secondary styles and the reasoning rule's decision branches are ready-made
-seeds), present the axis of difference with the rationale, pick one, refine.
+Seed each candidate from a different style emphasis, present the axis of
+difference with the rationale, pick one, refine.
 
 ## Self-Critique Gate
 

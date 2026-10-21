@@ -24,7 +24,7 @@ exposure: internal
 2. **Dependency injection:** shared resources (DB session, current user, settings) enter via `Depends`, never via module globals. This is also what makes tests overridable.
 3. **Async-first for I/O:** async handlers and async drivers for every network or disk call; no sync I/O inside async functions.
 4. **Boundary validation:** validation models on every request, response, and persistence boundary. Never trust client data, never pass raw dicts inward.
-5. **Environment config:** all settings from environment via a typed settings object. No hardcoded secrets, hosts, or ports.
+5. **Startup config snapshot:** settings are read once at startup into a validated, typed settings object; a bad value stops the start. Secrets come from mounted files, never environment variables or arguments. No hardcoded secrets, hosts, or ports.
 
 ## DO
 
@@ -33,6 +33,7 @@ exposure: internal
 - Log structured JSON with a correlation id per request; attach it to error responses
 - Pool connections, close them on every path, retry transient failures
 - Design writes to be idempotent and safely retryable
+- In a multi-tenant service, set the tenant context transaction-local in the one helper that opens the transaction (per the sql-database-design multi-tenancy reference); no other code path opens one
 - Use the lifespan handler for startup and shutdown (open pools, create indexes, drain in-flight work on termination)
 - Implement the pagination scheme the contract declares on list endpoints; push heavy aggregation into the database
 - Prefer three similar lines over one confusing utility (abstract on the third repeat)
@@ -91,4 +92,4 @@ Auth was checked only at login or router include, not per endpoint. Enforce the 
 
 ## Related Skills
 
-Pairs with the sql-database-design and nosql-database-design skills for schema decisions, with react-typescript on the consuming frontend, and with the docker-compose skill whose environment packages the service. Seed scenario loaders are this stack's code: one callable receiving the scenario name, deterministic and referentially intact per the docker-compose skill's seed-scenarios contract.
+Pairs with the sql-database-design and nosql-database-design skills for schema decisions, with react-typescript on the consuming frontend, and with the container-environment skill whose environment packages the service. Seed scenario loaders are this stack's code: one callable receiving the scenario name, deterministic and referentially intact per the container-environment skill's seed-scenarios contract.

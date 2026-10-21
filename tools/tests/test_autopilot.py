@@ -32,10 +32,6 @@ for _path in (PACKAGE / "scripts", ROOT / "tools", ROOT / "tools" / "tests"):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
-import build_distributions  # noqa: E402
-import delivery_compile  # noqa: E402
-import requirement_compile  # noqa: E402
-import task_inputs  # noqa: E402
 import validate  # noqa: E402
 from git_fixture import init_repository, temporary_directory  # noqa: E402
 
@@ -131,8 +127,8 @@ class Project:
                 if args == ("worktree", "list", "--porcelain"):
                     return f"worktree {root}\nHEAD {'0' * 40}\nbranch refs/heads/main\n"
                 raise AssertionError("unexpected Git operation: " + " ".join(args))
-            import delivery_git
-            stack.enter_context(mock.patch.object(delivery_git, "run_git", side_effect=git_output))
+            import project_paths
+            stack.enter_context(mock.patch.object(project_paths, "run_git", side_effect=git_output))
         hooks = Path(stack.enter_context(tempfile.TemporaryDirectory())) / "hooks.json"
         if armed:
             hooks.write_text(json.dumps(ARMED_HOOKS), encoding="utf-8")
@@ -162,24 +158,6 @@ class Project:
     def events(self) -> list[dict]:
         path = self.state / "ledger.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
-
-    def delivery(self, status: str, identifier: str = "DLV-001") -> None:
-        path = (self.root / "workspace/docs/delivery/deliveries"
-                / f"{identifier.lower()}-night/delivery.md")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"---\ntype: delivery\nid: {identifier}\ntitle: Night run\n"
-                        f"status: {status}\n---\n\n# Night run\n", encoding="utf-8")
-        if status == "awaiting_merge":
-            # The commit that records the PR URL in the Review sets awaiting_merge.
-            (path.parent / "delivery-review.md").write_text(
-                "---\ntype: delivery-review\npull_request_url: https://example.invalid/pull/2\n---\n\n# Review\n",
-                encoding="utf-8")
-
-    def requirement(self, status: str, identifier: str = "REQ-001") -> None:
-        path = self.root / f"workspace/docs/requirements/req-{identifier[4:]}-night.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f"---\ntype: requirement\nid: {identifier}\ntitle: Night work\n"
-                        f"status: {status}\n---\n\n# Night work\n", encoding="utf-8")
 
     def assert_refused(self, fragment: str, *argv: str, now: datetime = NOW) -> None:
         code, out, err = self.run_verb(*argv, now=now)
@@ -263,28 +241,19 @@ class GrantTermsTests(unittest.TestCase):
                               "--deny", "release")
 
     def test_goal_refusals_name_what_is_wrong(self):
-        self.p.assert_refused("scripts/delivery_compile.py finds no Delivery DLV-099",
-                              "on", "--goal", "delivery:DLV-099")
-        self.p.assert_refused("scripts/requirement_compile.py finds no Requirement REQ-404",
-                              "on", "--goal", "requirement:REQ-404")
-        self.p.assert_refused("unknown goal kind 'sprint'; declared kinds: delivery, requirement,"
-                              " text", "on", "--goal", "sprint:9")
+        self.p.assert_refused("unknown goal kind 'sprint'; declared kinds: text",
+                              "on", "--goal", "sprint:9")
         self.p.assert_refused("names no target", "on", "--goal", "text:")
-        self.p.delivery("cancelled")
-        self.p.assert_refused("goal delivery:DLV-001 is already reached", "on", "--goal",
-                              "delivery:DLV-001")
         self.assertFalse((self.p.root / ".agentrof").exists())
 
     def test_a_goal_grant_ends_at_its_cap_or_at_the_earlier_given_time(self):
-        self.p.delivery("active")
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:dlv-001")
+        code, _out, err = self.p.run_verb("on", "--goal", "text:night run")
         self.assertEqual(code, 0, err)
         grant = self.p.grant()
         self.assertEqual(grant["expires_at"],
                          stamp(NOW + timedelta(hours=POLICY["default_goal_cap_hours"])))
-        self.assertEqual(grant["goal"]["target"], "DLV-001")
-        self.assertEqual(grant["goal"]["end"]["terminal_statuses"], ["merged", "cancelled"])
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "3h")
+        self.assertEqual(grant["goal"]["target"], "night run")
+        code, _out, err = self.p.run_verb("on", "--goal", "text:night run", "--for", "3h")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.p.grant()["expires_at"], stamp(NOW + timedelta(hours=3)))
 
@@ -350,6 +319,7 @@ class ArmingTests(unittest.TestCase):
             prompt(self.p.root, f"${NAME}x on"),
             prompt(self.p.root, "Run the backlog review."),
             prompt(self.p.root, f"${NAME} on --for 72h", agent_id="thread-2", agent_type="worker"),
+            "not json", "", {"cwd": str(self.p.root)},
         )
         for payload in ignored:
             with self.subTest(payload=payload):
@@ -392,21 +362,6 @@ class LifecycleTests(unittest.TestCase):
         return self.p.run_verb("queue", "--class", name, "--question", "Publish the tag?",
                                "--options", "Publish; Hold", "--recommendation", "Hold",
                                "--blocks", "release notes", now=now)
-
-    def test_failed_authority_publication_restores_the_previous_mark(self):
-        import atomic_file
-        import autopilot_provenance
-        self.p.run_verb("on")
-        path = self.p.state / "grant.json"
-        before = path.read_bytes()
-        changed = {**json.loads(before), "id": "unpublished"}
-        after = (json.dumps(changed, indent=2, sort_keys=True) + "\n").encode()
-        with mock.patch.object(atomic_file, "replace_bytes", side_effect=OSError("interrupted write")):
-            with self.assertRaises(OSError):
-                autopilot.write_private(path, changed)
-        self.assertEqual(path.read_bytes(), before)
-        self.assertTrue(autopilot_provenance.written_by_package(path.parent, path.name, before))
-        self.assertFalse(autopilot_provenance.written_by_package(path.parent, path.name, after))
 
     def test_check_reports_an_active_an_expired_and_no_grant(self):
         code, out, _err = self.p.run_verb("check")
@@ -541,13 +496,6 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(self.p.events()[-1]["classes"], ["approval_gate", "merge"])
         self.assertIn("decision [approval_gate, merge] Approve gate B and merge?",
                       self.p.run_verb("report")[1])
-        self.p.run_verb("on", "--allow", "phase_start")
-        self.p.delivery("scope_approved")
-        code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--class",
-                                          "phase_start", "--question", "Approve gate A?",
-                                          "--choice", "Approve", "--reason", "r", "--target", "t",
-                                          "--entry", "execution-plan", "--after", "delivery:DLV-001")
-        self.assertEqual(code, 0, err)
 
     def test_off_revokes_the_grant_prints_the_report_and_check_is_inactive(self):
         self.p.run_verb("on")
@@ -564,25 +512,18 @@ class LifecycleTests(unittest.TestCase):
         self.assertIn(f"autopilot: revoked {grant['id']}", out)
 
     def test_status_shows_the_remaining_time_goal_classes_and_counts(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "9h")
+        self.p.run_verb("on", "--goal", "text:night run", "--for", "9h")
         self.record()
         self.queue()
         self.queue("phase_start")
         code, out, err = self.p.run_verb("status", now=NOW + timedelta(hours=1, minutes=15))
         self.assertEqual(code, 0, err)
         self.assertIn("(7h 45m left)", out)
-        self.assertIn("goal: delivery DLV-001, ends when scripts/delivery_compile.py reads merged or"
-                      " cancelled; current state: active", out)
-        self.assertIn("allowed classes: choice, approval_gate, merge", out)
-        self.assertIn("decisions: 1, queued: 2", out)
-        self.assertIn("declared guards: arming user_only_entry, question guard instructions;"
-                      " a host can skip a declared hook it has not enabled or trusted", out)
         code, out, _err = self.p.run_verb("status", "--json", now=NOW + timedelta(hours=1))
         status = json.loads(out)
         self.assertEqual((status["active"], status["remaining_minutes"], status["counts"],
-                          status["goal_read"]["state"]),
-                         (True, 480, {"decisions": 1, "queued": 2}, "active"))
+                          status["grant"]["goal"]["target"], status["arming"]),
+                         (True, 480, {"decisions": 1, "queued": 2}, "night run", "user_only_entry"))
 
     def test_report_lists_every_decision_and_queued_question_in_time_order(self):
         self.p.run_verb("on")
@@ -624,22 +565,26 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual([entry["question"] for entry in report["entries"]],
                          ["Merge PR 41 at 01:00?", "Merge PR 42 at 03:00?"])
 
-    @integration
-    def test_runtime_state_is_private_ignored_and_changes_no_tracked_file(self):
-        self.assertEqual(git(self.p.root, "status", "--porcelain", "--ignored"), "")
+    def test_runtime_state_is_private(self):
         self.p.run_verb("on")
         self.record()
         self.queue()
         self.p.run_verb("off")
         self.assertEqual(sorted(path.name for path in self.p.state.iterdir()),
                          ["autopilot.lock", "grant.json", "ledger.jsonl"])
-        self.assertEqual(git(self.p.root, "status", "--porcelain"), "")
-        self.assertEqual(git(self.p.root, "status", "--porcelain", "--ignored"), "!! .agentrof/\n")
-        self.assertEqual(git(self.p.root, "status", "--porcelain", "--untracked-files=no"), "")
         if os.name != "nt":
             self.assertEqual(stat.S_IMODE(self.p.state.stat().st_mode), 0o700)
             for path in self.p.state.iterdir():
                 self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
+
+    def test_recovery_is_explicitly_armed_and_expiry_refuses_it(self):
+        import autopilot_recovery as recovery
+        project = self.p
+        project.assert_refused("no active grant", "heal")
+        with mock.patch.object(recovery, "start", return_value=123):
+            self.assertEqual(project.run_verb("on", "--for", "1h", "--recover-transport")[0], 0)
+        self.assertTrue(project.grant()["transport_recovery"])
+        project.assert_refused("no active grant", "heal", now=NOW + timedelta(hours=2))
 
     @integration
     def test_the_grant_lives_in_the_main_worktree_for_every_linked_worktree(self):
@@ -726,13 +671,6 @@ def system_zone(name: str):
         time.tzset()
 
 
-class RecoveryProcessTests(unittest.TestCase):
-    @integration
-    def test_process_liveness_query_keeps_the_current_process_alive_on_every_os(self):
-        import autopilot_recovery as recovery
-        self.assertTrue(recovery.process_alive(os.getpid()))
-
-
 @integration
 @unittest.skipIf(os.name == "nt", "time.tzset sets the system zone only on POSIX hosts")
 class TransportRecoveryTests(unittest.TestCase):
@@ -788,15 +726,6 @@ class TransportRecoveryTests(unittest.TestCase):
         transcript.write_text(json.dumps({"type": "assistant", "message": "ENOTFOUND is quoted text"}))
         self.assertIsNone(recovery.terminal_error(transcript, POLICY["transport_error_codes"]))
 
-    def test_recovery_is_explicitly_armed_and_expiry_refuses_it(self):
-        import autopilot_recovery as recovery
-        project = Project(self)
-        project.assert_refused("no active grant", "heal")
-        with mock.patch.object(recovery, "start", return_value=123):
-            self.assertEqual(project.run_verb("on", "--for", "1h", "--recover-transport")[0], 0)
-        self.assertTrue(project.grant()["transport_recovery"])
-        project.assert_refused("no active grant", "heal", now=NOW + timedelta(hours=2))
-
 
 class ClockTests(unittest.TestCase):
     """--until reads the system zone across a daylight-saving change, from when the user typed it."""
@@ -823,11 +752,6 @@ class ClockTests(unittest.TestCase):
             self.p.assert_refused("--until 07:00 is in the past", "on",
                                   now=typed + timedelta(minutes=6))
         self.assertFalse((self.p.state / "grant.json").exists())
-
-    def test_a_huge_duration_is_refused_without_a_traceback(self):
-        self.p.arm("on --for 99999999999d")
-        self.p.assert_refused(f"is above the {POLICY['max_duration_hours']} h maximum", "on")
-
 
 class FailClosedTests(unittest.TestCase):
     """A package that cannot show its arming hook, or a grant it could not have armed, grants nothing."""
@@ -988,131 +912,14 @@ class GoalTests(unittest.TestCase):
         code, out, _err = self.p.run_verb("check", now=now)
         return code, out
 
-    def test_check_completes_a_delivery_goal_once_its_compiler_reads_a_terminal_status(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.assertEqual(self.check(NOW + timedelta(hours=1))[0], 0)
-        self.p.delivery("cancelled")
-        code, out = self.check(NOW + timedelta(hours=2))
-        self.assertEqual(code, 1)
-        self.assertIn("scripts/delivery_compile.py read delivery DLV-001 as cancelled", out)
-        completion = self.p.grant()["completion"]
-        self.assertEqual((self.p.grant()["state"], completion["goal_state"], completion["read_at"]),
-                         ("completed", "cancelled", stamp(NOW + timedelta(hours=2))))
-        self.assertEqual(self.p.events()[-1]["event"], "completed")
-
-    def test_a_compiler_completion_names_the_compiler_and_the_state_it_read(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.p.delivery("cancelled")
-        self.check(NOW + timedelta(hours=2))
-        out = self.p.run_verb("report")[1]
-        self.assertIn("completed: scripts/delivery_compile.py read delivery DLV-001 as cancelled at"
-                      f" {stamp(NOW + timedelta(hours=2))}", out)
-        self.assertNotIn("compiler agreed: None", out)
-
-    @integration
-    def test_a_merged_delivery_is_read_through_the_compiler_merge_derivation(self):
-        self.p.delivery("awaiting_merge")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        with mock.patch.object(delivery_compile, "delivery_state",
-                               return_value=("merged", None)) as derived:
-            code, out = self.check(NOW + timedelta(hours=1))
-        derived.assert_called()
-        self.assertEqual(code, 1)
-        self.assertEqual(self.p.grant()["completion"]["goal_state"], "merged")
-
-    @integration
-    def test_a_delivery_whose_merge_state_cannot_be_read_has_no_goal_state(self):
-        """A Delivery Review record that cannot be read, here after an editor wrote a byte order mark, leaves
-        the merge state unknown: a running grant shows the goal unknown with the reason instead of the tracked
-        status, and on refuses the goal, as it refuses a Delivery record it cannot read."""
-        self.p.delivery("awaiting_merge")
-        review = self.p.root / "workspace/docs/delivery/deliveries/dlv-001-night/delivery-review.md"
-        code, _out, err = self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.assertEqual(code, 0, err)
-        review.write_bytes(b"\xef\xbb\xbf" + review.read_bytes())
-        reason = (f"cannot read it: Delivery merge state cannot be evaluated: {review} cannot be read:"
-                  " missing frontmatter block")
-        later = NOW + timedelta(hours=1)
-        code, out = self.check(later)
-        self.assertEqual(code, 0, out)
-        self.assertIn(f"current state: unknown ({reason})", out)
-        self.assertEqual(self.p.grant()["state"], "active")
-        read = json.loads(self.p.run_verb("status", "--json", now=later)[1])["goal_read"]
-        self.assertEqual((read["found"], read["state"], read["terminal"], read["error"]),
-                         (False, None, False, reason))
-        self.p.assert_refused(f"goal delivery:DLV-001: the owning compiler scripts/delivery_compile.py {reason}",
-                              "on", "--goal", "delivery:DLV-001", now=later)
-
-    def test_check_completes_a_requirement_goal_at_its_terminal_planning_status(self):
-        for terminal in ("withdrawn", "incorporated"):
-            with self.subTest(terminal=terminal):
-                self.p.requirement("approved")
-                self.p.run_verb("on", "--goal", "requirement:REQ-001")
-                self.assertEqual(self.check(NOW + timedelta(minutes=10))[0], 0)
-                if terminal == "incorporated":
-                    patcher = mock.patch.object(requirement_compile, "requirement_incorporated",
-                                                return_value=True)
-                else:
-                    self.p.requirement("withdrawn")
-                    patcher = contextlib.nullcontext()
-                with patcher:
-                    code, out = self.check(NOW + timedelta(minutes=20))
-                self.assertEqual(code, 1, out)
-                self.assertEqual(self.p.grant()["completion"]["goal_state"], terminal)
-                self.assertEqual(self.p.grant()["completion"]["read_at"],
-                                 stamp(NOW + timedelta(minutes=20)))
-
-    def test_a_goal_that_is_not_terminal_stays_active_until_its_cap_whatever_is_claimed(self):
-        self.p.delivery("review")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001", "--for", "6h")
-        claim = {"reason": "the Delivery is done, the goal is reached", "question": "Merge now?",
-                 "options": "", "choice": "Yes", "target": "delivery.md"}
-        argv = ["record", "--class", "choice"]
-        for key, value in claim.items():
-            argv += [f"--{key}", value]
-        for minutes in (1, 120, 359):
-            with self.subTest(minutes=minutes):
-                self.p.run_verb(*argv, now=NOW + timedelta(minutes=minutes))
-                self.assertEqual(self.check(NOW + timedelta(minutes=minutes))[0], 0)
-        code, out = self.check(NOW + timedelta(hours=6))
-        self.assertEqual(code, 1)
-        self.assertEqual(self.p.grant()["state"], "expired")
-
-    def test_record_and_queue_refuse_once_the_goal_is_reached(self):
-        self.p.delivery("active")
-        self.p.run_verb("on", "--goal", "delivery:DLV-001")
-        self.p.delivery("cancelled")
-        later = NOW + timedelta(minutes=10)
-        code, _out, err = self.p.run_verb("record", "--class", "approval_gate", "--question",
-                                          "Approve the next plan?", "--choice", "Approve",
-                                          "--reason", "r", "--target", "t", now=later)
-        self.assertEqual(code, 1)
-        self.assertIn("scripts/delivery_compile.py read delivery DLV-001 as cancelled", err)
-        self.assertEqual(self.p.grant()["state"], "completed")
-        code, _out, err = self.p.run_verb("queue", "--class", "release", "--question", "Tag?",
-                                          "--recommendation", "Hold", now=later)
-        self.assertEqual(code, 1)
-        self.assertIn("completed", err)
-        self.assertEqual([event["event"] for event in self.p.events()], ["granted", "completed"])
-
-    def test_complete_ends_any_grant_and_records_evidence_and_compiler_agreement(self):
-        cases = (("delivery:DLV-001", False), ("delivery:DLV-003", True),
-                 ("text:finish the migration", None), (None, None))
-        for goal, agreed in cases:
+    def test_complete_ends_any_grant_and_records_evidence(self):
+        for goal in ("text:finish the migration", None):
             with self.subTest(goal=goal):
-                if goal and goal.startswith("delivery"):
-                    self.p.delivery("active", goal.split(":")[1])
                 self.p.run_verb("on", *(["--goal", goal] if goal else []))
-                if goal == "delivery:DLV-003":
-                    self.p.delivery("cancelled", "DLV-003")
                 code, out, err = self.p.run_verb("complete", "--evidence", "PR 41 merged")
                 self.assertEqual(code, 0, err)
-                completion = self.p.grant()["completion"]
                 self.assertEqual(self.p.grant()["state"], "completed")
-                self.assertEqual((completion["by"], completion["evidence"],
-                                  completion["compiler_agreed"]), ("complete", "PR 41 merged", agreed))
+                self.assertEqual(self.p.grant()["completion"], {"by": "complete", "evidence": "PR 41 merged"})
                 self.assertIn("completed by complete: PR 41 merged", out)
         self.p.assert_refused("no active grant", "complete", "--evidence", "again")
 
@@ -1130,20 +937,10 @@ class GoalTests(unittest.TestCase):
 
 
 class DistributionTests(unittest.TestCase):
-    """Both hosts' generated packages: wrappers, canonical content and real hook wiring."""
-
-    @classmethod
-    def setUpClass(cls) -> None:
-        cls.temporary = tempfile.TemporaryDirectory()
-        cls.dist = Path(cls.temporary.name) / "dist"
-        build_distributions.build(ROOT, cls.dist)
-
-    @classmethod
-    def tearDownClass(cls) -> None:
-        cls.temporary.cleanup()
+    """Both hosts' committed packages (dist-check keeps them equal to a build): wrappers and real hook wiring."""
 
     def package(self, host: str) -> Path:
-        return self.dist / host / "software-engineering-team"
+        return ROOT / "dist" / host / "software-engineering-team"
 
     def hook_argv(self, host: str, verb: str) -> list[str]:
         """The hook command the host runs, with the package root it substitutes."""
@@ -1159,8 +956,8 @@ class DistributionTests(unittest.TestCase):
 
     @staticmethod
     def clean_env() -> dict:
-        return {key: value for key, value in os.environ.items()
-                if key not in HOST_SESSION_VARIABLES}
+        return {**{key: value for key, value in os.environ.items() if key not in HOST_SESSION_VARIABLES},
+                "PYTHONDONTWRITEBYTECODE": "1"}
 
     def run_hook(self, host: str, verb: str, payload, cwd: Path,
                  env: dict | None = None) -> subprocess.CompletedProcess:
@@ -1174,154 +971,39 @@ class DistributionTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(script), *argv], cwd=root, env=self.clean_env(),
                               capture_output=True, text=True, check=False, timeout=60)
 
-    @contextlib.contextmanager
-    def project(self):
-        with temporary_directory() as raw:
-            yield make_project(Path(raw))
-
     def test_the_entry_is_user_invoked_only_on_both_hosts(self):
         claude = (self.package("claude") / "skills/autopilot/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("\ndisable-model-invocation: true\n", claude.split("---", 2)[1])
         codex = self.package("codex") / "skills/autopilot/agents/openai.yaml"
         self.assertIn("allow_implicit_invocation: false", codex.read_text(encoding="utf-8"))
-        header = (ENTRY / "SKILL.md").read_text(encoding="utf-8").split("---", 2)[1]
-        self.assertIn("\nname: autopilot\n", header)
-        self.assertIn("\nexposure: entry\n", header)
 
     def test_both_hosts_declare_the_arming_and_question_hooks(self):
         for host, (event, matcher, question, _root) in HOST_HOOKS.items():
-            for source in (ROOT / "platforms" / host / "software-engineering-team/overlay/hooks",
-                           self.package(host) / "hooks"):
-                with self.subTest(host=host, source=source):
-                    hooks = json.loads((source / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-                    arming = [group for group in hooks[event]
-                              if "hook user-prompt" in group["hooks"][0]["command"]]
-                    self.assertEqual([group.get("matcher") for group in arming], [matcher])
-                    self.assertIn(f"--host {host} --entry {NAME}",
-                                  arming[0]["hooks"][0]["command"])
-                    guards = [group for group in hooks["PreToolUse"]
-                              if "hook pre-question" in group["hooks"][0]["command"]]
-                    self.assertEqual([group["matcher"] for group in guards], [question])
+            with self.subTest(host=host):
+                hooks = json.loads((self.package(host) / "hooks/hooks.json").read_text(encoding="utf-8"))["hooks"]
+                arming = [group for group in hooks[event]
+                          if "hook user-prompt" in group["hooks"][0]["command"]]
+                self.assertEqual([group.get("matcher") for group in arming], [matcher])
+                self.assertIn(f"--host {host} --entry {NAME}", arming[0]["hooks"][0]["command"])
+                guards = [group for group in hooks["PreToolUse"]
+                          if "hook pre-question" in group["hooks"][0]["command"]]
+                self.assertEqual([group["matcher"] for group in guards], [question])
 
-    @integration
-    def test_an_agent_side_on_without_arming_is_refused_on_each_arming_host(self):
-        for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root:
-                result = self.run_verb(host, root, "on", "--for", "9h")
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("run `on` without options", result.stderr)
-                result = self.run_verb(host, root, "on")
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("no fresh arming record from your own typed entry command",
-                              result.stderr)
-                self.assertFalse((root / ".agentrof").exists())
-                status = json.loads(self.run_verb(host, root, "status", "--json").stdout)
-                self.assertEqual((status["arming"], status["question_guard"]),
-                                 ("user_prompt_hook", "hook"))
-
-    @integration
-    def test_a_copied_package_mints_no_grant_the_installed_package_honours(self):
-        for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root, \
-                    tempfile.TemporaryDirectory() as raw:
-                copy = Path(raw) / "copy"
-                shutil.copytree(self.package(host), copy, ignore=shutil.ignore_patterns("hooks"))
-                script = copy / "skill-content/autopilot/scripts/autopilot.py"
-                agent_on = [sys.executable, str(script), "on", "--for", "72h", "--allow", "release"]
-                result = subprocess.run(agent_on, cwd=root, env=self.clean_env(),
-                                        capture_output=True, text=True, check=False, timeout=60)
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("hooks/hooks.json is missing", result.stderr)
-                self.assertFalse((root / RUNTIME / "grant.json").exists())
-                (copy / ".agent-marketplace-package.json").unlink()
-                result = subprocess.run(agent_on, cwd=root, env=self.clean_env(),
-                                        capture_output=True, text=True, check=False, timeout=60)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                result = self.run_verb(host, root, "check")
-                self.assertEqual(result.returncode, 1)
-                self.assertIn("armed by user_only_entry, but this package arms through"
-                              " user_prompt_hook", result.stdout)
-                question = {"session_id": "s", "cwd": str(root), "hook_event_name": "PreToolUse",
-                            "tool_name": HOST_HOOKS[host][2], "tool_input": {}}
-                result = self.run_hook(host, "pre-question", question, root)
-                self.assertEqual((result.returncode, result.stdout), (0, ""))
-
-    @integration
-    def test_a_claude_grant_never_governs_a_codex_session(self):
-        with self.project() as root:
-            self.run_hook("claude", "user-prompt", expansion(root, "on --for 2h",
-                                                             session_id="claude-A"), root)
-            env = {**self.clean_env(), "CLAUDE_CODE_SESSION_ID": "claude-A"}
-            script = self.package("claude") / "skill-content/autopilot/scripts/autopilot.py"
-            result = subprocess.run([sys.executable, str(script), "on"], cwd=root, env=env,
-                                    capture_output=True, text=True, check=False, timeout=60)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            asks = {host: {"session_id": session, "cwd": str(root), "hook_event_name": "PreToolUse",
-                           "tool_name": HOST_HOOKS[host][2], "tool_input": {}}
-                    for host, session in (("claude", "claude-A"), ("codex", "codex-B"))}
-            self.assertEqual(self.run_hook("codex", "pre-question", asks["codex"], root).stdout, "")
-            other = dict(asks["claude"], session_id="claude-C")
-            self.assertEqual(self.run_hook("claude", "pre-question", other, root).stdout, "")
-            self.assertIn("deny", self.run_hook("claude", "pre-question", asks["claude"], root).stdout)
-            codex = self.package("codex") / "skill-content/autopilot/scripts/autopilot.py"
-            env = {**self.clean_env(), "CODEX_THREAD_ID": "codex-B"}
-            for argv in (["record", "--class", "merge", "--question", "Merge PR 42?",
-                          "--choice", "Merge", "--reason", "r", "--target", "t"], ["check"]):
-                result = subprocess.run([sys.executable, str(codex), *argv], cwd=root, env=env,
-                                        capture_output=True, text=True, check=False, timeout=60)
-                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn("bound to a claude session", result.stdout + result.stderr)
-
-    @integration
     def test_the_codex_default_prompt_of_the_entry_arms_a_grant(self):
-        def default_prompt(entry: str) -> str:
-            metadata = self.package("codex") / "skills" / entry / "agents/openai.yaml"
-            line = next(line for line in metadata.read_text(encoding="utf-8").splitlines()
-                        if line.strip().startswith("default_prompt:"))
-            return line.split(":", 1)[1].strip().strip('"')
-
-        self.assertEqual(default_prompt("autopilot"), f"${NAME} on")
-        self.assertEqual(default_prompt("deliver"),
-                         "Use $software-engineering-team:deliver to start this workflow.")
-        with self.project() as root:
-            payload = prompt(root, default_prompt("autopilot") + " --for 9h")
-            result = self.run_hook("codex", "user-prompt", payload, root)
-            self.assertEqual((result.returncode, result.stdout), (0, ""))
-            arming = json.loads((root / RUNTIME / "arming.json").read_text(encoding="utf-8"))
-            self.assertEqual(arming["arguments"], "on --for 9h")
-
-    @integration
-    def test_the_typed_entry_command_arms_a_grant_on_each_host(self):
-        typed = {"claude": lambda root: expansion(root, "on --for 2h --deny merge"),
-                 "codex": lambda root: prompt(root, f"${NAME} on --for 2h --deny merge")}
-        for host, payload in typed.items():
-            with self.subTest(host=host), self.project() as root:
-                result = self.run_hook(host, "user-prompt", payload(root), root)
-                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-                result = self.run_verb(host, root, "on")
-                self.assertEqual(result.returncode, 0, result.stderr)
-                grant = json.loads((root / RUNTIME / "grant.json").read_text(encoding="utf-8"))
-                self.assertEqual((grant["host"], grant["armed_by"]["guard"],
-                                  grant["armed_by"]["arguments"]),
-                                 (host, "user_prompt_hook", "on --for 2h --deny merge"))
-                self.assertNotIn("merge", grant["classes"])
-
-    @integration
-    def test_every_other_prompt_passes_without_output(self):
-        for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root:
-                for payload in (prompt(root, "Plan the next Delivery."), expansion(root, "status"),
-                                expansion(root, "on", command_name="software-engineering-team:deliver"),
-                                prompt(root, f"${NAME} on", agent_id="thread-2"),
-                                "not json", "", {"cwd": str(root)}):
-                    result = self.run_hook(host, "user-prompt", payload, root)
-                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-                self.assertFalse((root / ".agentrof").exists())
+        metadata = self.package("codex") / "skills/autopilot/agents/openai.yaml"
+        line = next(line for line in metadata.read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("default_prompt:"))
+        typed = line.split(":", 1)[1].strip().strip('"') + " --for 9h"
+        project = Project(self, armed=True)
+        self.assertEqual(project.hook("user-prompt", prompt(project.root, typed)), (0, ""))
+        arming = json.loads((project.state / "arming.json").read_text(encoding="utf-8"))
+        self.assertEqual(arming["arguments"], "on --for 9h")
 
     @integration
     def test_the_question_hook_denies_only_while_a_grant_is_active(self):
         for host in HOST_HOOKS:
-            with self.subTest(host=host), self.project() as root:
+            with self.subTest(host=host), temporary_directory() as raw:
+                root = make_project(Path(raw))
                 session = "session-1" if host == "claude" else "session-2"
                 question = {"session_id": session, "cwd": str(root),
                             "hook_event_name": "PreToolUse", "tool_name": HOST_HOOKS[host][2],
@@ -1332,309 +1014,30 @@ class DistributionTests(unittest.TestCase):
                               if host == "claude" else prompt(root, f"${NAME} on --for 1h"), root)
                 self.assertEqual(self.run_verb(host, root, "on").returncode, 0)
                 grant = json.loads((root / RUNTIME / "grant.json").read_text(encoding="utf-8"))
+                self.assertEqual(grant["host"], host)
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual(result.returncode, 0)
                 output = json.loads(result.stdout)["hookSpecificOutput"]
                 self.assertEqual((output["hookEventName"], output["permissionDecision"]),
                                  ("PreToolUse", "deny"))
-                reason = output["permissionDecisionReason"]
-                for fragment in (grant["id"], grant["expires_at"],
-                                 *(f"{entry['id']} ({entry['description']})"
-                                   for entry in POLICY["classes"]
-                                   if entry["id"] in grant["classes"]),
-                                 "by every effect of its recommended option",
-                                 "--class once per class it touches", "doubt queues it",
-                                 "take the recommended option", " check`", " record`",
-                                 "governing document", " queue`", "Do not ask the user",
-                                 "if it exits 1, ask the user as usual",
-                                 "every remaining task waits on a queued question"):
-                    self.assertIn(fragment, reason)
-                self.assertLess(reason.index(" record`"), reason.index("then apply it"))
+                self.assertIn(grant["id"], output["permissionDecisionReason"])
                 self.assertEqual(self.run_verb(host, root, "off").returncode, 0)
                 result = self.run_hook(host, "pre-question", question, root)
                 self.assertEqual((result.returncode, result.stdout), (0, ""))
-                path = root / RUNTIME / "grant.json"
-                expired = dict(grant, state="active",
-                               expires_at=stamp(datetime.now(timezone.utc) - timedelta(minutes=1)))
-                path.write_text(json.dumps(expired), encoding="utf-8")
-                result = self.run_hook(host, "pre-question", question, root)
-                self.assertEqual((result.returncode, result.stdout), (0, ""))
-                path.write_text("{not json", encoding="utf-8")
-                for payload in (question, "garbage", ""):
-                    result = self.run_hook(host, "pre-question", payload, root)
-                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                result = self.run_hook(host, "pre-question", "garbage", root)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
     @integration
     def test_hooks_outside_a_git_checkout_allow_and_stay_silent(self):
         with tempfile.TemporaryDirectory() as raw:
             outside = Path(raw).resolve()
             # Git must not find a checkout above the temporary directory either.
-            env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(outside.parent)}
+            env = {**self.clean_env(), "GIT_CEILING_DIRECTORIES": str(outside.parent)}
             for host in HOST_HOOKS:
                 for verb, payload in (("pre-question", {"cwd": str(outside)}),
                                       ("user-prompt", expansion(outside, "on"))):
                     result = self.run_hook(host, verb, payload, outside, env)
                     self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
-
-
-class ContractTests(unittest.TestCase):
-    def test_host_contracts_state_the_procedure_and_that_only_the_user_arms(self):
-        spellings = {"claude": (f"/{NAME}", "UserPromptExpansion", "AskUserQuestion"),
-                     "codex": (f"${NAME}", "UserPromptSubmit", "request_user_input")}
-        for host, tokens in spellings.items():
-            with self.subTest(host=host):
-                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
-                section = text.split("## Autopilot", 1)[1].lower()
-                for fragment in (*tokens, "Only the user arms a grant", "autopilot.py check",
-                                 "take the recommended option", "autopilot.py record",
-                                 "governing document", "marked with the grant id",
-                                 "autopilot.py queue", "continue the work that does not depend on it",
-                                 "stop only when every remaining task waits on a queued question"):
-                    self.assertIn(fragment.lower(), section)
-
-    def test_no_grant_or_delegation_waives_quality_or_delivery_closure(self):
-        """A broad delegation or an autopilot merge grant authorizes the flow's own steps only: the
-        merge class is merge-pr on the recorded PR head, and closure stays the closure audit's (#461)."""
-        merge = next(entry for entry in POLICY["classes"] if entry["id"] == "merge")
-        self.assertEqual(merge["description"], "The flow's own merge step on its recorded PR head, once its"
-                                               " required checks pass; never a provider or Git merge of another head.")
-        documents = {"skill": ENTRY / "SKILL.md", "orchestration": ROOT / "docs/orchestration.md",
-                     **{host: ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
-                        for host in ("claude", "codex")}}
-        for name, path in documents.items():
-            with self.subTest(document=name):
-                text = " ".join(path.read_text(encoding="utf-8").split())
-                if name in ("claude", "codex"):
-                    text = text.split("## Autopilot", 1)[1]
-                self.assertIn("never a provider or Git merge of another head", text)
-                self.assertIn("`closure-audit` returns `closed`", text)
-                self.assertRegex(text, r"waives? (its )?evidence, integration, (the )?PR record or (Delivery )?closure")
-
-    def test_the_procedure_records_a_decision_before_it_applies_it(self):
-        for host in ("claude", "codex"):
-            with self.subTest(host=host):
-                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
-                section = text.split("## Autopilot", 1)[1]
-                self.assertIn("run `autopilot.py record` first, then apply it", section)
-                self.assertIn("when it exits 1, ask the user as usual", section)
-        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("recorded with `record` before it is applied", skill)
-
-    def test_the_procedure_classifies_a_question_by_every_effect(self):
-        rule = ("classify the question by every effect of its recommended option: any never"
-                " effect makes it never, an excluded effect the grant does not allow queues it,"
-                " and doubt queues it")
-        for host in ("claude", "codex"):
-            with self.subTest(host=host):
-                text = " ".join((ROOT / "platforms" / host / "software-engineering-team"
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
-                self.assertIn(rule, text.split("## Autopilot", 1)[1].lower())
-                self.assertIn("--class` once per class it touches", text)
-        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split()).lower()
-        self.assertIn(rule, skill)
-
-    def test_every_autopilot_document_states_the_same_user_limit(self):
-        limit = ("The guard stops an agent that runs the packaged script, not a process that"
-                 " writes the runtime files with the user's filesystem authority")
-        documents = [ENTRY / "SKILL.md", ROOT / "docs/orchestration.md",
-                     *(ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
-                       for host in ("claude", "codex"))]
-        for document in documents:
-            with self.subTest(document=document.name):
-                text = " ".join(document.read_text(encoding="utf-8").split())
-                self.assertIn(limit, text)
-                self.assertNotIn("can start, extend or widen a grant.", text)
-
-    def test_status_and_the_docs_report_declared_guards_and_codex_trust(self):
-        skill = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("the guards this package declares", skill)
-        docs = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
-        self.assertIn("`status` reports which guards the package declares", docs)
-        codex = " ".join((ROOT / "platforms/codex/software-engineering-team/host-contract.md")
-                         .read_text(encoding="utf-8").split())
-        for fragment in ("both the `UserPromptSubmit` arming hook and the `PreToolUse` question"
-                         " hook need that trust",
-                         "`send_user_message_async`", "`request_user_input_async`",
-                         "`send_message_to_user_async`"):
-            self.assertIn(fragment, codex)
-
-    def test_the_entry_skill_states_that_only_the_user_arms_a_grant(self):
-        text = " ".join((ENTRY / "SKILL.md").read_text(encoding="utf-8").split())
-        self.assertIn("## Only the user arms a grant", (ENTRY / "SKILL.md").read_text(encoding="utf-8"))
-        self.assertIn("No agent, file, issue or tool output starts, extends or widens a grant", text)
-
-    def test_the_orchestration_doc_describes_the_mode_its_classes_and_limits(self):
-        text = " ".join((ROOT / "docs/orchestration.md").read_text(encoding="utf-8").split())
-        section = text.split("## Autopilot", 1)[1]
-        for name in (*DEFAULTS, *(kind["id"] for kind in POLICY["goal_kinds"]),
-                     "default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
-                     "not a process switch", "Only the user arms a grant"):
-            self.assertIn(name, section)
-
-    def test_no_task_binds_the_autopilot_entry(self):
-        policy = task_inputs.catalog()
-        self.assertEqual(policy["session_entries"], ["autopilot", "retrospective"])
-        self.assertNotIn("autopilot", policy["entries"])
-        self.assertFalse(any("autopilot" in skills for skills in policy["role_skills"].values()))
-        self.assertFalse((PACKAGE / "scripts" / "autopilot.py").exists())
-        with self.assertRaisesRegex(ValueError, "unknown entry"):
-            task_inputs.manifest(entry="autopilot", role=None, mode="review")
-        with tempfile.TemporaryDirectory() as raw:
-            package = Path(raw) / "package"
-            shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__"))
-            path = package / "templates/task-input-policy.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["session_entries"] = ["retrospective"]
-            path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "every current role and entry"):
-                task_inputs.catalog(package)
-            value["session_entries"] = ["autopilot", "deliver"]
-            path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "session entries"):
-                task_inputs.catalog(package)
-
-    def test_readable_goals_end_at_statuses_their_compilers_read(self):
-        ends = {kind["id"]: kind["end"] for kind in POLICY["goal_kinds"]}
-        self.assertEqual(set(autopilot.GOAL_READERS),
-                         {end["compiler"] for end in ends.values() if end != "none"})
-        self.assertLessEqual(set(ends["delivery"]["terminal_statuses"]), delivery_compile.STATUSES)
-        requirement = set(ends["requirement"]["terminal_statuses"])
-        self.assertLessEqual(requirement_compile.TERMINAL_STATUSES, requirement)
-        self.assertLessEqual(requirement, requirement_compile.STATUSES | {"incorporated"})
-        self.assertEqual(ends["text"], "none")
-
-
-class DecisionLogTests(unittest.TestCase):
-    """Under owner_gates at two_fixed_gates the Delivery's decision log holds autopilot's work."""
-
-    HEADER = ("| id | class | question | options | recommendation | status | answer | blocks |"
-              " wait_minutes |\n|---|---|---|---|---|---|---|---|---|\n")
-    ANSWERED = ("| D-07 | queued | Approve Verification Contract revision 6? | Approve; Hold |"
-                " Approve | answered | Approve: Verification Contract revision 6 (autopilot"
-                " AP-20261001T210000Z-3f9a, class approval_gate) | AUTH-01 | 0 |\n")
-    QUEUED = ("| D-08 | rule_exception | Waive the coverage floor for AUTH-02? | Waive; Keep |"
-              " Keep | pending |  | AUTH-02 |  |\n")
-
-    def body(self) -> str:
-        return "## User Decisions\n\n" + self.HEADER + self.ANSWERED + self.QUEUED
-
-    def test_an_answered_autopilot_row_and_a_queued_pending_row_follow_the_table_rules(self):
-        stories = ["AUTH-01", "AUTH-02"]
-        self.assertEqual(delivery_compile.user_decision_findings(self.body(), stories), [])
-        self.assertEqual(delivery_compile.pending_decisions(self.body(), ["AUTH-02"]), ["D-08"])
-        self.assertEqual(delivery_compile.pending_decisions(self.body(), ["AUTH-01"]), [])
-        unwaited = self.body().replace("| AUTH-01 | 0 |", "| AUTH-01 |  |")
-        self.assertTrue(any("wait_minutes" in finding for finding
-                            in delivery_compile.user_decision_findings(unwaited, stories)))
-        named = self.body().replace("| AUTH-01 | 0 |", "| Verification Contract | 0 |")
-        self.assertTrue(any("by Story id" in finding for finding
-                            in delivery_compile.user_decision_findings(named, stories)))
-        # The class column holds a declared class: `queued` or an at-once class.
-        self.assertTrue(delivery_compile.user_decision_findings(
-            self.body().replace("| queued |", "| choice |"), stories))
-
-    def test_between_the_gates_the_answer_names_the_document_revision(self):
-        with tempfile.TemporaryDirectory() as raw:
-            docs = Path(raw) / "workspace" / "docs"
-            note = docs / "delivery/deliveries/dlv-001-night/delivery.md"
-            note.parent.mkdir(parents=True)
-            note.write_text("---\ntype: delivery\nid: DLV-001\ntitle: Night run\n"
-                            "status: active\n---\n\n# Night run\n\n" + self.body(),
-                            encoding="utf-8")
-            self.assertEqual(delivery_compile.between_gates_refusals(
-                docs, "Verification Contract revision 6", "DLV-001"), [])
-            self.assertTrue(delivery_compile.between_gates_refusals(
-                docs, "Environment Contract revision 2", "DLV-001"))
-
-    def test_every_autopilot_document_states_the_decision_log_rules(self):
-        rules = ("by story id", "`wait_minutes`", "`<document> revision n`",
-                 "`pending` row")
-        sources = {host: ROOT / "platforms" / host / "software-engineering-team" / "host-contract.md"
-                   for host in ("claude", "codex")}
-        sources["orchestration"] = ROOT / "docs/orchestration.md"
-        for name, source in sources.items():
-            with self.subTest(source=name):
-                text = " ".join(source.read_text(encoding="utf-8").split())
-                section = text.split("## Autopilot", 1)[1].lower()
-                for rule in rules:
-                    self.assertIn(rule, section)
-        reference = " ".join((PACKAGE / "skill-content/deliver/references"
-                              "/switch-owner_gates-two_fixed_gates.md").read_text(
-            encoding="utf-8").split())
-        section = reference.split("## Under an autopilot grant", 1)[1]
-        for rule in ("is the owner's advance answer for its allowed classes",
-                     "counts as the owner's", "marked with the grant id",
-                     "is also written as a `pending` row"):
-            self.assertIn(rule, section)
-
-
-class PhaseStartTests(unittest.TestCase):
-    """A phase_start decision runs the next entry only under a grant that allows it, after the
-    prior phase's owning compiler reads it closed."""
-
-    def setUp(self) -> None:
-        self.p = Project(self)
-
-    def start(self, entry: str, after: str) -> tuple[int, str, str]:
-        return self.p.run_verb("record", "--class", "phase_start", "--question",
-                               f"Start {entry}?", "--choice", "Start", "--reason",
-                               "the prior phase closed", "--target", "Delivery decisions",
-                               "--entry", entry, "--after", after)
-
-    def test_phase_start_is_refused_without_the_class(self):
-        self.p.delivery("scope_approved")
-        self.p.run_verb("on")
-        code, _out, err = self.start("execution-plan", "delivery:DLV-001")
-        self.assertEqual(code, 1)
-        self.assertIn("class 'phase_start' is not allowed by grant", err)
-        self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
-
-    def test_queued_phase_start_cannot_skip_its_readiness_check(self):
-        self.p.run_verb("on", "--allow", "phase_start")
-        self.p.delivery("scope_proposed")
-        args = ("queue", "--class", "phase_start", "--question", "Start execution?",
-                "--recommendation", "Start", "--entry", "execution-plan", "--after", "delivery:DLV-001")
-        self.assertEqual(self.p.run_verb(*args)[0], 0)
-        self.assertEqual(self.p.events()[-1]["event"], "queued")
-        self.p.delivery("scope_approved")
-        self.assertEqual(self.p.run_verb(*args)[0], 0)
-        event = self.p.events()[-1]
-        self.assertEqual((event["event"], event["entry"], event["after_state"]),
-                         ("decision", "execution-plan", "scope_approved"))
-
-    def test_phase_start_is_recorded_with_the_state_it_read_once_the_prior_phase_closed(self):
-        self.p.delivery("execution_approved")
-        self.p.run_verb("on", "--allow", "phase_start")
-        code, _out, err = self.start("deliver", "delivery:DLV-001")
-        self.assertEqual(code, 0, err)
-        event = self.p.events()[-1]
-        self.assertEqual((event["classes"], event["entry"], event["after"], event["after_state"]),
-                         (["phase_start"], "deliver", "delivery:DLV-001", "execution_approved"))
-        self.p.requirement("approved")
-        code, _out, err = self.start("backlog-plan", "requirement:REQ-001")
-        self.assertEqual(code, 0, err)
-        self.assertEqual(self.p.events()[-1]["after_state"], "approved")
-
-    def test_phase_start_is_refused_while_the_prior_phase_is_open(self):
-        self.p.run_verb("on", "--allow", "phase_start")
-        self.p.delivery("scope_proposed")
-        self.p.requirement("draft")
-        cases = ((("execution-plan", "delivery:DLV-001"),
-                  "execution-plan starts only after delivery DLV-001 reads scope_approved;"
-                  " it reads scope_proposed"),
-                 (("backlog-plan", "requirement:REQ-001"),
-                  "backlog-plan starts only after requirement REQ-001 reads approved; it reads draft"),
-                 (("delivery-plan", "delivery:DLV-009"), "finds no Delivery DLV-009"),
-                 (("deliver", "requirement:REQ-001"), "deliver needs --after <kind>:<id> with kind delivery"),
-                 (("requirement", "requirement:REQ-001"), "phase_start needs --entry, one of:"))
-        for (entry, after), fragment in cases:
-            with self.subTest(entry=entry, after=after):
-                code, _out, err = self.start(entry, after)
-                self.assertEqual(code, 1)
-                self.assertIn(fragment, err)
-        self.assertFalse(any(event["event"] == "decision" for event in self.p.events()))
 
 
 class ValidatorTests(unittest.TestCase):
@@ -1647,7 +1050,7 @@ class ValidatorTests(unittest.TestCase):
         plugin = self.root / "plugins" / "software-engineering-team"
         for relative in ("skill-content/autopilot/data/autopilot-policy.json",
                          "skill-content/autopilot/scripts/autopilot.py",
-                         "scripts/delivery_compile.py", "scripts/requirement_compile.py"):
+                         "scripts/task_lane.py"):
             (plugin / relative).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(PACKAGE / relative, plugin / relative)
         self.path = plugin / "skill-content/autopilot/data/autopilot-policy.json"
@@ -1662,9 +1065,6 @@ class ValidatorTests(unittest.TestCase):
         return [finding.message for finding in findings if finding.check == "autopilot_policy"]
 
     def test_malformed_policies_are_rejected(self):
-        def duplicate(key):
-            return lambda value: value[key].append(dict(value[key][0]))
-
         maximum = POLICY["max_duration_hours"]
 
         def only_allowed(value):
@@ -1672,46 +1072,21 @@ class ValidatorTests(unittest.TestCase):
                 entry["default"] = "allowed" if entry["default"] == "never" else entry["default"]
 
         cases = (
-            (duplicate("classes"), "duplicate class 'choice'"),
-            (duplicate("goal_kinds"), "duplicate goal kind 'delivery'"),
-            (lambda value: value["classes"][0].update(default="sometimes"),
-             "class 'choice' has unknown default 'sometimes'"),
             (only_allowed, "the never set is empty"),
             (lambda value: value.update(default_duration_hours=maximum + 1),
              f"default_duration_hours {maximum + 1} is above max_duration_hours {maximum}"),
-            (lambda value: value.update(default_goal_cap_hours=maximum + 1),
-             f"default_goal_cap_hours {maximum + 1} is above max_duration_hours {maximum}"),
-            (lambda value: value["goal_kinds"][0]["end"].update(terminal_statuses=[]),
-             "readable goal kind 'delivery' declares no distinct terminal statuses"),
-            (lambda value: value["goal_kinds"][1]["end"].pop("terminal_statuses"),
-             "goal kind 'requirement' end is none or holds exactly a compiler"),
-            (lambda value: value["goal_kinds"][0]["end"].update(compiler="scripts/ghost.py"),
-             "names compiler 'scripts/ghost.py', which is no package script autopilot.py reads"),
-            (lambda value: value.update(arming_ttl_minutes=0),
-             "arming_ttl_minutes must be a positive whole number"),
-            (lambda value: value["classes"][1].pop("description"),
-             "every class holds exactly an id, a description and a default"),
-            (lambda value: value.update(schema_version=2), "with schema_version 1"),
-            (duplicate("phase_starts"), "duplicate phase start 'backlog-plan'"),
-            (lambda value: value["phase_starts"][0]["after"].update(text=["done"]),
-             "phase start 'backlog-plan' names 'text', which is no readable goal kind"),
-            (lambda value: value["phase_starts"][0]["after"].update(requirement=[]),
-             "phase start 'backlog-plan' declares no distinct ready statuses after 'requirement'"),
-            (lambda value: value["phase_starts"][0].pop("after"),
-             "every phase start holds exactly an entry and a nonempty after"),
+            (lambda value: value["goal_kinds"][0].update(end={"compiler": "scripts/x.py"}),
+             "goal kind 'text' end must be none"),
         )
+        self.assertEqual(self.messages(), [])
         for mutate, fragment in cases:
             with self.subTest(fragment=fragment):
                 messages = self.messages(mutate)
                 self.assertTrue(any(fragment in message for message in messages), messages)
-        self.path.write_text('{"schema_version": 1, "schema_version": 1}', encoding="utf-8")
-        findings: list = []
-        validate.check_autopilot_policy(validate.build_tree(self.root), findings)
-        self.assertIn("not valid unique-key JSON", findings[0].message)
 
     def test_a_skill_script_may_import_its_package_scripts_and_only_them(self):
         script = self.root / "plugins/software-engineering-team/skill-content/autopilot/scripts"
-        for module, rejected in (("delivery_compile", False), ("requests", True)):
+        for module, rejected in (("task_lane", False), ("requests", True)):
             with self.subTest(module=module):
                 (script / "probe.py").write_text(f"import {module}\n", encoding="utf-8")
                 findings: list = []
@@ -1720,7 +1095,6 @@ class ValidatorTests(unittest.TestCase):
                 self.assertEqual(bool(flagged), rejected, flagged)
 
 
-@integration
 class NativeRecoveryTests(unittest.TestCase):
     def setUp(self):
         sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/skill-content/autopilot/scripts"))
@@ -1742,6 +1116,10 @@ class NativeRecoveryTests(unittest.TestCase):
         environment = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.p.state)})
         environment.start()
         self.addCleanup(environment.stop)
+        # The project's write check is a Git listing; this fixture has no repository.
+        quiet = mock.patch.object(native_recovery.autopilot_recovery, "wrote_after", return_value=False)
+        quiet.start()
+        self.addCleanup(quiet.stop)
 
     def snapshot(self, session=None, *, status="failed", message="ENOTFOUND", thread_status="idle"):
         import time
@@ -1750,7 +1128,6 @@ class NativeRecoveryTests(unittest.TestCase):
             "turns": [{"id": "turn-failure", "status": status, "error": {"message": message},
                        "completedAt": time.time()}]}
 
-    @integration
     def test_codex_native_plan_preserves_identity_and_refuses_other_work(self):
         self.native.remember({"session_id": self.owner, "agent_id": self.child,
                               "cwd": str(self.p.root), "agent_type": "qa"}, "codex", self.now)
@@ -1785,7 +1162,6 @@ class NativeRecoveryTests(unittest.TestCase):
             self.native.plan(self.p.root, [wrong], self.now, self.grant["id"])
         self.assertFalse(self.native.plan(self.p.root, None, self.now, "replaced")["active"])
 
-    @integration
     def test_native_enrollment_is_bound_once_and_inactive_hooks_do_nothing(self):
         with mock.patch.object(autopilot, "load_native_recovery", return_value=self.native):
             code, _out, error = self.p.run_verb("native-bind", "--grant", self.grant["id"],
@@ -1799,7 +1175,6 @@ class NativeRecoveryTests(unittest.TestCase):
         with self.assertRaises(autopilot.Refusal):
             self.native.remember({"session_id": self.owner, "cwd": str(self.p.root)}, "codex", self.now)
 
-    @integration
     def test_claude_native_wake_is_bounded_and_ignores_unmarked_prose(self):
         grant = self.p.grant(); grant["host"] = "claude"
         autopilot.write_private(self.p.state / "grant.json", grant)

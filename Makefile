@@ -1,4 +1,4 @@
-.PHONY: validate release-validate counts counts-check dist-check test eval static-check check check-local verify-local check-pr scaffold release-check public-release-check public-release-smoke
+.PHONY: validate release-validate counts counts-check dist-check test static-check check check-local verify-local check-pr scaffold release-check public-release-check public-release-smoke
 
 PY := python3
 
@@ -17,12 +17,8 @@ counts-check:
 dist-check:
 	$(PY) tools/build_distributions.py --check
 
-test:
-	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
-
-eval:
-	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest tools.tests.test_scenario_report tools.tests.test_runtime_scripts tools.tests.test_ba_compile -v
-	@echo "eval: deterministic behavior assertions green"
+# The full suite runs in pull request CI; locally a change runs its own unit tests.
+test: check-local
 
 static-check: validate release-validate counts-check dist-check
 

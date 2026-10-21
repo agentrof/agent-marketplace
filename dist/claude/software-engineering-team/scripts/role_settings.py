@@ -2,16 +2,14 @@
 """Resolve the purpose class, model and reasoning effort of every role, per host.
 
 Every built package ships `templates/model-classes.json`: each role's package
-class, generated variants included, which classes escalate and on which risk
-flags, and per host each class slot's package model and effort (a class that
-escalates has a second slot, `<class>_escalated`), the variants only that host
-renders, how a spawn sets its model, the host's model catalog with the
+class, which classes escalate and on which risk flags, and per host each class
+slot's package model and effort (a class that escalates has a second slot,
+`<class>_escalated`), how a spawn sets its model, the host's model catalog with the
 efforts each model takes, the host's effort vocabulary and model ID shape,
 and the efforts the host asks the owner to confirm or refuses.
 `workspace/config.json` holds only a project's overrides:
 
-- `role_classes` moves a role to another class on every host; its escalated
-  variant follows it.
+- `role_classes` moves a role to another class on every host.
 - `class_models.<host>.<slot>` sets that slot's `model`, a model ID of the
   host's shape or `session`, and its `effort`; a missing key keeps the
   package value. `session` runs the slot's roles on the session's model.
@@ -71,7 +69,6 @@ def valid_class_map(value: object) -> bool:
         return False
     for spec in hosts.values():
         if not isinstance(spec, dict) or not isinstance(spec.get("classes"), dict) \
-                or not isinstance(spec.get("variants"), dict) \
                 or not isinstance(spec.get("models"), dict) \
                 or not isinstance(spec.get("efforts"), list) \
                 or not isinstance(spec.get("model_id_shape"), str) \
@@ -84,10 +81,6 @@ def valid_class_map(value: object) -> bool:
             return False
         if not all(isinstance(slot, dict) and isinstance(slot.get("model"), str)
                    for slot in spec["classes"].values()):
-            return False
-        if not all(isinstance(variant, dict) and variant.get("slot") in spec["classes"]
-                   and isinstance(variant.get("agent"), str)
-                   for variant in spec["variants"].values()):
             return False
     return True
 
@@ -105,11 +98,8 @@ def movable_roles(class_map: dict) -> dict[str, str]:
 
 
 def package_classes(class_map: dict, host: str) -> dict[str, str]:
-    """Each role the host renders, its own variants included, with its package slot."""
-    roles = movable_roles(class_map)
-    roles.update({name: variant["slot"]
-                  for name, variant in class_map["hosts"][host]["variants"].items()})
-    return roles
+    """Each role the host renders with its package slot."""
+    return movable_roles(class_map)
 
 
 def class_slots(class_map: dict, host: str) -> list[str]:
@@ -195,24 +185,15 @@ def role_classes(class_map: dict, config: dict) -> dict[str, str]:
 def resolve(class_map: dict, config: dict, host: str) -> dict[str, dict]:
     """Every role's class slot, model and effort on one host, each with its source.
 
-    A movable role's class comes from `role_classes`, else the package; an
-    escalated variant runs one level above its role's class, a purpose
-    variant on its own class; that slot's model and effort come from
-    `class_models`, else the package profile.
+    A role's class comes from `role_classes`, else the package; that slot's
+    model and effort come from `class_models`, else the package profile.
     """
     classes = role_classes(class_map, config)
     package = package_classes(class_map, host)
-    variants = class_map["hosts"][host]["variants"]
     overrides = host_overrides(config, host)
     rows = {}
     for role, package_slot in sorted(package.items()):
-        if role in classes:
-            slot = classes[role]
-        elif package_slot.endswith(f"_{ESCALATED}"):
-            slot = escalated_slot(class_map, classes.get(variants[role]["agent"],
-                                                         package_slot.removesuffix(f"_{ESCALATED}")))
-        else:
-            slot = package_slot
+        slot = classes.get(role, package_slot)
         rows[role] = {"class": slot, "class_source": PACKAGE if slot == package_slot else CONFIG,
                       **slot_setting(class_map, host, slot, overrides.get(slot))}
     return rows

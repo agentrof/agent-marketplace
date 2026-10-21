@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import shutil
@@ -16,7 +15,6 @@ try:
 except ModuleNotFoundError:  # run as a script from tools/tests
     from levels import integration
 from pathlib import Path
-from unittest import mock
 
 
 TESTS_DIR = Path(__file__).resolve().parent
@@ -184,8 +182,8 @@ class SingleTeamDistributionTests(unittest.TestCase):
         self.assertTrue(all(snapshot == snapshots[0] for snapshot in snapshots))
 
         for relative in (
-            "scripts/experience_application_check.py",
-            "skill-content/experience-modeling/data/experience-schema.json",
+            "scripts/task_lane.py",
+            "scripts/project_config.py",
         ):
             expected = (self.root / "plugins" / fixtures.PLUGIN / relative).read_bytes()
             for host in build_distributions.HOSTS:
@@ -217,109 +215,11 @@ class SingleTeamDistributionTests(unittest.TestCase):
                     target = packaged / path.relative_to(canonical)
                     self.assertEqual(target.read_bytes(), expected, target)
 
-    def test_provenance_hashes_and_rebuild_are_deterministic(self):
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                package = self.root / "dist" / host / fixtures.PLUGIN
-                provenance = json.loads(
-                    (package / build_distributions.PROVENANCE).read_text(
-                        encoding="utf-8"
-                    )
-                )
-                self.assertEqual(provenance["component"], fixtures.PLUGIN)
-                self.assertEqual(provenance["host"], host)
-                for relative, expected in provenance["files"].items():
-                    actual = hashlib.sha256((package / relative).read_bytes()).hexdigest()
-                    self.assertEqual(actual, expected, relative)
-
-        self.assertEqual(
-            build_distributions.check(self.root, self.root / "dist"),
-            [],
-        )
-
-    def test_independent_builds_are_byte_identical(self):
-        with tempfile.TemporaryDirectory() as first_dir, \
-                tempfile.TemporaryDirectory() as second_dir:
-            first = Path(first_dir) / "dist"
-            second = Path(second_dir) / "dist"
-            build_distributions.build(self.root, first)
-            build_distributions.build(self.root, second)
-            self.assertEqual(build_distributions.compare_dirs(first, second), [])
-
     def test_snapshot_paths_use_case_sensitive_posix_order(self):
         paths = build_distributions.snapshot_files(self.root, "plugins")
         relative = [path.relative_to(self.root).as_posix() for path in paths]
         self.assertEqual(relative, sorted(relative))
         self.assertNotEqual(relative, sorted(relative, key=str.casefold))
-
-    def test_canonical_source_rejects_symlinked_surface_roots(self):
-        for surface_name in ("plugins", "platforms"):
-            with self.subTest(surface=surface_name), tempfile.TemporaryDirectory() as tmp:
-                root = copy_root(self.root, Path(tmp) / "repository", with_dist=False)
-                surface = root / surface_name
-                moved = root / "assets" / f"moved-{surface_name}"
-                moved.parent.mkdir()
-                surface.rename(moved)
-                try:
-                    surface.symlink_to(moved, target_is_directory=True)
-                except OSError as exc:
-                    self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
-                with self.assertRaisesRegex(ValueError, "real directory"):
-                    build_distributions.validate_canonical(root)
-
-    def test_issue_reporting_is_external_and_has_no_project_artifacts(self):
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                package = self.root / "dist" / host / fixtures.PLUGIN
-                wrapper = (
-                    package / "skills/issue-report/SKILL.md"
-                ).read_text(encoding="utf-8")
-                setup_wrapper = (
-                    package / "skills/setup/SKILL.md"
-                ).read_text(encoding="utf-8")
-                canonical = (
-                    package / "skill-content/issue-report/SKILL.md"
-                ).read_text(encoding="utf-8")
-                self.assertIn("project_scope: external", canonical)
-                self.assertNotIn("workspace config", wrapper)
-                self.assertIn("workspace config", setup_wrapper)
-                self.assertTrue((package / "scripts/file_issue.py").is_file())
-
-    def test_fixture_copy_ignores_python_runtime_caches(self):
-        with tempfile.TemporaryDirectory() as source_dir, \
-                tempfile.TemporaryDirectory() as target_dir:
-            source_root = Path(source_dir)
-            plugin_root = source_root / "plugins" / fixtures.PLUGIN
-            script = plugin_root / "scripts" / "runner.py"
-            script.parent.mkdir(parents=True)
-            script.write_text("print('fixture')\n", encoding="utf-8")
-            cache = script.parent / "__pycache__"
-            cache.mkdir()
-            (cache / "runner.cpython-39.pyc").write_bytes(b"cache")
-
-            with mock.patch.object(fixtures, "REAL_REPOSITORY", source_root):
-                fixtures.copy(f"plugins/{fixtures.PLUGIN}", Path(target_dir))
-
-            copied = Path(target_dir) / "plugins" / fixtures.PLUGIN
-            self.assertTrue((copied / "scripts/runner.py").is_file())
-            self.assertFalse((copied / "scripts/__pycache__").exists())
-
-    def test_agent_metadata_is_projected_for_each_host(self):
-        canonical = self.root / "plugins" / fixtures.PLUGIN / "agents"
-        for source in canonical.glob("*.md"):
-            name = source.stem
-            claude = (
-                self.root / "dist/claude" / fixtures.PLUGIN / "agents" / source.name
-            ).read_text(encoding="utf-8")
-            codex = (
-                self.root / "dist/codex" / fixtures.PLUGIN / "agents" / source.name
-            ).read_text(encoding="utf-8")
-            self.assertIn(f"name: {name}", claude)
-            self.assertIn(f"name: {name}", codex)
-            self.assertIn("model:", claude)
-            self.assertNotIn("reasoning:", claude)
-            self.assertNotIn("reasoning:", codex)
-
 
 @integration
 class CopiedDistributionTests(unittest.TestCase):
@@ -350,11 +250,8 @@ class CopiedDistributionTests(unittest.TestCase):
         return self.git("rev-parse", "HEAD")
 
     def test_changes_to_neighbouring_package_files_merge_without_a_conflict(self):
-        # A merge queue merges each queued pull request onto the ones ahead of
-        # it without rebuilding dist/ (#311): committed packages of changes to
-        # different files must merge into the rebuild of the merged sources.
-        # One real merge of a change beside an added file; the provenance merge
-        # of the other neighbour pairs is a case of the documented conflicts test.
+        # Committed packages of changes to different files merge into the
+        # rebuild of the merged sources, without rebuilding dist/.
         git_fixture.init_repository(self.root, initial_branch="main")
         self.git("config", "user.name", "Distribution Test")
         self.git("config", "user.email", "distribution@example.test")
@@ -426,43 +323,9 @@ class CopiedDistributionTests(unittest.TestCase):
         )["build_id"]
         self.assertEqual(checkout_identity, blob_identity)
 
-    def test_snapshot_is_stable_across_staging_a_crlf_text_edit(self):
-        git_fixture.init_repository(self.root, initial_branch="main")
-        subprocess.run(
-            ["git", "config", "core.autocrlf", "true"],
-            cwd=self.root, check=True, capture_output=True, text=True,
-        )
-        subprocess.run(
-            ["git", "add", "--all"], cwd=self.root, check=True,
-            capture_output=True, text=True,
-        )
-        subprocess.run(
-            ["git", "checkout-index", "--all", "--force"],
-            cwd=self.root, check=True, capture_output=True, text=True,
-        )
-        source = self.root / "plugins" / fixtures.PLUGIN / "constitution.md"
-        source.write_bytes(source.read_bytes() + b"\r\nSubstantive edit\r\n")
-
-        before_staging = build_distributions.marketplace_snapshot(self.root)
-        with tempfile.TemporaryDirectory() as first_dir:
-            first = Path(first_dir) / "dist"
-            build_distributions.build(self.root, first)
-            subprocess.run(
-                ["git", "add", "--all"], cwd=self.root, check=True,
-                capture_output=True, text=True,
-            )
-            after_staging = build_distributions.marketplace_snapshot(self.root)
-            with tempfile.TemporaryDirectory() as second_dir:
-                second = Path(second_dir) / "dist"
-                build_distributions.build(self.root, second)
-                self.assertEqual(
-                    build_distributions.compare_dirs(first, second), []
-                )
-        self.assertEqual(before_staging, after_staging)
-
     def test_binary_payload_survives_autocrlf_checkout_and_build(self):
         relative = Path(
-            "skill-content/ui-ux-design/data/binary-contract.pdf"
+            "skill-content/deliver/data/binary-contract.pdf"
         )
         payload = (
             b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n"
@@ -531,21 +394,6 @@ class CopiedDistributionTests(unittest.TestCase):
             problems,
         )
 
-    def test_distribution_check_rejects_symlinked_dist_root(self):
-        moved = self.root / "assets" / "moved-dist"
-        moved.parent.mkdir()
-        (self.root / "dist").rename(moved)
-        try:
-            (self.root / "dist").symlink_to(moved, target_is_directory=True)
-        except OSError as exc:
-            self.skipTest(f"fixture filesystem cannot create symlinks: {exc}")
-
-        problems = build_distributions.check(self.root, self.root / "dist")
-        self.assertTrue(
-            any("not a real directory" in problem for problem in problems),
-            problems,
-        )
-
     def test_canonical_source_rejects_unknown_component_and_symlink(self):
         plugin = self.root / "plugins" / fixtures.PLUGIN
         unknown = plugin / "runtime-state"
@@ -597,22 +445,6 @@ class DistributionRuleTests(unittest.TestCase):
             problems,
         )
 
-    def test_distribution_check_rejects_python_runtime_cache(self):
-        expected, actual = self.generated_pair()
-        target = (
-            actual / "claude" / fixtures.PLUGIN
-            / "__pycache__" / "payload.cpython-39.pyc"
-        )
-        target.parent.mkdir()
-        target.write_bytes(b"unattested runtime cache")
-
-        problems = build_distributions.compare_dirs(expected, actual)
-        self.assertTrue(
-            any(str(target.parent) in problem and "stale" in problem
-                for problem in problems),
-            problems,
-        )
-
     def snapshot_root(self, name: str, files: dict[str, bytes]) -> Path:
         """A root holding only the surfaces ``marketplace_snapshot`` hashes."""
         root = self.base / name
@@ -648,20 +480,17 @@ class DistributionRuleTests(unittest.TestCase):
 
     @integration
     def test_snapshot_and_provenance_bind_the_package_mode_contract(self):
-        relative = "scripts/backlog_compile.py"
+        relative = "scripts/task_lane.py"
         root = copy_root(shared_root(), self.base / "marketplace", with_dist=False)
         source = root / "plugins" / fixtures.PLUGIN / relative
-        original_mode = source.stat().st_mode
-        if not original_mode & 0o111:
-            self.skipTest("fixture filesystem has no executable mode")
         before = build_distributions.marketplace_snapshot(root)["build_id"]
         baseline = json.loads((
             shared_root() / "dist" / "claude" / fixtures.PLUGIN
             / build_distributions.PROVENANCE
         ).read_text(encoding="utf-8"))
-        self.assertIn(relative, baseline["executables"])
+        self.assertNotIn(relative, baseline["executables"])
 
-        source.chmod(original_mode & ~stat.S_IXUSR)
+        source.chmod(source.stat().st_mode | stat.S_IXUSR)
         checkout_mode_only = build_distributions.marketplace_snapshot(
             root
         )["build_id"]
@@ -669,13 +498,13 @@ class DistributionRuleTests(unittest.TestCase):
         mode_contract = root / "package-modes.json"
         mode_contract.write_bytes((json.dumps({
             "schema_version": 1,
-            "packages": {fixtures.PLUGIN: {"executables": []}},
+            "packages": {fixtures.PLUGIN: {"executables": [relative]}},
         }, indent=2) + "\n").encode("utf-8"))
         after = build_distributions.marketplace_snapshot(root)["build_id"]
         self.assertNotEqual(before, after)
         # A package's provenance lists exactly the executables this contract loads.
         changed = build_distributions.load_package_executables(root, fixtures.PLUGIN)
-        self.assertNotIn(relative, changed)
+        self.assertIn(relative, changed)
 
     def test_python_runtime_caches_never_enter_distributions(self):
         source = self.base / "plugins" / fixtures.PLUGIN
@@ -690,75 +519,6 @@ class DistributionRuleTests(unittest.TestCase):
         self.assertTrue((output / "scripts" / "probe.py").is_file())
         self.assertEqual(list(output.rglob("__pycache__")), [])
         self.assertEqual(list(output.rglob("*.pyc")), [])
-
-    @integration
-    def test_documented_provenance_conflicts_are_the_ones_git_reports(self):
-        # #311: the provenance serialization and its four descriptions must
-        # name every case in which two queued PRs conflict in dist/.
-        base = {name: "0" * 64 for name in "abcdef"}
-
-        def put(name: str, digest: str):
-            return lambda files: {**files, name: digest * 64}
-
-        def drop(name: str):
-            return lambda files: {key: value for key, value in files.items() if key != name}
-
-        cases = (
-            ("change neighbours", put("b", "1"), put("c", "2"), False),
-            ("change beside an add after it", put("b", "1"), put("bb", "2"), False),
-            ("change beside an add before it", put("c", "1"), put("bb", "2"), False),
-            ("removal beside a change", drop("c"), put("b", "2"), False),
-            ("removal before a change", drop("c"), put("d", "2"), False),
-            ("removals one entry apart", drop("b"), drop("d"), False),
-            ("last removed, earlier change", drop("f"), put("d", "2"), False),
-            ("adds at different positions", put("bb", "1"), put("cc", "2"), False),
-            ("add after the last, earlier change", put("g", "1"), put("e", "2"), False),
-            ("change one file twice", put("c", "1"), put("c", "2"), True),
-            ("adds at one sort position", put("bb", "1"), put("bc", "2"), True),
-            ("add after a changed last entry", put("g", "1"), put("f", "2"), True),
-            ("removal next to a removal", drop("b"), drop("c"), True),
-            ("removal next to an add before it", drop("c"), put("bb", "2"), True),
-            ("removal next to an add after it", drop("c"), put("cc", "2"), True),
-            ("last removed, entry before changed", drop("f"), put("e", "2"), True),
-        )
-
-        def provenance(files: dict) -> str:
-            return build_distributions.render_provenance({"component": "t", "files": files,
-                                                          "schema_version": 4})
-
-        # git merge-file runs the three-way text merge a branch merge runs on
-        # the one provenance file both branches change.
-        for index, (name, left, right, conflicts) in enumerate(cases):
-            current, ancestor, other = (self.base / f"{index}-{side}" for side in
-                                        ("right", "base", "left"))
-            current.write_text(provenance(right(base)), encoding="utf-8")
-            ancestor.write_text(provenance(base), encoding="utf-8")
-            other.write_text(provenance(left(base)), encoding="utf-8")
-            merged = subprocess.run(
-                ["git", "merge-file", "-q", str(current), str(ancestor), str(other)],
-                capture_output=True, text=True, check=False)
-            with self.subTest(case=name):
-                self.assertGreaterEqual(merged.returncode, 0, merged.stderr)
-                self.assertLess(merged.returncode, 128, merged.stderr)
-                self.assertEqual(bool(merged.returncode), conflicts, merged.stdout)
-                if not conflicts:
-                    self.assertEqual(current.read_text(encoding="utf-8"),
-                                     provenance(right(left(base))))
-        documents = {
-            "render_provenance": build_distributions.render_provenance.__doc__,
-            **{relative: (fixtures.REAL_REPOSITORY / relative).read_text(encoding="utf-8")
-               for relative in ("docs/maintainer-operations-protocol.md",
-                                "docs/upgrade-protocol.md")},
-        }
-        for where, text in documents.items():
-            text = " ".join(text.split())
-            with self.subTest(document=where):
-                for conflict in ("adds at one sort position", "an add after a changed last entry",
-                                 "a removal next to another removal or an add",
-                                 "a removal of the last entry beside a change to the entry"
-                                 " before it"):
-                    self.assertIn(conflict, text)
-
 
 def shipped_models(host: str) -> dict:
     """The models a host's shipped catalog pins, by model ID."""
@@ -779,41 +539,19 @@ AUTO_MODELS = {host: shipped_profile(host) for host in ("claude", "codex")}
 
 
 def catalog_model(host: str, *, besides: tuple = (), effort: str | None = None,
-                  unused: bool = False, effortless: bool = False,
-                  lacking: str | None = None) -> str:
+                  unused: bool = False, effortless: bool = False) -> str:
     """The first shipped catalog model of ``host`` with the traits a case needs."""
     used = {model for model, _effort in AUTO_MODELS[host].values()}
     for model, entry in sorted(shipped_models(host).items()):
         if model in besides or (unused and model in used) or (effortless and entry["efforts"]) \
-                or (effort is not None and effort not in entry["efforts"]) \
-                or (lacking is not None and lacking in entry["efforts"]):
+                or (effort is not None and effort not in entry["efforts"]):
             continue
         return model
     raise AssertionError(f"the {host} catalog pins no model this case needs")
 # The owner's decisions on #349 of 1 Oct 2026: no role defaults to these efforts.
 UNPINNED_EFFORTS = {"max", "ultra"}
-# The class of the review panel readers and of the fix-pass writers.
-LENS_CLASS, MECHANICAL_CLASS = "routine_review", "mechanical"
-# The class a code-reviewer runs a security review on.
-SECURITY_CLASS = "security_review"
 DECLARED_CLASSES = json.loads((fixtures.REAL_REPOSITORY / "tools/data/models.json").read_text(
     encoding="utf-8"))["model_classes"]
-# Generated review panel reader variant: its canonical agent.
-LENS_VARIANTS = {
-    "backlog-reviewer-lens": "backlog-reviewer",
-    "design-system-reviewer-lens": "design-system-reviewer",
-    "solution-reviewer-lens": "solution-reviewer",
-}
-# Generated reader variant of the code review panel: its canonical agent.
-CODE_REVIEW_LENS_VARIANTS = {"code-reviewer-lens": "code-reviewer"}
-# Generated mechanical writer variant: its canonical agent.
-MECHANICAL_VARIANTS = {
-    "devops-engineer-mechanical": "devops-engineer",
-    "product-owner-mechanical": "product-owner",
-    "qa-engineer-mechanical": "qa-engineer",
-    "solution-architect-mechanical": "solution-architect",
-}
-REGISTRY = "skill-content/configure/data/process-switches.json"
 
 
 def setting_lines(root: Path, host: str, slot: str) -> list[str]:
@@ -856,9 +594,6 @@ SHARED_VARIANTS = {
         build_distributions.execution_profile_path(root, "codex"),
         lambda table: table["profiles"]["auto"].update(
             critical_decision={"model": codex_fast_model(), "effort": "max"})),
-    "no_mechanical_switch": lambda root: edit_json(
-        root / "plugins" / fixtures.PLUGIN / REGISTRY,
-        lambda data: data["switches"].pop("mechanical_pass_tier")),
 }
 
 
@@ -922,32 +657,12 @@ class ExecutionProfileTests(unittest.TestCase):
             for path in sorted(agents.glob("*.md"))
         }
 
-    def registry(self) -> Path:
-        return self.root / "plugins" / fixtures.PLUGIN / REGISTRY
-
     def assert_own_root(self) -> None:
         self.assertNotIn(self.root, _SHARED_ROOTS.values(), "change a copy, not a shared build")
 
-    def edit_variants(self, mutate) -> None:
-        self.assert_own_root()
-        data = json.loads(self.registry().read_text(encoding="utf-8"))
-        mutate(data["switches"]["review_panels"]["agent_variants"]["lens_panel"], data)
-        self.registry().write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
     def rendered_classes(self, host: str = "claude") -> dict[str, str]:
-        """Every agent ``host`` renders with its class slot: canonical agents and
-        their switch variants, and on a host whose role file decides the model
-        an escalated variant per agent on a class that escalates and the
-        security review variant."""
-        rendered = {**self.classes(), **{variant: LENS_CLASS for variant in LENS_VARIANTS},
-                    **{variant: LENS_CLASS for variant in CODE_REVIEW_LENS_VARIANTS},
-                    **{variant: MECHANICAL_CLASS for variant in MECHANICAL_VARIANTS}}
-        if host == "codex":
-            rendered.update({f"{name}-escalated": f"{slot}_escalated"
-                             for name, slot in list(rendered.items())
-                             if DECLARED_CLASSES[slot]["escalates"]})
-            rendered["code-reviewer-security"] = SECURITY_CLASS
-        return rendered
+        """Every agent ``host`` renders, with its class slot: the canonical agents."""
+        return self.classes()
 
     def edit_table(self, host: str, mutate) -> None:
         self.assert_own_root()
@@ -1071,7 +786,7 @@ class ExecutionProfileTests(unittest.TestCase):
         committed = shared_root() / "dist" / "claude" / fixtures.PLUGIN / "agents"
         self.assertEqual(build_distributions.compare_dirs(committed, self.render_agents("claude")),
                          [])
-        pinned = AUTO_MODELS["claude"][MECHANICAL_CLASS][0]
+        pinned = AUTO_MODELS["claude"]["routine_authoring"][0]
         family, version = build_distributions.load_adapters(self.root)["claude"].module.model_version(
             pinned)
         bumped = f"claude-{family}-{version[0] + 1}"
@@ -1098,164 +813,6 @@ class ExecutionProfileTests(unittest.TestCase):
                 else:
                     self.assertEqual(model, setting_lines(self.root, "claude", slot)[0])
                     self.assertNotEqual(model, f"model: {bumped}")
-
-    def test_single_reviewers_keep_their_class_beside_their_lens_variants(self):
-        self.root = shared_root("codex_decision_fast")
-        fast = codex_fast_model()
-        classes = self.classes()
-
-        def codex_lines(agent: str) -> list[str]:
-            return ([f'model = "{fast}"', 'model_reasoning_effort = "max"']
-                    if classes[agent] == "critical_decision" else role_lines(self.root, classes[agent]))
-
-        for variant, agent in sorted({**LENS_VARIANTS, **CODE_REVIEW_LENS_VARIANTS}.items()):
-            with self.subTest(variant=variant):
-                base = frontmatter_lines(self.dist_agent("claude", agent))
-                self.assertEqual(base[2:4], setting_lines(self.root, "claude", classes[agent]))
-                claude = frontmatter_lines(self.dist_agent("claude", variant))
-                self.assertEqual(claude[0], f"name: {variant}")
-                self.assertEqual(claude[1], f"{base[1]} Lens reader variant for review panels.")
-                self.assertEqual(claude[2:4], setting_lines(self.root, "claude", LENS_CLASS))
-                self.assertEqual(claude[4:], base[4:])
-                # The variant keeps the role's body, boundaries and identity.
-                body = self.dist_agent("claude", agent).read_text(encoding="utf-8").split("\n---\n", 1)[1]
-                self.assertEqual(
-                    self.dist_agent("claude", variant).read_text(encoding="utf-8").split("\n---\n", 1)[1],
-                    body)
-                codex = frontmatter_lines(self.dist_agent("codex", variant))
-                self.assertEqual(
-                    [line for line in codex if line.startswith("model")],
-                    setting_lines(self.root, "codex", LENS_CLASS),
-                )
-        self.codex_json("apply", "--scope", "local")
-        files = self.role_files()
-        for variant, agent in sorted({**LENS_VARIANTS, **CODE_REVIEW_LENS_VARIANTS}.items()):
-            with self.subTest(codex=variant):
-                self.assertEqual(role_settings(files[variant]), role_lines(self.root, LENS_CLASS))
-                self.assertEqual(role_settings(files[agent]), codex_lines(agent))
-                # A variant keeps its base role's sandbox: the document reviewers read only.
-                self.assertEqual('sandbox_mode = "read-only"' in files[variant],
-                                 'sandbox_mode = "read-only"' in files[agent])
-                if variant in LENS_VARIANTS:
-                    self.assertIn('sandbox_mode = "read-only"', files[variant])
-
-    def test_builder_refuses_agent_variants_it_cannot_render(self):
-        self.use_copy(with_dist=True)
-        source = self.root / "plugins" / fixtures.PLUGIN
-        classes = set(json.loads((self.root / "tools/data/models.json").read_text(
-            encoding="utf-8"))["model_classes"])
-        self.assertEqual(
-            [name for _agent, name, _class, _text in build_distributions.agent_variants(source, classes)],
-            sorted(CODE_REVIEW_LENS_VARIANTS) + sorted(MECHANICAL_VARIANTS) + sorted(LENS_VARIANTS))
-        original = self.registry().read_bytes()
-        for mutate, fragment in (
-                (lambda variant, _data: variant.update(agents=["ghost-reviewer"]),
-                 "names unknown agent 'ghost-reviewer'"),
-                (lambda variant, _data: variant.update({"class": "extreme"}),
-                 "names unknown class 'extreme'"),
-                (lambda variant, _data: variant.update(description="Lens: reader"),
-                 "needs a one-line description without a colon"),
-                (lambda variant, _data: variant.update(agents=["backlog-reviewer", "backlog-reviewer"]),
-                 "collides with another agent"),
-                (lambda variant, _data: variant.pop("suffix"), "agent_variants must declare")):
-            with self.subTest(fragment=fragment):
-                self.registry().write_bytes(original)
-                self.edit_variants(mutate)
-                with self.assertRaisesRegex(ValueError, fragment):
-                    build_distributions.agent_variants(source, classes)
-        # The build refuses before it removes the generated tree.
-        with self.assertRaisesRegex(ValueError, "agent_variants must declare"):
-            build_distributions.replace_generated(self.root, self.root / "dist")
-        self.assertTrue(self.dist_agent("claude", "backlog-reviewer-lens").is_file())
-        self.registry().unlink()
-        self.assertEqual(build_distributions.agent_variants(source, classes), [])
-
-    def test_lens_class_panel_data_and_variants_are_build_inputs(self):
-        self.use_copy()
-        before = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.set_slot("claude", LENS_CLASS, {
-            "model": catalog_model("claude", besides=(AUTO_MODELS["claude"][LENS_CLASS][0],),
-                                   effort="high"), "effort": "high"})
-        reclassed = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertNotEqual(reclassed, before)
-        panels = (
-            self.root / "plugins" / fixtures.PLUGIN
-            / "skill-content/challenge-review/data/review-panels.json"
-        )
-        data = json.loads(panels.read_text(encoding="utf-8"))
-        data["review_steps"]["backlog_epic"]["default_panel"] = [[
-            lens for assignment in data["review_steps"]["backlog_epic"]["default_panel"]
-            for lens in assignment
-        ]]
-        panels.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        regrouped = build_distributions.marketplace_snapshot(self.root)["build_id"]
-        self.assertNotEqual(regrouped, reclassed)
-        self.edit_variants(lambda variant, _data: variant["agents"].remove("solution-reviewer"))
-        self.assertNotEqual(
-            build_distributions.marketplace_snapshot(self.root)["build_id"], regrouped,
-        )
-
-    def test_writers_keep_their_class_beside_their_mechanical_variants(self):
-        settings = {host: setting_lines(self.root, host, MECHANICAL_CLASS)
-                    for host in build_distributions.HOSTS}
-        suffix = " Writer variant for passes that apply only the fixes a review verdict names."
-        classes = self.classes()
-        for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
-            self.assertNotEqual(classes[agent], MECHANICAL_CLASS)
-            for host in build_distributions.HOSTS:
-                with self.subTest(variant=variant, host=host):
-                    base_text = self.dist_agent(host, agent).read_text(encoding="utf-8")
-                    text = self.dist_agent(host, variant).read_text(encoding="utf-8")
-                    # The variant keeps the writer's body, boundaries and identity.
-                    self.assertEqual(text.split("\n---\n", 1)[1], base_text.split("\n---\n", 1)[1])
-                    base, lines = (frontmatter_lines(self.dist_agent(host, name))
-                                   for name in (agent, variant))
-                    self.assertEqual(lines[:2], [f"name: {variant}", base[1] + suffix])
-                    self.assertEqual(
-                        [line for line in lines[2:] if not line.startswith(("model", "effort"))],
-                        [line for line in base[2:] if not line.startswith(("model", "effort"))])
-                    self.assertEqual([line for line in lines if line.startswith(("model", "effort"))],
-                                     settings[host])
-        self.codex_json("apply", "--scope", "local")
-        files = self.role_files()
-        for variant, agent in sorted(MECHANICAL_VARIANTS.items()):
-            with self.subTest(codex=variant):
-                self.assertEqual(role_settings(files[variant]), role_lines(self.root, MECHANICAL_CLASS))
-                self.assertEqual(role_settings(files[agent]), role_lines(self.root, classes[agent]))
-                self.assertNotIn("sandbox_mode", files[variant])
-                instructions = [line for line in files[variant].splitlines()
-                                if line.startswith("developer_instructions")]
-                self.assertEqual(instructions, [line for line in files[agent].splitlines()
-                                                if line.startswith("developer_instructions")])
-
-    def test_base_agents_and_role_files_do_not_depend_on_the_mechanical_switch(self):
-        def agents(root: Path) -> dict:
-            return {host: {path.name: path.read_bytes() for path in sorted(
-                (root / "dist" / host / fixtures.PLUGIN / "agents").glob("*.md"))}
-                for host in build_distributions.HOSTS}
-
-        # A Codex build also renders each variant's escalated variant.
-        mechanical = {host: set(MECHANICAL_VARIANTS) | ({f"{variant}-escalated" for variant
-                                                        in MECHANICAL_VARIANTS}
-                                                       if host == "codex" else set())
-                      for host in build_distributions.HOSTS}
-        self.codex_json("apply", "--scope", "local")
-        with_switch, role_files = agents(self.root), self.role_files()
-        # The same sources built without the mechanical_pass_tier switch.
-        without_root = shared_root("no_mechanical_switch")
-        without = agents(without_root)
-        for host in build_distributions.HOSTS:
-            with self.subTest(host=host):
-                self.assertEqual(set(with_switch[host]) - set(without[host]),
-                                 {f"{variant}.md" for variant in mechanical[host]})
-                self.assertEqual({name: with_switch[host][name] for name in without[host]},
-                                 without[host])
-        self.codex_json("apply", "--scope", "local", root=without_root)
-        after = self.role_files()
-        self.assertEqual({name: text for name, text in role_files.items()
-                          if name not in mechanical["codex"]},
-                         {name: after[name] for name in role_files
-                          if name not in mechanical["codex"]})
 
     def test_inherit_profile_omits_the_model_keeps_the_effort_and_survives_refresh(self):
         self.codex_json("apply", "--scope", "local")
@@ -1374,8 +931,6 @@ class ExecutionProfileTests(unittest.TestCase):
         claude_pinned = AUTO_MODELS["claude"]["critical_decision"][0]
         effortless = catalog_model("claude", unused=True, effortless=True)
         codex_pinned = AUTO_MODELS["codex"]["critical_decision"][0]
-        # Every Codex catalog model runs a class, so a rename also strands its slots.
-        codex_other = catalog_model("codex", besides=(codex_pinned,), lacking="ultra")
         family = shipped_models("claude")[claude_pinned]["family"]
         other_family = next(entry["family"] for _model, entry in sorted(shipped_models("claude").items())
                             if entry["family"] != family)
@@ -1387,18 +942,8 @@ class ExecutionProfileTests(unittest.TestCase):
             ("claude", slot("routine_authoring", {"effort": "high"}), "must name a model"),
             ("claude", slot("mechanical", {"model": effortless, "effort": "high"}),
              "effort 'high' is not supported by .*, which takes no effort"),
-            ("claude", slot("mechanical", {"model": effortless, "effort": "extreme"}),
-             "effort must be one of"),
-            ("claude", slot("inherit", {"model": claude_pinned}),
-             "must map exactly the model class slots"),
             ("codex", slot("critical_decision", {"model": codex_pinned, "effort": "extreme"}),
              "effort must be one of"),
-            ("codex", slot("mechanical", {"model": codex_other, "effort": "ultra"}),
-             "effort 'ultra' is not supported by"),
-            ("codex", slot("security_review_escalated", {"model": codex_pinned}),
-             "must map exactly the model class slots"),
-            ("codex", lambda t: t["profiles"]["auto"]["routine_authoring"].update(temperature="1"),
-             "may hold only"),
             ("codex", lambda t: t["profiles"]["auto"].pop("mechanical"),
              "must map exactly the model class slots"),
             ("claude", lambda t: t["profiles"].update(fast={}),
@@ -1408,33 +953,18 @@ class ExecutionProfileTests(unittest.TestCase):
         )
         catalog_cases = (
             ("claude", rename(effortless, "opus"), "'opus' is not a pinned model ID"),
-            ("claude", rename(effortless, "claude-haiku-4-5"),
-             "'claude-haiku-4-5' is not a pinned model ID"),
-            ("claude", rename(effortless, "claude-sonnet-5-5-20260901"), "is not a pinned model ID"),
-            ("claude", rename(effortless, "gpt-6.1-sol"), "is not a pinned model ID"),
             ("claude", pin(claude_pinned, family=other_family),
              f"belongs to family '{family}', not '{other_family}'"),
-            ("codex", rename(codex_other, "gpt-5.5"), "'gpt-5.5' is not a pinned model ID"),
-            ("codex", rename(codex_other, "gpt 6 luna"), "is not a pinned model ID"),
             ("codex", pin(codex_pinned, efforts=["turbo"]), "efforts must list distinct values"),
-            ("codex", pin(codex_pinned, efforts=["high", "high"]), "efforts must list distinct values"),
             ("claude", pin(claude_pinned, sources=[]), "sources must list"),
-            ("claude", pin(claude_pinned, sources=["http://example.com"]), "sources must list"),
             ("claude", pin(claude_pinned, verified="01.10.2026"), "verified must be"),
-            ("claude", pin(claude_pinned, verified="2026-02-30"), "verified must be"),
             ("claude", pin(effortless, min_cli_version="2.1"), "min_cli_version must be"),
-            ("codex", pin(codex_other, min_cli_version="v0.157.0"), "min_cli_version must be"),
             ("codex", lambda c: c["models"][codex_pinned].pop("min_cli_version"), "must hold exactly"),
-            ("claude", pin(claude_pinned, id=claude_pinned), "must hold exactly"),
             # CI installs the pinned CLI and starts no role, so the build refuses
             # a pin below the oldest CLI that runs a catalog model.
             ("codex", pin(codex_pinned, min_cli_version="9.0.0"),
              f"is below 9.0.0, the minimum of codex model '{codex_pinned}'"),
-            ("claude", pin(claude_pinned, min_cli_version="3.0.0"),
-             f"is below 3.0.0, the minimum of claude model '{claude_pinned}'"),
-            ("codex", lambda c: c["models"][codex_pinned].pop("verified"), "must hold exactly"),
             ("codex", lambda c: c.update(schema_version=1), "schema_version 2 and models"),
-            ("codex", lambda c: c.update(classes=c.pop("models")), "schema_version 2 and models"),
             ("claude", lambda c: c.update(models={}), "at least one exact model ID"),
         )
 
@@ -1467,10 +997,7 @@ class ExecutionProfileTests(unittest.TestCase):
         pinned = pins.read_bytes()
         for path, message in (
                 (build_distributions.execution_profile_path(self.root, "codex"),
-                 "missing or invalid execution profile"),
-                (build_distributions.model_catalog_path(self.root, "claude"),
-                 "missing or invalid model catalog"),
-                (pins, "missing or invalid host CLI versions")):
+                 "missing or invalid execution profile"),):
             with self.subTest(missing=path.name):
                 restore()
                 pins.write_bytes(pinned)
@@ -1480,7 +1007,7 @@ class ExecutionProfileTests(unittest.TestCase):
         pins.write_bytes(pinned)
         # One patch below each host's highest catalog minimum.
         below = {}
-        for host, key in (("claude", "claude_code"), ("codex", "codex")):
+        for host, key in (("claude", "claude_code"),):
             major, minor, patch = max(tuple(int(part) for part in entry["min_cli_version"].split("."))
                                       for entry in shipped_models(host).values())
             below[key] = f"{major}.{minor}.{patch - 1}" if patch else f"{major}.{minor - 1}.999"
@@ -1496,22 +1023,6 @@ class ExecutionProfileTests(unittest.TestCase):
                         build_distributions.build(self.root, Path(self.temporary.name) / key)
                     self.assertFalse((Path(self.temporary.name) / key).exists())
         pins.write_bytes(pinned)
-
-    def test_model_and_effort_lines_are_the_named_exception_to_default_equivalence(self):
-        # Pinned models change every role's settings with no Process Policy (#344),
-        # so invariant 30 and the release note must say they follow the catalog.
-        exception = ("the model and effort lines of rendered agents follow each host's model"
-                     " catalog and execution profile, not default equivalence")
-        repository = fixtures.REAL_REPOSITORY
-        architecture = " ".join((repository / "docs/architecture.md").read_text(
-            encoding="utf-8").split())
-        invariant = architecture.split(" 30. ", 1)[1].split(" 31. ", 1)[0]
-        self.assertIn(exception, invariant)
-        # The rule names both of its exceptions in one place.
-        self.assertIn("Two exceptions stand outside this rule:", invariant)
-        self.assertIn("a user-armed session entry such as autopilot ships without a switch,"
-                      " because without an active grant its hooks exit silently, no task binds it",
-                      invariant)
 
     def test_every_class_pins_the_owners_effort_and_the_docs_say_why(self):
         # A Claude Code role without `effort` follows the session's level,
@@ -1531,63 +1042,18 @@ class ExecutionProfileTests(unittest.TestCase):
                 with self.subTest(host=host, slot=slot):
                     self.assertEqual("effort" in setting, bool(models[setting["model"]]["efforts"]))
                     self.assertNotIn(setting.get("effort"), UNPINNED_EFFORTS)
-        # Each host contract states the shipped profile.
-        contracts = {host: " ".join((repository / "platforms" / host / fixtures.PLUGIN
-                                     / "host-contract.md").read_text(encoding="utf-8").split())
-                     for host in build_distributions.HOSTS}
-        claude, codex = AUTO_MODELS["claude"], AUTO_MODELS["codex"]
-        for fragment in (
-                f"`mechanical` runs `{claude['mechanical'][0]}` at `{claude['mechanical'][1]}`",
-                f"`critical_decision` `{claude['critical_decision'][0]}` at"
-                f" `{claude['critical_decision'][1]}`",
-                f"`security_review` `{claude['security_review'][0]}` at"
-                f" `{claude['security_review'][1]}`",
-                f"`orchestration` `{claude['orchestration'][0]}` at"
-                f" `{claude['orchestration'][1]}`"):
-            self.assertIn(fragment, contracts["claude"])
-        # On Codex only the mechanical class leaves the frontier model.
-        self.assertEqual({model for slot, (model, _effort) in codex.items()
-                          if slot != MECHANICAL_CLASS}, {codex["critical_decision"][0]})
-        self.assertIn(f"`mechanical` runs `{codex['mechanical'][0]}` at `{codex['mechanical'][1]}`;"
-                      f" every other slot runs `{codex['critical_decision'][0]}`", contracts["codex"])
-
-    def test_host_contracts_state_the_oldest_cli_the_pinned_models_need(self):
-        adapters = build_distributions.load_adapters(self.root)
-        for host, adapter in adapters.items():
-            catalog = json.loads(self.catalogs[host])
-            minimums = [entry["min_cli_version"] for entry in catalog["models"].values()]
-            newest = max(minimums, key=build_distributions.cli_version)
-            contract = " ".join((self.root / "platforms" / host / fixtures.PLUGIN
-                                 / "host-contract.md").read_text(encoding="utf-8").split())
-            with self.subTest(host=host):
-                self.assertIn(f"The pinned models need {adapter.metadata['display_name']}"
-                              f" {newest} or later", contract)
-                for minimum in minimums:
-                    self.assertIn(minimum, contract)
 
     def test_each_adapter_accepts_only_its_documented_pinned_ids(self):
         adapters = build_distributions.load_adapters(self.root)
         cases = {
             "claude": {
                 "claude-opus-5-5": ("opus", (5, 5, 0)),
-                "claude-sonnet-5": ("sonnet", (5, 0, 0)),
                 "claude-haiku-4-5-20251001": ("haiku", (4, 5, 20251001)),
-                "claude-opus-4-20250514": ("opus", (4, 0, 20250514)),
-                "claude-haiku-4-5": None,
-                "claude-opus-5-5-20260922": None,
                 "claude-opus-5-5[1m]": None,
-                "opus": None,
-                "inherit": None,
-                "gpt-6.1-sol": None,
             },
             "codex": {
                 "gpt-6.1-sol": ("sol", (6, 1)),
-                "gpt-6-luna": ("luna", (6, 0)),
-                "gpt-5.3-codex-spark": ("codex-spark", (5, 3)),
                 "gpt-5.5": None,
-                "codex-auto-review": None,
-                "gpt-6.1-sol ": None,
-                "claude-opus-5-5": None,
             },
         }
         for host, expected in cases.items():

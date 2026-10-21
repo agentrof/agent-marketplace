@@ -207,16 +207,16 @@ def package_guard() -> tuple[str | None, str]:
 
 
 def main_checkout(project: Path) -> Path:
-    import delivery_git
+    import project_paths
 
-    return delivery_git.main_worktree(project)
+    return project_paths.main_worktree(project)
 
 
 def state_dir(project: Path) -> Path:
     """The autopilot runtime directory of the checkout's main worktree."""
-    import delivery_git
+    import project_paths
 
-    runtime = delivery_git.runtime_root(main_checkout(project))
+    runtime = project_paths.runtime_root(main_checkout(project))
     directory = runtime / "autopilot"
     for part in (runtime.parents[1], runtime.parent, runtime, directory):
         if part.is_symlink():
@@ -231,7 +231,7 @@ def private_dir(directory: Path) -> Path:
 
 
 def mark_write(path: Path, data: bytes | None) -> None:
-    """Tell the vault hook a grant or arming write is this package's; see autopilot_provenance."""
+    """Tell the autopilot guard a grant or arming write is this package's; see autopilot_provenance."""
     import autopilot_provenance
 
     if path.name in (GRANT, ARMING):
@@ -424,64 +424,6 @@ def current(directory: Path, now: datetime) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# Goals: a readable goal's end is read by its owning compiler
-# ---------------------------------------------------------------------------
-
-
-def read_delivery_goal(docs: Path, target: str) -> dict:
-    import delivery_compile
-
-    root = delivery_compile.find_delivery(docs, target)
-    if root is None:
-        return {"found": False, "error": f"finds no Delivery {target}"}
-    props, _body = delivery_compile.split_note(root / "delivery.md")
-    state, unknown = delivery_compile.delivery_state(root, props)
-    if unknown is not None:
-        # Without a merge state the tracked status is no answer, so the read fails as for delivery.md.
-        raise RuntimeError(unknown)
-    return {"found": True, "state": str(state), "error": None}
-
-
-def read_requirement_goal(docs: Path, target: str) -> dict:
-    import requirement_compile
-
-    for path in requirement_compile.requirement_paths(docs):
-        if requirement_compile.requirement_id(path) != target:
-            continue
-        payload = requirement_compile.status_requirement(path)
-        state = str(payload.get("status"))
-        # Planning ends when the approved Requirement is in the approved backlog.
-        if state == "approved" and payload.get("incorporated"):
-            state = "incorporated"
-        return {"found": True, "state": state, "error": None}
-    return {"found": False, "error": f"finds no Requirement {target}"}
-
-
-GOAL_READERS = {
-    "scripts/delivery_compile.py": read_delivery_goal,
-    "scripts/requirement_compile.py": read_requirement_goal,
-}
-
-
-def read_goal(project: Path, goal: dict) -> dict | None:
-    """The goal's state as its owning compiler reads it, None for an unreadable kind."""
-    end = goal.get("end")
-    if not isinstance(end, dict):
-        return None
-    reader = GOAL_READERS.get(str(end.get("compiler")))
-    if reader is None:
-        return {"found": False, "state": None, "error": f"no reader for {end.get('compiler')}"}
-    try:
-        result = reader(main_checkout(project) / "workspace" / "docs", str(goal["target"]))
-    except Exception as exc:
-        # A read that fails is no terminal state: the grant keeps running to its cap.
-        result = {"found": False, "error": f"cannot read it: {exc or type(exc).__name__}"}
-    result.setdefault("state", None)
-    result["terminal"] = bool(result.get("found")) and result["state"] in end.get("terminal_statuses", [])
-    return result
-
-
-# ---------------------------------------------------------------------------
 # Grant terms
 # ---------------------------------------------------------------------------
 
@@ -557,7 +499,7 @@ def grant_classes(policy: dict, allow: list[str], deny: list[str]) -> list[str]:
     return [name for name in declared if name in (defaults | set(allow)) - set(deny)]
 
 
-def grant_goal(policy: dict, text: str, project: Path) -> dict:
+def grant_goal(policy: dict, text: str) -> dict:
     kinds = {entry["id"]: entry for entry in policy["goal_kinds"]}
     kind, separator, target = text.partition(":")
     kind, target = kind.strip(), target.strip()
@@ -565,27 +507,16 @@ def grant_goal(policy: dict, text: str, project: Path) -> dict:
         raise Refusal(f"unknown goal kind {kind!r}; declared kinds: {', '.join(kinds)}")
     if not separator or not target:
         raise Refusal(f"goal {text!r} names no target; write {kind}:<target>")
-    end = kinds[kind]["end"]
-    if isinstance(end, dict):
-        target = target.upper()
-    goal = {"kind": kind, "target": target, "end": end}
-    read = read_goal(project, goal)
-    if read is not None:
-        if not read["found"]:
-            raise Refusal(f"goal {kind}:{target}: the owning compiler {end['compiler']} {read['error']}")
-        if read["terminal"]:
-            raise Refusal(f"goal {kind}:{target} is already reached: {end['compiler']} reads"
-                          f" {read['state']}")
-    return goal
+    return {"kind": kind, "target": target, "end": kinds[kind]["end"]}
 
 
-def grant_terms(policy: dict, options: argparse.Namespace, now: datetime, project: Path,
+def grant_terms(policy: dict, options: argparse.Namespace, now: datetime,
                 typed: datetime | None = None) -> dict:
     """The grant's end, goal and classes; a typed --until is read from when it was typed."""
     maximum = timedelta(hours=policy["max_duration_hours"])
     if options.duration and options.until:
         raise Refusal("give --for or --until, not both")
-    goal = grant_goal(policy, options.goal, project) if options.goal else None
+    goal = grant_goal(policy, options.goal) if options.goal else None
     if options.duration:
         minutes = duration_minutes(options.duration)
         if minutes > policy["max_duration_hours"] * 60:
@@ -640,20 +571,10 @@ def command_line() -> str:
     return f"{shlex.quote(sys.executable)} {shlex.quote(str(Path(__file__).resolve()))}"
 
 
-def goal_line(goal: dict | None, read: dict | None = None) -> str:
+def goal_line(goal: dict | None) -> str:
     if not goal:
         return "goal: none (time-bound)"
-    text = f"goal: {goal['kind']} {goal['target']}"
-    if not isinstance(goal.get("end"), dict):
-        return text + ", read by no compiler; it ends through complete, off or the cap"
-    end = goal["end"]
-    text += f", ends when {end['compiler']} reads {' or '.join(end['terminal_statuses'])}"
-    if read is not None:
-        state = read.get("state") if read.get("found") else "unknown"
-        text += f"; current state: {state}"
-        if read.get("error"):
-            text += f" ({read['error']})"
-    return text
+    return f"goal: {goal['kind']} {goal['target']}; it ends through complete, off or the cap"
 
 
 def class_descriptions(grant: dict) -> list[tuple[str, str]]:
@@ -662,8 +583,7 @@ def class_descriptions(grant: dict) -> list[tuple[str, str]]:
             for name in grant.get("classes", [])]
 
 
-def summary(grant: dict, now: datetime, read: dict | None = None, *,
-            describe: bool = False) -> list[str]:
+def summary(grant: dict, now: datetime, *, describe: bool = False) -> list[str]:
     lines = []
     if grant.get("state") == "active":
         expires = parse_stamp(grant["expires_at"])
@@ -671,7 +591,7 @@ def summary(grant: dict, now: datetime, read: dict | None = None, *,
                      f" ({span(expires - now)} left)")
     else:
         lines.append(f"autopilot: {grant.get('state')} {grant.get('id')} at {grant.get('ended_at')}")
-    lines.append(goal_line(grant.get("goal"), read))
+    lines.append(goal_line(grant.get("goal")))
     if describe:
         lines.append("allowed classes:" if grant.get("classes") else "allowed classes: none")
         lines.extend(f"- {name}: {text}" for name, text in class_descriptions(grant))
@@ -725,15 +645,8 @@ def report_lines(payload: dict) -> list[str]:
     if replaced:
         lines.append(f"replaces: {', '.join(replaced)}; their entries are listed too")
     completion = grant.get("completion")
-    if completion and completion.get("by") == "compiler":
-        goal = grant.get("goal") or {}
-        lines.append(f"completed: {completion.get('compiler')} read {goal.get('kind')}"
-                     f" {goal.get('target')} as {completion.get('goal_state')}"
-                     f" at {completion.get('read_at')}")
-    elif completion:
-        lines.append(f"completed by {completion.get('by')}: {completion.get('evidence') or ''}"
-                     f" (goal state {completion.get('goal_state')},"
-                     f" compiler agreed: {completion.get('compiler_agreed')})")
+    if completion:
+        lines.append(f"completed by {completion.get('by')}: {completion.get('evidence') or ''}")
     for number, entry in enumerate(payload["entries"], 1):
         options = "; ".join(entry.get("options", []))
         classes = ", ".join(entry_classes(entry))
@@ -814,7 +727,7 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
             typed.append("--recover-transport")
         armed_by = {"guard": "user_only_entry", "arguments": " ".join(["on", *typed])}
         host = args.host
-    terms = grant_terms(policy, options, now, project,
+    terms = grant_terms(policy, options, now,
                         parse_stamp(armed_by["armed_at"]) if "armed_at" in armed_by else None)
     with locked(directory):
         previous = current(directory, now)
@@ -856,43 +769,21 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
     return 0
 
 
-def settle(directory: Path, project: Path, now: datetime) -> tuple[dict | None, dict | None]:
-    """The latest grant after its end conditions are applied, and its goal read.
-
-    A grant past its time is expired; a readable goal its compiler reads as
-    terminal completes it. A project without autopilot state gets none.
-    """
+def settle(directory: Path, now: datetime) -> dict | None:
+    """The latest grant after its end time is applied; none for a project without autopilot state."""
     if not (directory / GRANT).is_file():
-        return None, None
+        return None
     with locked(directory):
-        return settle_locked(directory, project, now)
-
-
-def settle_locked(directory: Path, project: Path, now: datetime) -> tuple[dict | None, dict | None]:
-    """settle for a caller that holds the lock."""
-    grant = current(directory, now)
-    if not grant or not grant.get("goal") or inactive_reason(grant, now) is not None:
-        return grant, None
-    read = read_goal(project, grant["goal"])
-    if read is not None and read["terminal"]:
-        end_grant(directory, now, grant, "completed", now, completion={
-            "by": "compiler", "goal_state": read["state"], "read_at": stamp(now),
-            "compiler": grant["goal"]["end"]["compiler"]})
-    return grant, read
+        return current(directory, now)
 
 
 def ended_line(grant: dict) -> str:
-    line = f"autopilot: {grant.get('state')} {grant.get('id')} at {grant.get('ended_at')}"
-    completion = grant.get("completion") or {}
-    if completion.get("by") == "compiler":
-        line += (f"; {completion['compiler']} read {grant['goal']['kind']}"
-                 f" {grant['goal']['target']} as {completion['goal_state']}")
-    return line
+    return f"autopilot: {grant.get('state')} {grant.get('id')} at {grant.get('ended_at')}"
 
 
 def cmd_check(args: argparse.Namespace, now: datetime) -> int:
     project = Path(args.project_root)
-    grant, read = settle(state_dir(project), project, now)
+    grant = settle(state_dir(project), now)
     if grant is None:
         print("autopilot: inactive")
         return 1
@@ -907,7 +798,7 @@ def cmd_check(args: argparse.Namespace, now: datetime) -> int:
     if problem:
         print(f"autopilot: active {grant['id']} is {problem}; this session asks as usual")
         return 1
-    print("\n".join(summary(grant, now, read, describe=True)))
+    print("\n".join(summary(grant, now, describe=True)))
     return 0
 
 
@@ -915,7 +806,7 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     project = Path(args.project_root)
     directory = state_dir(project)
     coverage = guards()
-    grant, read = settle(directory, project, now)
+    grant = settle(directory, now)
     counts = report_payload(directory, grant)["counts"] if grant else {"decisions": 0, "queued": 0}
     reason = inactive_reason(grant, now)
     active = reason is None
@@ -923,7 +814,7 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     mismatch = binding_mismatch(*bound) if bound else None
     problem = binding_problem(*bound) if bound else None
     if args.json:
-        result = {"active": active, "grant": grant, "goal_read": read, "counts": counts,
+        result = {"active": active, "grant": grant, "counts": counts,
                   "remaining_minutes": int((parse_stamp(grant["expires_at"]) - now).total_seconds()
                                            // 60) if active else 0,
                   "inactive_reason": reason, "bound_to": bound_line(grant) if grant else None,
@@ -933,7 +824,7 @@ def cmd_status(args: argparse.Namespace, now: datetime) -> int:
     if grant is None:
         lines = ["autopilot: inactive"]
     elif active:
-        lines = summary(grant, now, read)
+        lines = summary(grant, now)
     elif grant.get("state") != "active":
         lines = [ended_line(grant)]
     else:
@@ -955,18 +846,12 @@ def require_state(directory: Path, what: str) -> None:
         raise Refusal(what)
 
 
-def active_grant(directory: Path, now: datetime, project: Path | None = None, *,
-                 bound: bool = True) -> dict:
+def active_grant(directory: Path, now: datetime, *, bound: bool = True) -> dict:
     """The grant that governs this session, or a refusal that names why there is none.
 
-    Given the project, the grant's end conditions, its goal included, are
-    applied first, so a decision is never recorded after the goal is reached.
     Ending a grant is always allowed, so complete asks for no bound session.
     """
-    if project is None:
-        grant = current(directory, now)
-    else:
-        grant, _read = settle_locked(directory, project, now)
+    grant = current(directory, now)
     if grant and grant.get("state") != "active":
         raise Refusal(f"no active grant: {ended_line(grant).removeprefix('autopilot: ')}")
     reason = inactive_reason(grant, now)
@@ -992,23 +877,8 @@ def split_options(text: str | None) -> list[str]:
 
 
 def phase_start(policy: dict, project: Path, args: argparse.Namespace) -> dict:
-    """The next entry a phase_start decision runs, once its owning compiler reads the prior phase closed."""
-    starts = {entry["entry"]: entry["after"] for entry in policy["phase_starts"]}
-    if args.entry not in starts:
-        raise Refusal(f"phase_start needs --entry, one of: {', '.join(starts)}")
-    kind, _, target = (args.after or "").partition(":")
-    if kind not in starts[args.entry] or not target:
-        raise Refusal(f"{args.entry} needs --after <kind>:<id> with kind"
-                      f" {' or '.join(starts[args.entry])}")
-    ready = starts[args.entry][kind]
-    goal = next(entry for entry in policy["goal_kinds"] if entry["id"] == kind)
-    read = read_goal(project, {"end": {**goal["end"], "terminal_statuses": ready},
-                               "target": target})
-    if not read["terminal"]:
-        state = read["state"] if read.get("found") else read.get("error")
-        raise Refusal(f"{args.entry} starts only after {kind} {target} reads"
-                      f" {' or '.join(ready)}; it reads {state}; queue the question")
-    return {"entry": args.entry, "after": args.after, "after_state": read["state"]}
+    """A phase_start decision needs a compiler that reads the prior phase closed; none ships."""
+    raise Refusal("phase_start: no packaged compiler reads a closed phase; queue the question")
 
 
 def cmd_record(args: argparse.Namespace, now: datetime) -> int:
@@ -1017,7 +887,7 @@ def cmd_record(args: argparse.Namespace, now: datetime) -> int:
     options = split_options(args.options)
     require_state(directory, "no active grant")
     with locked(directory):
-        grant = active_grant(directory, now, Path(args.project_root))
+        grant = active_grant(directory, now)
         # A decision is taken only when every class its recommended option touches is allowed.
         names = declared_classes(policy, args.class_)
         defaults = {entry["id"]: entry["default"] for entry in policy["classes"]}
@@ -1044,7 +914,7 @@ def cmd_queue(args: argparse.Namespace, now: datetime) -> int:
     options = split_options(args.options)
     require_state(directory, "no active grant")
     with locked(directory):
-        grant = active_grant(directory, now, Path(args.project_root))
+        grant = active_grant(directory, now)
         names = declared_classes(policy, args.class_)
         if not args.recommendation.strip() or args.hold is not None and not args.hold.strip():
             raise Refusal("the recommendation and an explicit hold reason must not be empty")
@@ -1091,7 +961,7 @@ def cmd_waiting(args: argparse.Namespace, now: datetime) -> int:
     directory = state_dir(Path(args.project_root))
     require_state(directory, "no active grant")
     with locked(directory):
-        grant = active_grant(directory, now, Path(args.project_root))
+        grant = active_grant(directory, now)
         queued = [entry for entry in ledger(directory, grant["id"]) if entry.get("event") == "queued"]
         if args.runnable_task or not queued:
             print(json.dumps({"submitted": False, "reason": "independent work remains" if args.runnable_task
@@ -1134,13 +1004,8 @@ def cmd_complete(args: argparse.Namespace, now: datetime) -> int:
     require_state(directory, "no active grant")
     with locked(directory):
         grant = active_grant(directory, now, bound=False)
-        completion = {"by": "complete", "evidence": args.evidence, "goal_state": None,
-                      "compiler_agreed": None}
-        read = read_goal(Path(args.project_root), grant["goal"]) if grant.get("goal") else None
-        if read is not None:
-            completion.update(goal_state=read["state"] if read["found"] else None,
-                              compiler_agreed=read["terminal"], compiler=grant["goal"]["end"]["compiler"])
-        end_grant(directory, now, grant, "completed", now, completion=completion)
+        end_grant(directory, now, grant, "completed", now,
+                  completion={"by": "complete", "evidence": args.evidence})
     print("\n".join(report_lines(report_payload(directory, grant))))
     return 0
 
@@ -1288,7 +1153,7 @@ def run_hook(argv: list[str], stdin, now: datetime) -> int:
 def recovery_grant(args, now):
     directory = state_dir(Path(args.project_root))
     require_state(directory, "no active grant")
-    grant = active_grant(directory, now, Path(args.project_root))
+    grant = active_grant(directory, now)
     if grant.get("transport_recovery") is not True:
         raise Refusal("transport recovery needs a user-armed --recover-transport grant")
     return directory, grant
@@ -1434,15 +1299,11 @@ def parser() -> argparse.ArgumentParser:
     record.add_argument("--choice", required=True)
     record.add_argument("--reason", required=True)
     record.add_argument("--target", required=True)
-    record.add_argument("--entry", help="phase_start: the entry the decision runs next")
-    record.add_argument("--after", help="phase_start: <kind>:<id> of the phase that closed")
     record.set_defaults(handler=cmd_record)
     queue = verbs.add_parser("queue")
     queue.add_argument("--recommendation", required=True)
     queue.add_argument("--blocks")
     queue.add_argument("--hold", metavar="REASON", help="keep the question pending despite an allowed recommendation")
-    queue.add_argument("--entry", help="phase_start: the entry the decision runs next")
-    queue.add_argument("--after", help="phase_start: <kind>:<id> of the phase that closed")
     queue.set_defaults(handler=cmd_queue)
     for verb in (record, queue):
         verb.add_argument("--class", dest="class_", action="append", required=True,

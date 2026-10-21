@@ -23,7 +23,7 @@ only durable record.
 
 ## Findings during project work
 
-Return a `context_findings` entry to the parent with observed behavior, expected
+Report to the parent the observed behavior, expected
 behavior, source anchors, impact, recovery attempted and result, and a proposed
 fix plus a verification case when known. Mark unverified causes and fixes as
 hypotheses. A normal budget continuation or a correctly absent project document

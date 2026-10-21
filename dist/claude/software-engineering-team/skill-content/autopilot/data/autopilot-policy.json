@@ -58,71 +58,9 @@
   ],
   "goal_kinds": [
     {
-      "id": "delivery",
-      "description": "Until one Delivery reaches a terminal status: merged or cancelled.",
-      "end": {
-        "compiler": "scripts/delivery_compile.py",
-        "terminal_statuses": [
-          "merged",
-          "cancelled"
-        ]
-      }
-    },
-    {
-      "id": "requirement",
-      "description": "Until one Requirement ends its planning: incorporated into the approved backlog, resolved with no change, superseded or withdrawn.",
-      "end": {
-        "compiler": "scripts/requirement_compile.py",
-        "terminal_statuses": [
-          "incorporated",
-          "resolved_no_change",
-          "superseded",
-          "withdrawn"
-        ]
-      }
-    },
-    {
       "id": "text",
       "description": "A free-text goal that no compiler can read. It ends only through complete, off or its cap.",
       "end": "none"
-    }
-  ],
-  "phase_starts": [
-    {
-      "entry": "backlog-plan",
-      "after": {
-        "requirement": [
-          "approved"
-        ]
-      }
-    },
-    {
-      "entry": "delivery-plan",
-      "after": {
-        "requirement": [
-          "incorporated"
-        ],
-        "delivery": [
-          "merged",
-          "cancelled"
-        ]
-      }
-    },
-    {
-      "entry": "execution-plan",
-      "after": {
-        "delivery": [
-          "scope_approved"
-        ]
-      }
-    },
-    {
-      "entry": "deliver",
-      "after": {
-        "delivery": [
-          "execution_approved"
-        ]
-      }
     }
   ],
   "transport_interval_seconds": 600,

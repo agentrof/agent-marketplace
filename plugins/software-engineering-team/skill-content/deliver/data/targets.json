@@ -1,7 +1,11 @@
 {
-  "description": "Request-to-merge targets in minutes per task kind (knowledge: documents; build: code, devops, tests) and size, plus the kind's maximum and average target. A project may tune them here; the retrospective compares every merged task with its own kind and size.",
+  "description": "Request-to-merge targets in minutes per task kind (knowledge: documents; build: code, devops, tests) and size, plus the kind's maximum and average target, and a cost budget in USD per kind and size. A project may tune them here; the retrospective compares every merged task with its own kind and size and flags each task whose priced cost is over its budget.",
   "kinds": {
     "build": {"s": 5, "m": 15, "l": 30, "max": 60, "average": 15},
     "knowledge": {"s": 1, "m": 3, "l": 5, "max": 15, "average": 5}
+  },
+  "cost_budget_usd": {
+    "build": {"s": 2, "m": 6, "l": 15},
+    "knowledge": {"s": 0.5, "m": 1.5, "l": 3}
   }
 }

@@ -1,7 +1,7 @@
 {
   "name": "software-engineering-team",
-  "version": "2026.10.6",
-  "description": "Software Engineering Team for Requirement Flow, approved backlog planning and coordinated Delivery execution.",
+  "version": "2026.10.7",
+  "description": "Software Engineering Team for fast-lane delivery: task, branch, pull request, review and merge.",
   "author": {
     "name": "Agentrof",
     "url": "https://github.com/agentrof"
@@ -17,8 +17,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Software Engineering Team",
-    "shortDescription": "An orchestrated product and engineering team",
-    "longDescription": "Drive product work through analysis, architecture, design, test planning, and an approved project-local Obsidian backlog with Codex-native agents.",
+    "shortDescription": "Fast-lane delivery: one request to one merged pull request",
+    "longDescription": "Turn one free-text request into a task, one branch and one pull request, written by the owning role, checked by CI and one reviewer, and merged automatically on green, with Codex-native agents.",
     "developerName": "Agentrof",
     "category": "Engineering",
     "capabilities": [
@@ -29,7 +29,7 @@
     "websiteURL": "https://github.com/agentrof/agent-marketplace",
     "defaultPrompt": [
       "Set up this repository for the Software Engineering Team.",
-      "Prepare this project through the Software Engineering Team workflow."
+      "Deliver this change through the Software Engineering Team fast lane."
     ],
     "brandColor": "#2563EB"
   }

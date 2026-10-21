@@ -42,10 +42,6 @@ import build_distributions
 ROOT = Path(__file__).resolve().parent.parent
 REPORT_SCHEMA_VERSION = 1
 EXIT_CLEAN, EXIT_DRIFT, EXIT_INVALID, EXIT_UNCHECKED = 0, 1, 2, 3
-AB_REFERENCE = (
-    "plugins/software-engineering-team/skill-content/challenge-review/"
-    "references/switch-mechanical_pass_tier-mechanical.md"
-)
 TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 CLI_VERSION_RE = re.compile(r"(?<![0-9.])([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])")
 
@@ -400,8 +396,8 @@ def issue_body(root: Path, report: dict, today: str) -> str:
     else:
         lines += [
             "The pull request carries this comparison of the pinned and the candidate"
-            " model for every slot on a moving pin. It follows the Measurement section"
-            f" of `{AB_REFERENCE}` with the two models as the only candidates:",
+            " model for every slot on a moving pin, with the two models as the only"
+            " candidates:",
             "",
             "1. Freeze at least one task per slot from Git history. For a writer slot"
             " the task is a fix pass: the commit before it, the findings it applied and"

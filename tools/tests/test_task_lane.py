@@ -22,6 +22,7 @@ sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
 import task_lane  # noqa: E402
+from tools.tests.git_fixture import init_repository  # noqa: E402
 
 try:
     from tools.tests.levels import integration
@@ -464,6 +465,7 @@ class LocalProofGitTests(unittest.TestCase):
     def test_prove_records_each_command_on_the_real_head_and_a_new_commit_makes_it_stale(self):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        init_repository(root)
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
         (root / ".agentrof").mkdir()
@@ -472,7 +474,6 @@ class LocalProofGitTests(unittest.TestCase):
 
         def git(*args: str) -> str:
             return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=root)
-        git("init", "-q")
         git("add", "-A")
         git("commit", "-qm", "start")
         record = task_lane.cmd_prove(SimpleNamespace(task="TK-004", base="main"), root)

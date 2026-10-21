@@ -89,6 +89,11 @@ class SetupProjectTests(unittest.TestCase):
                 cwd=project, check=False,
             )
             self.assertEqual(ignored.returncode, 0)
+            tracked = subprocess.run(
+                ["git", "check-ignore", "--no-index", "-q", ".agentrof/local-proof.json"],
+                cwd=project, check=False,
+            )
+            self.assertEqual(tracked.returncode, 1)
             runtime_sentinel = runtime / "cache.txt"
             runtime_sentinel.write_text("disposable\n", encoding="utf-8")
             workspace = project / "workspace"

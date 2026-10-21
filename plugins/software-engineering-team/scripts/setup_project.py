@@ -203,13 +203,7 @@ def refresh_guard(root: Path, timeout_seconds: float = 3.0):
 
 
 def managed_block(workspace: str) -> str:
-    roots = local_roots()
-    return "\n".join((
-        START,
-        *(f"/{value}/" for value in roots),
-        f"{workspace}/junit-*.xml",
-        END,
-    ))
+    return setup_check.managed_block(workspace)
 
 
 def proposed_managed_file(root: Path, name: str, start: str, end: str,

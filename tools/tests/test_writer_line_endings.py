@@ -11,7 +11,6 @@ import _pyio
 import ast
 import builtins
 import contextlib
-import importlib.util
 import io
 import os
 import pathlib
@@ -25,7 +24,6 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 PLUGIN = ROOT / "plugins" / "software-engineering-team"
 SCRIPTS = PLUGIN / "scripts"
-SHARED_TEAM = ROOT / "platforms" / "shared" / "_team" / "overlay" / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
@@ -34,21 +32,6 @@ import atomic_file  # noqa: E402
 SAMPLE = "first line\nsecond line\n"
 MODE = re.compile(r"[rwxabtU+]{1,4}")
 TEMPORARY_FILES = {"NamedTemporaryFile", "TemporaryFile", "SpooledTemporaryFile"}
-
-
-def load(name: str, path: Path, *imports: Path):
-    """Load a shipped script whose sibling imports live in other source trees."""
-    added = [str(item) for item in imports if str(item) not in sys.path]
-    sys.path[:0] = added
-    try:
-        spec = importlib.util.spec_from_file_location(name, path)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    finally:
-        for item in added:
-            sys.path.remove(item)
-    return module
 
 
 @contextlib.contextmanager

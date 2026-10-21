@@ -128,7 +128,7 @@
       "45165c3aa0e864396eb2a04ae8b9fb4595dbfdda9fa06a24d042c2ba399ce4e4"
     ,
     "scripts/setup_companions.py":
-      "67aa1ac33cd4ee939bfa2cad8fa3aa520319cc811cbfc176c8727d9bf50c58b1"
+      "5e92bf974ab4ab63625ffa92500fa1200d1ce1d8230840b0479f2569623963ce"
     ,
     "scripts/setup_project.py":
       "681b9fa94f6a55f5fdab66ffe49cf49915f79eaf0f2bc2eb7984f647175464a8"
@@ -180,6 +180,9 @@
     ,
     "skill-content/code-review/references/smells.md":
       "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
+    ,
+    "skill-content/companions-uninstall/SKILL.md":
+      "78d5bd877a43d5c3246b9dd3c54cbe80e46ebd6caf2b790f6f34220cd783a371"
     ,
     "skill-content/configure/SKILL.md":
       "4435393479e488e9e3b3231ea21f21d95237f0b189a1b044478c8a560d1816b1"
@@ -314,10 +317,10 @@
       "616b6b3720b930306653e393590a2f41ec882745ce81db826905d05d526f8066"
     ,
     "skill-content/setup/SKILL.md":
-      "d5a7d5a4118ab70406d7c9a44d5f7d6cc5fe7a7a18c4ea63727ac08cd84f6dee"
+      "a943c897c98fa7b7923571c8111bb0e52b7d8e1e3176732d677675946ad195c2"
     ,
     "skill-content/setup/data/companions.json":
-      "c58395a5dc95f3ab63932fa11bfbaf699f040269a5fa32e04693be1f174f4749"
+      "a48740585fe8d01cdb90a0b13ad0726422367d3e6915ca9a63a4273edb54ffbc"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "d1a8d26ff998f886f46a7d776118fba73ccee242b1d817e89dfee6afc1cc51d8"
@@ -408,6 +411,9 @@
     ,
     "skills/code-review/SKILL.md":
       "658638bee8dd2414a2ed1adf90d0cf18117e8ae6b2193df01d1646037fafb0c3"
+    ,
+    "skills/companions-uninstall/SKILL.md":
+      "ae192552baf84b7a65809efb2573b4ae6292d73baa8398902b10575cfb348f35"
     ,
     "skills/configure/SKILL.md":
       "8caa3466ab26db18c22ec0e1e7c8afcf327d8098e313ec9cfc29efd902a2517d"

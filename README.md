@@ -9,7 +9,7 @@ branch and one pull request, verified by the project's CI and one reviewer.
 <!-- counts:start -->
 | Plugins | Agents | Entry skills | Knowledge skills |
 |---|---|---|---|
-| 1 | 11 | 6 | 10 |
+| 1 | 11 | 7 | 10 |
 <!-- counts:end -->
 
 Counts are maintained by `make counts`.
@@ -61,6 +61,20 @@ config; the environment is written to the Claude project settings.
 3. Run `scripts/setup_project.py companions check --project-root <root>`.
    It exits 0 when every row reads `yes` or `-` and nothing is printed below
    the table.
+
+The table has one row per companion and host: its type (plugin, skill, cli,
+hook), `installed`, `enabled` for plugins, and `skills_loaded`, the count of its
+skills that a fresh host session lists (Claude from its init event, Codex
+through its app server). A short count or an `ERROR` line fails the check.
+
+### Uninstall
+
+`scripts/setup_project.py companions uninstall --project-root <root>` (the
+`/companions-uninstall` entry skill) removes every companion from both hosts,
+or one with `--host`: plugins, skills, the graphify CLI and git hooks, and the
+deny rules, environment and Codex disable block that `apply` wrote. The team
+plugin, project marker files and graphify output stay. It prints a table with
+`removed` per row and exits 1 unless every row reads `yes`.
 
 The docs graph is built once by the owner
 (`GRAPHIFY_OUT=.agentrof/graphify/docs graphify extract workspace/docs --backend claude-cli`);

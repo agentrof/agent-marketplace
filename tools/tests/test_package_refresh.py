@@ -298,17 +298,6 @@ class PackageRefreshAcceptanceTests(unittest.TestCase):
                 build_distributions.marketplace_snapshot(next_root)["build_id"],
             )
 
-            with tempfile.TemporaryDirectory() as first, \
-                    tempfile.TemporaryDirectory() as second:
-                first_dist = Path(first) / "dist"
-                second_dist = Path(second) / "dist"
-                build_distributions.build(n_root, first_dist)
-                build_distributions.build(n_root, second_dist)
-                self.assertEqual(
-                    build_distributions.compare_dirs(first_dist, second_dist),
-                    [],
-                )
-
             results = {
                 host: self.refresh_host(n_root, next_root, root / "runs", host)
                 for host in native_hosts

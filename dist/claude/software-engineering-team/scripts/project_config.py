@@ -23,10 +23,14 @@ CONFIG_FIELDS = {
     "terminology_language",
     "tests_root",
     "workspace_layout",
+    "pr_proof",
     role_settings.CLASS_MODELS,
     role_settings.ROLE_CLASSES,
 }
-ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout"}
+ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout",
+                   "pr_proof"}
+# Who proves a task before its pull request; unset means remote_ci.
+PR_PROOF_VALUES = ("remote_ci", "local_record")
 # Setup writes these into a config that lacks them; the project owns them after.
 # `workspace` and `docs` are the only top-level folders the workspace guard lets
 # a write create under workspace/ and workspace/docs/. The project root is not
@@ -123,6 +127,8 @@ def base_errors(config: dict) -> list[str]:
         value = config.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{field} must be a non-empty string")
+    if "pr_proof" in config and config["pr_proof"] not in PR_PROOF_VALUES:
+        errors.append(f"pr_proof must be one of {', '.join(PR_PROOF_VALUES)}")
     errors.extend(layout_errors(config))
     return errors
 

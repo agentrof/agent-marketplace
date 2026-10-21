@@ -32,18 +32,10 @@
   <root> --scope local --execution-profile inherit` omits `model` from every
   role file and keeps `model_reasoning_effort`; `--execution-profile auto`
   restores the pins.
-- A role whose pinned model cannot run falls back to this session's model
-  with a visible warning. When a spawn ends in `Agent errored: ...` naming its
-  pinned model as unknown, unsupported or not found (`Model not found
-  <model>`, `The '<model>' model is not supported when using Codex with a
-  ChatGPT account.`), tell the user which role, model and why; any other
-  error moves no role. Start it again only when the failed run changed
-  nothing: its manifest's `write_boundary` is `read_only`, or its
-  `task_inputs.py` invocation still passes with `--expected-hash
-  <source_hash>`; otherwise stop and report. To start it again, run the
-  command above with `--inherit-model <model>` and start the same
-  `agent_type`; if it errors again, run it with `--restore-model <model>`,
-  then stop and report both errors.
+- A spawn whose pinned model errors as unknown or unsupported (`Agent
+  errored: ...`) is started once more only if it changed nothing, after the
+  command above with `--execution-profile inherit`; tell the user which role
+  and model, and stop if it fails again.
 
 ## Autopilot
 

@@ -1734,16 +1734,14 @@ class CodexRoleStampTests(unittest.TestCase):
 
     def test_a_recorded_profile_or_fallback_keeps_the_stamp_current(self):
         self.render()
-        model = self.market.tier("codex", HIGH)["model"]
-        for args in (("--execution-profile", "inherit"), ("--inherit-model", model)):
+        for args in (("--execution-profile", "inherit"),):
             with self.subTest(args=args):
                 script = self.package / "scripts" / "generate_codex_project.py"
                 result = run_script(script, "apply", "--project-root", str(self.project.root),
                                     "--scope", "local", *args)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assert_quiet(self.register())
-                restore = (("--execution-profile", "auto") if args[0] == "--execution-profile"
-                           else ("--restore-model", model))
+                restore = ("--execution-profile", "auto")
                 result = run_script(script, "apply", "--project-root", str(self.project.root),
                                     "--scope", "local", *restore)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -1880,12 +1878,6 @@ class CodexProjectAgentTests(unittest.TestCase):
         if on_sol:
             self.assertEqual(fallen["roles"][on_sol[0]]["model"], "session")
             self.assertEqual(fallen["roles"][on_sol[0]]["model_source"], "fallback")
-        # --inherit-model takes a model the project resolves, not only a package pin.
-        moved = self.generated("apply", "--scope", "local", "--inherit-model", UNLISTED["codex"])
-        self.assertIn(UNLISTED["codex"], moved["model_fallbacks"])
-        restored = self.generated("apply", "--scope", "local", "--execution-profile", "auto")
-        self.assertEqual(restored["model_fallbacks"], {})
-        self.assert_role_files(config)
 
     def test_an_invalid_config_stops_the_codex_render(self):
         self.project.write_config(class_models={"codex": {HIGH: {"effort": "ultra"}}})

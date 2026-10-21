@@ -144,7 +144,6 @@ SYSTEM_HOMES = frozenset({"runner", "node", "linuxbrew", "vscode", "ubuntu",
 # in that file.
 HOME_PATH_FIXTURES = {
     "tools/tests/test_issue_report.py": frozenset({"fixture"}),
-    "tools/tests/test_model_fallback.py": frozenset({"dev"}),
     "tools/tests/test_validator_contract.py": frozenset({"fixture"}),
 }
 
@@ -854,8 +853,6 @@ def check_dead_links(tree: Tree, findings: list[Finding]) -> None:
             body = read_text(skill_md)
             for ref in sorted(refs.rglob("*.md")):
                 rel_ref = ref.relative_to(sdir).as_posix()
-                if ref.parent == refs and SWITCH_REFERENCE_RE.match(ref.name):
-                    continue  # the Process Policy binds it; check_switch_references owns it
                 if rel_ref not in body:
                     findings.append(Finding(
                         "warning", rel(tree, ref), 1, "dead_links",
@@ -1098,7 +1095,7 @@ def check_single_team_contract(tree: Tree, findings: list[Finding]) -> None:
                 "Claude",
                 tree.root / "platforms" / "claude" / plugin.name
                 / "overlay" / "hooks" / "hooks.json",
-                ("team_guard.py register", "model_fallback.py",
+                ("team_guard.py register",
                  "autopilot_guard.py pre", "autopilot_guard.py post", "workspace_guard.py"),
             ),
             (
@@ -1628,93 +1625,6 @@ def check_project_instruction_contract(
         ))
 
 
-def check_ba_schema_shape(tree: Tree, findings: list[Finding]) -> None:
-    """Any shipped space-schema.json must be well-formed: the compiler is
-    parameterized by it, so a malformed schema is a broken product."""
-    for plugin in plugin_dirs(tree):
-        for skill in skill_dirs(plugin):
-            path = skill / "data" / "space-schema.json"
-            if not path.is_file():
-                continue
-            def err(message: str, fix: str) -> None:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "ba_schema_shape", message, fix))
-            try:
-                schema = json.loads(read_text(path))
-            except json.JSONDecodeError as exc:
-                err(f"schema is not valid JSON: {exc}", "fix the JSON syntax")
-                continue
-            if not isinstance(schema.get("schema_version"), int):
-                err("schema_version must be an integer",
-                    "version the schema so the compiler can refuse unknowns")
-            doc_types = schema.get("doc_types")
-            if not isinstance(doc_types, dict) or not doc_types:
-                err("doc_types must be a non-empty object",
-                    "declare every document type the compiler may see")
-                continue
-            statuses = schema.get("statuses", [])
-            if "approved" not in statuses:
-                err("statuses must include 'approved'",
-                    "gates hinge on the approved status")
-            try:
-                re.compile(schema.get("id_format", ""))
-            except re.error:
-                err("id_format does not compile as a regex",
-                    "id_format is the id law; it must compile")
-            row_schemas = schema.get("row_schemas", {})
-            all_columns = {c for row in row_schemas.values()
-                           if isinstance(row, dict)
-                           for c in (row.get("columns") or [])}
-            citation_columns = schema.get("id_citation_columns")
-            if not (isinstance(citation_columns, list) and citation_columns
-                    and all(isinstance(c, str) and c
-                            for c in citation_columns)):
-                err("id_citation_columns must be a non-empty list of column"
-                    " names",
-                    "the columns whose cells cite ids as wikilinks are"
-                    " schema-listed, never inferred")
-            else:
-                for column in citation_columns:
-                    if column not in all_columns:
-                        err(f"id_citation_column '{column}' appears in no"
-                            " row schema",
-                            "every citation column is a real row-schema"
-                            " column")
-            seen_prefixes: dict[str, str] = {}
-            for type_name, spec in sorted(doc_types.items()):
-                for key, expected in (("required_sections", list),
-                                      ("mints", list), ("gate_blocking", bool)):
-                    if not isinstance(spec.get(key), expected):
-                        err(f"doc type '{type_name}' key '{key}' must be"
-                            f" {expected.__name__}",
-                            "every doc type declares sections, mints and gating")
-                location = spec.get("location")
-                if isinstance(location, dict) \
-                        and location.get("kind") == "folder":
-                    suffix = location.get("filename_suffix")
-                    if not (isinstance(suffix, str) and suffix):
-                        err(f"doc type '{type_name}' folder location must"
-                            " carry a non-empty filename_suffix",
-                            "typed content files carry a -<suffix>; the"
-                            " suffix is schema data, never implied")
-                for kind in spec.get("mints", []) or []:
-                    if str(kind).lower() not in row_schemas:
-                        err(f"doc type '{type_name}' mints '{kind}' which has"
-                            " no row schema",
-                            "every minted kind carries a row schema")
-            for kind, row in sorted(row_schemas.items()):
-                columns = row.get("columns", [])
-                if not isinstance(columns, list) or "id" not in columns:
-                    err(f"row schema '{kind}' must list columns including 'id'",
-                        "rows are the only carrier of minted ids")
-                section = row.get("section", "")
-                if section in seen_prefixes:
-                    err(f"row schema '{kind}' reuses section '{section}'"
-                        f" already claimed by {seen_prefixes[section]}",
-                        "each id kind mints in its own section token")
-                seen_prefixes[section] = kind
-
-
 def _under_plugin_templates(tree: Tree, path: Path) -> bool:
     try:
         parts = path.relative_to(tree.plugins_dir).parts
@@ -1908,295 +1818,8 @@ def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
     return dict(pairs)
 
 
-PROCESS_SWITCHES_RELPATH = build_distributions.PROCESS_SWITCHES_RELPATH
-SWITCH_ANCHOR_RE = re.compile(r"\b[Ss]witch\s+`([a-z][a-z0-9_]*)`")
-SWITCH_REFERENCE_RE = re.compile(r"^switch-([a-z][a-z0-9_]*)-([a-z][a-z0-9_]*)\.md$")
-PROCESS_SWITCH_KEYS = {"summary", "flows", "values", "default", "metric", "promotion"}
-PROCESS_SWITCH_OPTIONAL_KEYS = {"issue", "measurement_only", "parameters", "value_data", "reference_scope"}
-# A switch whose references every task of its owning flows binds, whichever
-# skill holds them, declares this reference_scope.
-SWITCH_REFERENCE_SCOPES = {"owning_flows"}
-SWITCH_PARAMETER_KEYS = {"summary", "values", "declared_by", "type", "min_count"}
-SWITCH_PARAMETER_TYPES = {"positive_integer", "glob_list"}
-# A package limit is a number; a promotion ships no glob list.
-SWITCH_LIMIT_TYPES = {"positive_integer"}
-VALUE_DATA_RE = re.compile(r"^skill-content/[a-z0-9]+(?:-[a-z0-9]+)*/data/[a-z0-9]+(?:-[a-z0-9]+)*\.json$")
-
-
 def _nonblank(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
-
-
-def value_data_problems(plugin: Path, switches: dict) -> list[str]:
-    """Package data that only non-default switch values read is bound with the
-    switch references of whichever of those values a project chose, so each
-    file is listed once per value that reads it, belongs to a value other than
-    the default and travels with at least one reference of each such value. A
-    file that several values read, of one switch or of several, is listed
-    under each of them."""
-    problems: list[str] = []
-    references = {SWITCH_REFERENCE_RE.match(path.name).groups()
-                  for skill in skill_dirs(plugin)
-                  for path in (skill / "references").glob("switch-*.md")
-                  if SWITCH_REFERENCE_RE.match(path.name)}
-    for switch, spec in sorted(switches.items()):
-        if not isinstance(spec, dict) or "value_data" not in spec:
-            continue
-        where = f"switch {switch!r}"
-        data = spec["value_data"]
-        values = [item.get("id") for item in spec.get("values", []) if isinstance(item, dict)] \
-            if isinstance(spec.get("values"), list) else []
-        if not isinstance(data, dict) or not data:
-            problems.append(f"{where}: value_data must map a switch value to its data files")
-            continue
-        for value, paths in sorted(data.items()):
-            at = f"{where} value {value!r}"
-            if value not in values or value == spec.get("default"):
-                problems.append(f"{at}: value data belongs to a declared value other than the default")
-            if not isinstance(paths, list) or not paths \
-                    or not all(isinstance(path, str) for path in paths):
-                problems.append(f"{at}: value data must list at least one data file")
-                continue
-            for path in paths:
-                if not VALUE_DATA_RE.match(path):
-                    problems.append(f"{at}: value data {path!r} is not a skill data JSON file")
-                elif not (plugin / path).is_file():
-                    problems.append(f"{at}: value data {path!r} does not exist")
-            for path in sorted({path for path in paths if paths.count(path) > 1}):
-                problems.append(f"{at}: value data {path!r} is listed more than once")
-            if (switch, value) not in references:
-                problems.append(f"{at}: value data needs a switch reference of that value to bind it")
-    return problems
-
-
-def parameter_problems(where: str, parameters: object, values: list[str], default: object,
-                       plugin: Path | None) -> list[str]:
-    """Return the problems of one switch's owner-set parameter declaration."""
-    if not isinstance(parameters, dict) or not SWITCH_PARAMETER_KEYS <= set(parameters) \
-            or set(parameters) - SWITCH_PARAMETER_KEYS - {"package_limits"}:
-        return [f"{where}: parameters hold exactly summary, values, declared_by, type and"
-                " min_count, and package_limits once a promotion ships them"]
-    problems: list[str] = []
-    if not _nonblank(parameters["summary"]):
-        problems.append(f"{where}: parameters need a summary the choice gate shows")
-    taking = parameters["values"]
-    if not isinstance(taking, list) or not taking or len(taking) != len(set(map(str, taking))):
-        problems.append(f"{where}: parameters must list the values that take them, each once")
-    else:
-        for value in taking:
-            if value not in values or value == default:
-                problems.append(f"{where}: parameters belong to a declared value other than the"
-                                f" default, not {value!r}")
-    if parameters["type"] not in SWITCH_PARAMETER_TYPES:
-        problems.append(f"{where}: parameter type {parameters['type']!r} is not one of"
-                        f" {sorted(SWITCH_PARAMETER_TYPES)}")
-    source = parameters["declared_by"]
-    declared = None
-    if not isinstance(source, dict) or set(source) != {"path", "key"} \
-            or not all(_nonblank(source.get(key)) for key in ("path", "key")):
-        problems.append(f"{where}: declared_by must name the package data file and the key that"
-                        " declare the parameter ids")
-    elif plugin is not None:
-        relative = source["path"]
-        target = plugin / relative
-        if relative.startswith("/") or "\\" in relative or ".." in relative.split("/") \
-                or not target.is_file():
-            problems.append(f"{where}: declared_by path {relative!r} is not a file of the package")
-        else:
-            try:
-                declared = json.loads(read_text(target)).get(source["key"])
-            except (json.JSONDecodeError, AttributeError):
-                declared = None
-            if not isinstance(declared, dict) or not declared or not all(
-                    REVIEW_STEP_ID_RE.match(key) and isinstance(item, dict)
-                    and _nonblank(item.get("summary")) for key, item in declared.items()):
-                problems.append(f"{where}: declared_by {relative} key {source['key']!r} must map"
-                                " snake_case parameter ids to a summary")
-                declared = None
-            else:
-                for key, item in sorted(declared.items()):
-                    if "type" in item and item["type"] not in SWITCH_PARAMETER_TYPES:
-                        problems.append(f"{where}: parameter {key!r} type {item['type']!r} is not one of"
-                                        f" {sorted(SWITCH_PARAMETER_TYPES)}")
-    minimum = parameters["min_count"]
-    if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 0 \
-            or (declared is not None and minimum > len(declared)):
-        problems.append(f"{where}: min_count must be a whole number no larger than the declared"
-                        " parameters")
-    # A promoted value that takes parameters stays non-default and ships limits.
-    limits = parameters.get("package_limits", {})
-    if not isinstance(limits, dict) or any(
-            isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
-            for limit in limits.values()) or (
-            declared is not None and set(limits) - set(declared)) or (
-            declared is not None and isinstance(limits, dict) and any(
-                declared[key].get("type", parameters["type"]) not in SWITCH_LIMIT_TYPES
-                for key in set(limits) & set(declared))):
-        problems.append(f"{where}: package_limits must map declared parameter ids to"
-                        " positive whole numbers")
-    return problems
-
-
-def process_switch_problems(data: object, flows: set[str], plugin: Path | None = None) -> list[str]:
-    """Return the shape problems of the package's process switch registry."""
-    if not isinstance(data, dict) or set(data) != {"schema_version", "switches"} \
-            or data.get("schema_version") != 1:
-        return ["registry must hold exactly schema_version 1 and switches"]
-    switches = data["switches"]
-    if not isinstance(switches, dict):
-        return ["switches must be an object keyed by switch id"]
-    problems: list[str] = []
-    for switch, spec in sorted(switches.items()):
-        where = f"switch {switch!r}"
-        if not REVIEW_STEP_ID_RE.match(switch):
-            problems.append(f"{where}: id must be lowercase snake_case")
-        if not isinstance(spec, dict):
-            problems.append(f"{where}: must be an object")
-            continue
-        unknown = sorted(set(spec) - PROCESS_SWITCH_KEYS - PROCESS_SWITCH_OPTIONAL_KEYS)
-        if unknown:
-            problems.append(f"{where}: unknown keys {unknown}")
-        if "measurement_only" in spec and spec["measurement_only"] is not True:
-            problems.append(f"{where}: measurement_only is true or absent")
-        if not _nonblank(spec.get("summary")):
-            problems.append(f"{where}: needs a summary of what it decides")
-        if not _nonblank(spec.get("metric")):
-            problems.append(f"{where}: needs a component metric")
-        promotion = spec.get("promotion")
-        if not isinstance(promotion, dict) or set(promotion) != {"unit", "threshold"} \
-                or not all(_nonblank(promotion.get(key)) for key in ("unit", "threshold")):
-            problems.append(f"{where}: needs a promotion rule with a unit and a threshold")
-        owners = spec.get("flows")
-        if not isinstance(owners, list) or not owners \
-                or not all(isinstance(flow, str) for flow in owners):
-            problems.append(f"{where}: flows must list at least one owning flow")
-        else:
-            for flow in sorted({flow for flow in owners if owners.count(flow) > 1}):
-                problems.append(f"{where}: duplicate owning flow {flow!r}")
-            for flow in sorted(set(owners) - flows):
-                problems.append(f"{where}: names unknown flow {flow!r}")
-        declared = spec.get("values")
-        ids: list[str] = []
-        if not isinstance(declared, list) or len(declared) < 2:
-            problems.append(f"{where}: values must list at least two values")
-        else:
-            for value in declared:
-                if not isinstance(value, dict) or set(value) != {"id", "tradeoffs"} \
-                        or not isinstance(value.get("id"), str) \
-                        or not _nonblank(value.get("tradeoffs")):
-                    problems.append(f"{where}: every value holds an id and non-empty tradeoffs")
-                    continue
-                if not REVIEW_STEP_ID_RE.match(value["id"]):
-                    problems.append(f"{where}: value id {value['id']!r} must be lowercase snake_case")
-                ids.append(value["id"])
-            for value in sorted({value for value in ids if ids.count(value) > 1}):
-                problems.append(f"{where}: duplicate value {value!r}")
-        default = spec.get("default")
-        if default not in ids:
-            problems.append(f"{where}: default {default!r} is not one of its values {ids}")
-        issue = spec.get("issue")
-        if "issue" in spec and (not isinstance(issue, int) or isinstance(issue, bool) or issue < 1):
-            problems.append(f"{where}: issue must be a positive issue number")
-        if "reference_scope" in spec and spec["reference_scope"] not in SWITCH_REFERENCE_SCOPES:
-            problems.append(f"{where}: reference_scope must be one of"
-                            f" {sorted(SWITCH_REFERENCE_SCOPES)}")
-        if "parameters" in spec:
-            problems.extend(parameter_problems(where, spec["parameters"], ids, default, plugin))
-    return problems
-
-
-def check_process_switches(tree: Tree, findings: list[Finding]) -> None:
-    """Process switches are declared once in the package registry, and every
-    switch is anchored in each flow that owns it as switch `<id>`."""
-    for plugin in plugin_dirs(tree):
-        path = plugin / PROCESS_SWITCHES_RELPATH
-        flows_dir = plugin / "flows"
-        flow_paths = sorted(flows_dir.glob("*.md")) if flows_dir.is_dir() else []
-        anchors: dict[str, dict[str, Path]] = {}
-        for flow in flow_paths:
-            for name in SWITCH_ANCHOR_RE.findall(read_text(flow)):
-                anchors.setdefault(name, {})[flow.stem] = flow
-
-        def err(where: Path, message: str, fix: str) -> None:
-            findings.append(Finding("error", rel(tree, where), 1, "process_switches", message, fix))
-
-        if not path.is_file():
-            if anchors or any((skill / "references").glob("switch-*.md")
-                              for skill in skill_dirs(plugin)):
-                err(path, "process switches are named but the switch registry is missing",
-                    "restore the registry the flows and switch references name")
-            continue
-        try:
-            data = json.loads(read_text(path), object_pairs_hook=_unique_json_object)
-        except (json.JSONDecodeError, ValueError) as exc:
-            err(path, f"switch registry is not valid unique-key JSON: {exc}",
-                "fix the registry; every key and switch is declared once")
-            continue
-        for problem in process_switch_problems(data, {flow.stem for flow in flow_paths}, plugin):
-            err(path, problem, "declare each switch once with its owning flows, values,"
-                " default, component metric and promotion rule")
-        switches = data.get("switches") if isinstance(data, dict) else None
-        switches = switches if isinstance(switches, dict) else {}
-        for problem in value_data_problems(plugin, switches):
-            err(path, problem, "list each data file once under every non-default switch value"
-                " whose references read it")
-        for name, owners in sorted(anchors.items()):
-            spec = switches.get(name)
-            listed = spec.get("flows") if isinstance(spec, dict) else None
-            for stem, flow in sorted(owners.items()):
-                if not isinstance(spec, dict):
-                    err(flow, f"flow {flow.name} names undeclared switch {name!r}",
-                        "declare the switch in the registry or fix the anchor")
-                elif not isinstance(listed, list) or stem not in listed:
-                    err(flow, f"flow {flow.name} names switch {name!r} but is not one of"
-                        " its owning flows", "list the flow in the switch's flows or"
-                        " remove the anchor")
-        for name, spec in sorted(switches.items()):
-            listed = spec.get("flows") if isinstance(spec, dict) else None
-            for stem in listed if isinstance(listed, list) else []:
-                if isinstance(stem, str) and (flows_dir / f"{stem}.md").is_file() \
-                        and stem not in anchors.get(name, {}):
-                    err(path, f"switch {name!r} is not named by its owning flow {stem!r}",
-                        "anchor the switch as switch `<id>` at the flow step it changes")
-        check_switch_references(plugin, switches, err)
-
-
-def check_switch_references(plugin: Path, switches: dict, err) -> None:
-    """A switch reference holds the instructions of one non-default switch
-    value. The Process Policy binds it, so no SKILL.md links it, and an owning
-    flow names its path so the orchestrating entry finds it."""
-    flows_dir = plugin / "flows"
-    for skill in skill_dirs(plugin):
-        skill_md = skill / "SKILL.md"
-        if skill_md.is_file() and "](references/switch-" in read_text(skill_md):
-            err(skill_md, "SKILL.md links a switch reference",
-                "switch references are bound by the Process Policy; never link one from SKILL.md")
-        for reference in sorted((skill / "references").glob("switch-*.md")):
-            match = SWITCH_REFERENCE_RE.match(reference.name)
-            if match is None:
-                err(reference, "switch reference must be named switch-<switch>-<value>.md",
-                    "name the file for one declared switch and value")
-                continue
-            name, value = match.groups()
-            spec = switches.get(name)
-            ids = [item.get("id") for item in spec.get("values", []) if isinstance(item, dict)] \
-                if isinstance(spec, dict) and isinstance(spec.get("values"), list) else []
-            if not isinstance(spec, dict):
-                err(reference, f"switch reference names undeclared switch {name!r}",
-                    "declare the switch in the registry or rename the reference")
-            elif value not in ids:
-                err(reference, f"switch reference names undeclared value {value!r} of switch {name!r}",
-                    "name one of the switch's declared values")
-            elif value == spec.get("default"):
-                err(reference, f"switch reference names the default value {value!r} of switch {name!r}",
-                    "the default path keeps its instructions in the ordinary files")
-            else:
-                relative = reference.relative_to(plugin).as_posix()
-                owners = spec.get("flows") if isinstance(spec.get("flows"), list) else []
-                if not any(isinstance(flow, str) and (flows_dir / f"{flow}.md").is_file()
-                           and relative in read_text(flows_dir / f"{flow}.md") for flow in owners):
-                    err(reference, f"switch reference {relative} is named by no owning flow of"
-                        f" switch {name!r}", "name the reference in the owning flow step it replaces")
 
 
 def implemented_derivations(source: str, registry: str = "STORY_SIZE_DERIVATIONS") -> set[str] | None:
@@ -2414,23 +2037,6 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
                 "regenerate it from the canonical product contract",
             ))
 
-def check_task_input_catalog(tree: Tree, findings: list[Finding]) -> None:
-    """Every shipped team role, skill and flow has one declared task route."""
-    import importlib.util
-    for plugin in plugin_dirs(tree):
-        path = plugin / "scripts" / "task_inputs.py"
-        if not path.is_file():
-            continue
-        try:
-            spec = importlib.util.spec_from_file_location("validated_task_inputs", path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            module.catalog(plugin)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            findings.append(Finding("error", rel(tree, path), 1, "task_input_catalog",
-                                    str(exc), "align canonical task routes with the shipped catalog"))
-
-
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -2457,18 +2063,15 @@ CHECKS = {
     "template_placeholders": check_template_placeholders,
     "project_instruction_contract": check_project_instruction_contract,
     "spawn_shape_constitution": check_spawn_shape_constitution,
-    "ba_schema_shape": check_ba_schema_shape,
     "wikilink_ban": check_wikilink_ban,
     "version_sync": check_version_sync,
     "model_config_shape": check_model_config_shape,
     "execution_profiles": check_execution_profiles,
     "host_cli_versions": check_host_cli_versions,
     "effort_policy": check_effort_policy,
-    "process_switches": check_process_switches,
     "autopilot_policy": check_autopilot_policy,
     "limits_config_shape": check_limits_config_shape,
     "product_namespace": check_product_namespace,
-    "task_input_catalog": check_task_input_catalog,
 }
 
 

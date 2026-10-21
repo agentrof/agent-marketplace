@@ -17,13 +17,13 @@
       "58eda52389624f995f8642994345d56f77c871ed6b599745f7d1eff8c3ab994e"
     ,
     "agents/analysis-challenger.md":
-      "142b687074a395fb78a939159db86ebce2c5183f2e14f862cdcf3679912ae2ae"
+      "419a7a2a0907e3d63310b105362e77d3e269be72552f498dc8c845f3e12c6e52"
     ,
     "agents/backend-developer.md":
       "bfdb3ae2199faeaa1120a30279f92fa783672d0a3067a053a51fcf6709141ed5"
     ,
     "agents/business-analyst.md":
-      "0f87ddbc0888f2316c004ff5ed4d11a7fedd83217e4263f1cab742982211b261"
+      "895fbe219a3f2bef868e1d629dfd85c3560f5993f4f7839c298ee60b19a36332"
     ,
     "agents/code-reviewer.md":
       "66d4b26b005a01f93be7f9e6ce87297e52270f6744ce5a13004edb9117c87009"
@@ -50,16 +50,16 @@
       "7e8b7c700ed292abc39be8b52248c0e7afb3aed38c59d13f0d9aba7dfa32bdc9"
     ,
     "constitution.md":
-      "47309ba22d3c4cfff3af59799dc8406c306954bdf344c28827a866950fe3029a"
+      "fd6d10826e035f233b4ea141ac6f1a14ba2e0941980cc7e5d1a1297d086d8903"
     ,
     "flows/fast-lane.md":
-      "154c7d0c2dfde57c0fdf21166226b3ec554eb63cd8f01051faccb235ba2011d0"
+      "7f618ebac38a9f2f8b00f215874c79d496f442bc621fbe74245cb0fbc4f70720"
     ,
     "hooks/hooks.json":
-      "6317b290023c6acf05d8d9d0f6a9adaf45c1cd1d39ebd3ee694c1d33602b7721"
+      "40c4580a4f81dc2fd147324ef786ba0569902fda460d4faaf1eec9661faca67a"
     ,
     "host-contract.md":
-      "960427fe2ad81ed16742a2001c13aecab0dda5e3350b3e213b6372da04d91fc2"
+      "f117d9dbc863737d1616d8e28d44329592826b1964cb614cbb1eaec796b7de9c"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -103,26 +103,17 @@
     "scripts/model_class.py":
       "e725ad4d93cbfc751ac180794e10b0baa4d8e4584c024109bdba4f154df45c13"
     ,
-    "scripts/model_fallback.py":
-      "7e799454ee8695ef1cc481cd67f6a63d543096498db365e9e620741451c8d9b2"
-    ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
-    "scripts/process_policy.py":
-      "83a35924942656ebbf3a1756268981932b5aaa59a25d2a8b9c07feaa31d3cab6"
-    ,
     "scripts/project_config.py":
-      "9de81cd1e2f573b047ee9909b926681cc454391e9e45f2671f03eea83b2c2e8d"
+      "1f46484dcaab016a1e5239d95fb8479c262180c5997dcccd667a0b71bc8bcd5b"
     ,
     "scripts/project_instructions.py":
       "9d47c7f43701efbf02710852b459e7cbf8680372afa58d10b88c460960ad8bd7"
     ,
     "scripts/project_paths.py":
       "40891b6797eb8c6437e4be9173571d451512d9af85fc47aba19db60e09c1f0b8"
-    ,
-    "scripts/reader_manifest.py":
-      "48c0c108f09060eccbcd749ffcaa13b53fd8c1e96f31f920a8b2e61fcc9a52ce"
     ,
     "scripts/role_settings.py":
       "475aca567d9cdd762ce51b60c47b6bcf7a9dfce64f062bc4d96212c4fb144526"
@@ -140,16 +131,10 @@
       "9f9c7f1b2d81c3f39a638d0658bab6d008cf348f0c95460ab76a6499fad1e62d"
     ,
     "scripts/setup_project.py":
-      "619d463d51b5b2eebd96f311026d9b37ca501b68b46585ba4a93b6c79e279718"
-    ,
-    "scripts/step_timing.py":
-      "f37fa8f00c6b93d145a89784724b37711279cec3b620aab29fe2921916024d23"
-    ,
-    "scripts/task_inputs.py":
-      "d19af55eec08738727d088cf154111d97e0621cdd96022973071b720cc332ae3"
+      "c776610aa77e99c5304df51ed23041a60ca76a8594c1868d5077249e794b35a0"
     ,
     "scripts/task_lane.py":
-      "271d4c4f3f1adbe36f0d36f896b7b3a1468b495ed41c1af9259f82c3e9ad5a39"
+      "6f71401d775077161323fed9bba6711ed86ded1e0d13cb3dfd1618dec9e553b1"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -182,10 +167,7 @@
       "ce09b658b99f436ccb0b0f65402f4c7449b3f1079cfc6f02cf882b6281ead3d6"
     ,
     "skill-content/business-analysis/SKILL.md":
-      "0457738b63d4bb37ebadba109cc6259d07f5b28e0a56e8afc7f351023f985ca8"
-    ,
-    "skill-content/business-analysis/data/space-schema.json":
-      "8bec0bb3025459143f52a8255d542ee52fcf99217e8c61fb770b407f1caa0936"
+      "e8850e9eaaf1dce44dba1375d1a95aacc6cf29e61f0c1572dee38c87def74256"
     ,
     "skill-content/code-review/SKILL.md":
       "d710b9585ba504ef4ad2cf473aa2c3a210b5cc3b8c4bc8ab6427d01b80ea7530"
@@ -200,19 +182,10 @@
       "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
     ,
     "skill-content/configure/SKILL.md":
-      "5375b3628a1523dfd79eef21f6ac5446702b8444446d6deddd88ef6e8f187acf"
-    ,
-    "skill-content/configure/data/process-switches.json":
-      "482500ca7526a40a245dc4470ed6ee6f32d2f59562191e2b660d27d090551cec"
-    ,
-    "skill-content/configure/data/step-budgets.json":
-      "399faca038906f9feeb1085ec6daeff6c5fe2ce1ae77fbe51438c016e59c0ea9"
+      "4435393479e488e9e3b3231ea21f21d95237f0b189a1b044478c8a560d1816b1"
     ,
     "skill-content/configure/references/config-contract.md":
-      "36f529742180c13643251b04c58f9ba093da42b51369c994a92a98e899990d53"
-    ,
-    "skill-content/configure/references/process-policy.md":
-      "5d42c6229f90a0bf6051b532e77366da542c5ddec9e6cdff32315e00d998de69"
+      "158a3489786fa5b11a515f860a48da5cb8c6bc40bb75e6b2584db858fb0e8e4d"
     ,
     "skill-content/configure/references/role-models.md":
       "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
@@ -239,7 +212,7 @@
       "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
     ,
     "skill-content/deliver/SKILL.md":
-      "1153ad19f205d3f1cf5b0f0c3e23c4279eb4fd53911fa2e849b85b808fc612c5"
+      "3b9a6b5efe96adef9d77f10753fd62e209590aa3e884e1823ed23cf8a54e7019"
     ,
     "skill-content/deliver/data/role-routing.json":
       "e4df0dfeeb7cae08e398b1a0d64d441657b31b2dc557ab316e463677bf3f94f8"
@@ -253,14 +226,8 @@
     "skill-content/deliver/references/fast-lane.md":
       "b3f0a7ad40925c7060162f5e60fa9395b71e11c2a564bc48c97c3423991560e2"
     ,
-    "skill-content/deliver/references/switch-pr_proof-local_record.md":
-      "7d58d116f06aa2722b75f8b67bc444987c8a2d7d88cd0a86d491c96332e57047"
-    ,
-    "skill-content/deliver/references/switch-step_budgets-enforced.md":
-      "28536b3bb86df9ed41511c4546a95816fcb3395dc4d9ee1592e3b48943e53d0b"
-    ,
-    "skill-content/deliver/references/switch-step_timing-recorded.md":
-      "0d4e563158e27d724752b6b87fabaccaa6f6f6bef9420a0de8f1e451cdbe1fee"
+    "skill-content/deliver/references/local-proof.md":
+      "eb79e39670278d19a70b91b77dcfa8c831f294be9e42a760a361c0be6cb66ca8"
     ,
     "skill-content/issue-report/SKILL.md":
       "053421143e9eaa980d17057b48e38a11cf529480f6901714de0b11cf2f6214a2"
@@ -335,19 +302,19 @@
       "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a"
     ,
     "skill-content/retrospective/SKILL.md":
-      "e324c4f3369ed810efbef71e7299a6fe96cf1093e1098f0acd4adf2a9a2d7f91"
+      "a437d5abc2737fa2720ccbff283888607862477706fd8ab7357a77089dcc6ae3"
     ,
     "skill-content/retrospective/data/pricing.json":
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"
     ,
     "skill-content/retrospective/data/rework-causes.json":
-      "d7e265299e3ab0e2788963c8c14e5c7548e741315016eac7e2133b53ec8a5b26"
+      "c14ec2881523a4a54d4fef5cbb966d415821b30077b844f131d10fe05eefb1cd"
     ,
     "skill-content/retrospective/references/rework.md":
       "616b6b3720b930306653e393590a2f41ec882745ce81db826905d05d526f8066"
     ,
     "skill-content/setup/SKILL.md":
-      "0a540936b0611c4b6b4fd617e946929cf33a126e37dbf56b107491f55a8d08a3"
+      "d5a7d5a4118ab70406d7c9a44d5f7d6cc5fe7a7a18c4ea63727ac08cd84f6dee"
     ,
     "skill-content/setup/data/companions.json":
       "e80a4fb563cb2058b7355a67919141c3d354c8c4770a1ac3cb189a252a3ec8dd"
@@ -517,9 +484,6 @@
     "templates/model-classes.json":
       "e86b24a60470eb0d1b7eb9d92e066417a481f1dd8630d4d8e2619b519f87333c"
     ,
-    "templates/project-context-policy.json":
-      "33c751e088616132fd76485509434fb0c35cc3f558ae605e08584318ad22a7b4"
-    ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
     ,
@@ -534,12 +498,6 @@
     ,
     "templates/project-instructions/user-context.json":
       "1948e5b9c4992a9bce42ce83b41d99488d07ee990ffe5413f5ab5f2e191d6212"
-    ,
-    "templates/task-input-contract.md":
-      "2df577ed4a9169aecb376ca5d88d72beec84b744abf1bab9ec1aa16e12551f13"
-    ,
-    "templates/task-input-policy.json":
-      "b0794c145d146afe029ecc59eb50043a53d6e3425bb28f3b95594b131ac768a3"
   },
   "host": "claude",
   "marketplace_release": "2026.10.6",

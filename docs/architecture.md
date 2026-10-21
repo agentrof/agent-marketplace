@@ -74,23 +74,14 @@ behavior is host-neutral; Claude Code and Codex are packaging adapters.
     `build_id` and verification recomputes it. Public stable installs,
     exact-lease ref transactions, immutable Release reconciliation and
     clean-ref completion remain mandatory.
-18. Every new process behaviour ships behind a process switch declared in
-    `configure/data/process-switches.json` whose default is the behaviour it
-    changes. With every switch at its default, every compiler and coordinator
-    output is byte-identical to the previous release on the same inputs and
-    every task binds the same instructions. Two exceptions stand outside this rule: the
-    model and effort lines of rendered agents follow each host's model
-    catalog and execution profile, not default
-    equivalence, so a catalog change reaches every role under any policy,
-    and a role whose pinned model cannot run falls back to the session's
-    model with a warning; and a user-armed session entry such as autopilot ships without a switch,
-    because without an active grant its hooks exit silently, no task binds
-    it and every output stays byte-identical. A non-default value's
-    instructions live in switch references that `task_inputs.py` binds only
-    when the project's Process Policy selects that value, together with the
-    package data only that value reads. Project values live in
-    `workspace/docs/operation/process-policy.md`, never in
-    `workspace/config.json`.
+18. A process behaviour change ships as the new default. A choice a project
+    may make differently is one optional key of `workspace/config.json`,
+    validated by `project_config.py check`; today that is `pr_proof`
+    (`remote_ci` by default, `local_record` for a project without remote CI).
+    Rendered agents' model and effort lines follow each host's model catalog
+    and execution profile. A user-armed session entry such as autopilot
+    changes no output without an active grant, because its hooks exit
+    silently.
 
 Repository issue and release operations are documented separately in
 [maintainer-operations-protocol.md](maintainer-operations-protocol.md).

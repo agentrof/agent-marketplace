@@ -171,27 +171,11 @@ stays `unverified`. A rendered role on the session's model
 carries `model: inherit` and keeps its `effort`, and its stamp keeps the
 settings the project config resolves, so the session start check finds it
 current. A model policy already substitutes the main conversation's model
-with Claude Code's own warning. For a model that Claude Code's wording names
-as not found, refused or too new for the installed Claude Code, the host
-contract has the coordinator tell the user and, when the failed run changed
-nothing, that is its task is read-only or the `task_inputs.py` invocation
-that derived its manifest still passes with `--expected-hash`, which compares
-the content of its inputs and of every modified or new source it covers,
-spawn the same role once more with `model` set to the session's family alias,
-which lands on the session's exact model, and stop if that spawn fails too; a
-writer that already changed files is never spawned again on a partly changed
-tree. `git status` cannot judge that: a further edit to an already modified
-file, or a new file in an untracked folder, leaves its output as it was, and
-a flow that commits only at its end runs its fix passes on modified files.
-The manifest every entry derives before it delegates a role is the record of
-the tree before the run, so no extra step precedes a spawn. The Claude plugin's
-hook on `Agent`, `model_fallback.py` under `PostToolUseFailure` and
-`PostToolUse`, adds the warning and that instruction to a foreground failure
-and warns when a role started on another model than its pin. It matches only
-Claude Code's model wording, since a subagent's error detail names the pin
-for any API error, and stays silent for a spawn that passes `model` and under
-`CLAUDE_CODE_SUBAGENT_MODEL_FORCE`, so a model the user chose never triggers
-it and the re-spawn never repeats.
+with Claude Code's own warning. For a spawn whose pinned model Claude Code
+names as not found, refused or too new, the host contract has the coordinator
+tell the user and, when the failed run changed nothing, spawn the same role
+once more with `model` set to the session's family alias, and stop if that
+spawn fails too; a writer that already changed files is never spawned again.
 
 On Codex the binary is the nearest `codex` process above setup, since Codex
 exports no variable that names it, else the target of the `apply_patch`
@@ -203,17 +187,10 @@ otherwise the output of `codex debug models`, which reflects no account
 inside the command sandbox or when it equals `codex debug models --bundled`.
 The role files of an `unavailable` model omit `model` and keep
 `model_reasoning_effort`. Codex has no hook event for a failed role, so the
-run-time warning comes from the host contract: when a spawned role still
-ends in `Agent errored: ...` that names its pinned model as unknown,
-unsupported, not found or not supported with the account, the coordinator
-tells the user and, when the failed run changed nothing, runs
-`generate_codex_project.py apply --scope local --inherit-model <model>` and
-starts the same role again. That run-time record stays until
-`--restore-model <model>` or `--execution-profile auto`. When that start
-errors too, the coordinator runs it with `--restore-model <model>`, which
-renders the pin again, before it stops, so no run-time record stays that no
-successful start backs. A rate limit or another error that names the model
-moves no role. `--execution-profile auto` restores the pins and checks them
+run-time rule is the host contract's: when a spawned role ends in `Agent
+errored: ...` naming its pinned model and the failed run changed nothing, the
+coordinator applies `--execution-profile inherit` and starts the role once
+more; `--execution-profile auto` restores the pins and checks them
 again.
 
 A project may override the package per class slot and per role, never the
@@ -302,83 +279,10 @@ session's model at its own class effort:
   reach every subagent in the session, not only this team. Claude Code's
   permission modes do not select a model or effort.
 
-## Process switches
+## Process choices
 
-Every new process behaviour ships behind a switch whose default is today's
-behaviour. `plugins/software-engineering-team/skill-content/configure/data/process-switches.json`
-declares each switch; a project's values live in
-`workspace/docs/operation/process-policy.md`, changed only through
-`/configure process` and never in `workspace/config.json`. A switch without a
-policy row follows its package default.
-
-To add a switch:
-
-1. Declare it in the registry: its `summary`, owning `flows`, at least two
-   `values` with their `tradeoffs`, which the choice gate shows, the `default`
-   that keeps today's behaviour, its component `metric` and `promotion` with
-   its `unit` and `threshold`; `issue` names its idea issue. A value that needs owner-set numbers declares
-   `parameters` (`summary`, the `values` that take them, `declared_by` naming
-   the package data file and key that declare their ids, `type` and
-   `min_count`). `type` is `positive_integer` or `glob_list`, comma-separated
-   path globs; a declared parameter may name its own `type`, and only a
-   `positive_integer` takes a package limit. The package sets no parameter value: the owner sets each one
-   in the policy's Parameters table through `/configure process`, a parameter
-   exists only while its switch is at a value that takes it, and
-   `process_policy.py value` reports the typed values beside the switch's. A
-   value whose instructions read package data that no default path reads
-   declares it in `value_data`, a list of
-   `skill-content/<skill>/data/<file>.json` paths per value; a task binds that
-   data only together with the value's switch references. Data that several
-   values read, of one switch or of several, is listed under each of them and
-   bound when any of them is chosen. A switch whose instructions every task of
-   its owning flows follows, whichever skills the task selects, declares
-   `reference_scope: owning_flows`.
-2. Anchor it as switch `<id>` at each step it changes in its owning flows.
-   The anchor names the switch reference that the other value follows and
-   adds nothing else to the flow.
-3. Write each non-default value's instructions in
-   `skill-content/<skill>/references/switch-<switch>-<value>.md`, in the skill
-   that the tasks needing them select. `task_inputs.py` binds the file only
-   when the project's policy selects that value, and only for a task whose
-   entry runs one of the switch's owning flows. Never link it from SKILL.md
-   and never write one for the default value.
-4. Keep the default path unchanged: with the switch at its default, its only
-   trace in a flow is the anchor of step 2, and skills, agents, manifests and
-   compiler outputs stay byte-identical.
-   Test each value with every other switch at its default.
-
-The `process_switches` validator check rejects a default outside the values,
-a switch that an owning flow does not name, a flow that names an undeclared
-switch or one it does not own, a switch without a metric or promotion rule,
-malformed parameters, a `reference_scope` other than
-`owning_flows`, value data that is missing, listed twice for one value,
-declared for the default or bound by no reference of its value, and a switch
-reference that names an undeclared switch or value or the default, that no
-owning flow names, or that a SKILL.md links.
-
-### Promotion rule
-
-A default flips only when the switch's component metric meets its threshold
-over its promotion unit, every shared quality guard holds (valid critical or
-major findings found after a merge, review cycles per task and defects
-reported after merge) and the owner approves the flip. One default flips per
-release, so the following tasks attribute a change to one flip. A flipped
-default that later breaks a quality guard flips back in the next release. A
-flip changes `default`, keeps every value, moves the promoted value's
-instructions into the default path and moves the previous default's path into
-its own switch reference.
-
-Only a non-default choice survives a flip. The Process Policy keeps a row only
-for a value other than the default, so a project whose row names the promoted
-value keeps it, now as the default, while every switch without a row follows
-the promoted default, also one whose owner answered the previous default at
-the choice gate. A project that wants the previous default back sets it
-through `/configure process`, where it is then a non-default choice.
-
-A value that takes owner-set parameters stays non-default, since only a value
-the owner chooses takes parameters. Its promotion ships package limits
-instead: the switch's `parameters` gain `package_limits`, one positive value
-per declared parameter id it covers, which a project at that value applies to
-each parameter its Parameters table leaves unset and which count towards
-`min_count`. `process_policy.py` and the validator accept that form, and
-`story_size_budget`'s promotion text says so.
+A process behaviour change ships as the new default. A choice a project may
+make differently is one optional key of `workspace/config.json`, added to
+`project_config.py` (`CONFIG_FIELDS`, `ORDINARY_FIELDS` and its value check),
+kept by setup when present and changed through `/configure`. Today the only
+one is `pr_proof`.

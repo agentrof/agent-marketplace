@@ -65,7 +65,6 @@ USER_CONTEXT_ENTRY_RE = re.compile(r"[^\s`]+")
 VERIFIED_DATE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 CLI_VERSION_RE = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 HOST_CLI_VERSIONS_RELPATH = "tools/data/host-cli-versions.json"
-PROCESS_SWITCHES_RELPATH = "skill-content/configure/data/process-switches.json"
 DELIVERY_PROTOCOL_CAPABILITY = {
     "read_min": 1,
     "read_max": 1,

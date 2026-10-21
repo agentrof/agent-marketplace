@@ -27,12 +27,9 @@ import validate  # noqa: E402
 from git_fixture import init_repository  # noqa: E402
 
 # The checks that read tools/data/models.json, directly or through the declared tiers.
-MODEL_CONFIG_READERS = ("model_config_shape", "frontmatter_shape", "execution_profiles",
-                        "process_switches")
+MODEL_CONFIG_READERS = ("model_config_shape", "frontmatter_shape", "execution_profiles")
 
 PLUGIN_ROOT = "plugins/software-engineering-team"
-SWITCHES = f"{PLUGIN_ROOT}/skill-content/configure/data/process-switches.json"
-MEASURES_RELPATH = "skill-content/deliver/data/fixture-measures.json"
 MODEL_CONFIG = "tools/data/models.json"
 HOST_CLI_PINS = "tools/data/host-cli-versions.json"
 
@@ -321,232 +318,6 @@ class ValidatorContractTests(unittest.TestCase):
                 self.assertIn(named, findings[0].message)
 
 
-FIXTURE_SWITCH = {
-    "summary": "How the fixture step runs.",
-    "flows": ["fast-lane"],
-    "values": [
-        {"id": "current", "tradeoffs": "Today's behaviour and the measured baseline."},
-        {"id": "fast", "tradeoffs": "Fewer passes; its recall is still unmeasured."},
-    ],
-    "default": "current",
-    "metric": "Minutes per fixture step against the baseline.",
-    "promotion": {"unit": "3 Deliveries", "threshold": "Median minutes at most half the baseline."},
-}
-FIXTURE_ANCHOR = "\nSwitch `fixture_mode` selects how step 3 runs.\n"
-
-
-class ProcessSwitchValidatorTests(unittest.TestCase):
-    """The package registry declares every process switch and its owning flows."""
-
-    def setUp(self) -> None:
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.bind(partial_root(Path(self.temporary.name) / "partial", PACKAGE_READS))
-
-    def bind(self, root: Path) -> None:
-        self.root = root
-        self.registry = self.root / SWITCHES
-        self.original = self.registry.read_bytes()
-        self.flow = self.root / PLUGIN_ROOT / "flows/fast-lane.md"
-        self.flow_text = self.flow.read_text(encoding="utf-8")
-
-    def use_whole_root(self) -> None:
-        """Move the test onto the full fixture, for a claim about the whole validator run."""
-        self.bind(valid_root(Path(self.temporary.name) / "whole"))
-
-    def messages(self) -> list[str]:
-        return [finding.message
-                for finding in fixtures.validator_findings(self.root, "process_switches")]
-
-    def declare(self, **switches) -> None:
-        data = json.loads(self.original)
-        data["switches"].update(switches)
-        self.registry.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-    def anchor(self, text: str = FIXTURE_ANCHOR) -> None:
-        self.flow.write_text(self.flow_text + text, encoding="utf-8")
-
-    def assert_rejected(self, fragment: str) -> None:
-        messages = self.messages()
-        self.assertTrue(any(fragment in message for message in messages), messages)
-
-    @integration
-    def test_shipped_registry_and_an_anchored_switch_are_clean(self):
-        self.assertEqual(self.messages(), [])
-        self.use_whole_root()
-        self.declare(fixture_mode=FIXTURE_SWITCH)
-        self.anchor()
-        self.assertEqual(validate.run(self.root), [])
-
-    def test_registry_shape_errors_are_rejected(self):
-        def switch(**changes):
-            spec = json.loads(json.dumps(FIXTURE_SWITCH))
-            spec.update(changes)
-            return {key: value for key, value in spec.items() if value is not None}
-
-        cases = (
-            (switch(default="ghost"),
-             "default 'ghost' is not one of its values ['current', 'fast']"),
-            (switch(metric=None), "needs a component metric"),
-            (switch(metric="  "), "needs a component metric"),
-            (switch(promotion=None), "needs a promotion rule with a unit and a threshold"),
-            (switch(promotion={"unit": "3 Deliveries"}),
-             "needs a promotion rule with a unit and a threshold"),
-            (switch(flows=[]), "flows must list at least one owning flow"),
-            (switch(flows=["fast-lane", "ghost-flow"]), "names unknown flow 'ghost-flow'"),
-            (switch(values=[FIXTURE_SWITCH["values"][0]]), "values must list at least two values"),
-            (switch(values=[*FIXTURE_SWITCH["values"], dict(FIXTURE_SWITCH["values"][1])]),
-             "duplicate value 'fast'"),
-            (switch(values=[{"id": "current"}, FIXTURE_SWITCH["values"][1]]),
-             "every value holds an id and non-empty tradeoffs"),
-            (switch(summary=None), "needs a summary of what it decides"),
-            (switch(owner="qa"), "unknown keys ['owner']"),
-            (switch(issue=0), "issue must be a positive issue number"),
-            (switch(reference_scope="every_task"),
-             "reference_scope must be one of ['owning_flows']"),
-        )
-        self.anchor()
-        for spec, fragment in cases:
-            with self.subTest(fragment=fragment):
-                self.declare(fixture_mode=spec)
-                self.assert_rejected(fragment)
-        self.declare(**{"Fixture-Mode": FIXTURE_SWITCH})
-        self.assert_rejected("id must be lowercase snake_case")
-        self.registry.write_text('{"schema_version": 2, "switches": {}}\n', encoding="utf-8")
-        self.assert_rejected("registry must hold exactly schema_version 1 and switches")
-        self.registry.write_text('{"schema_version": 1, "switches": {}, "switches": {}}\n',
-                                 encoding="utf-8")
-        self.assert_rejected("not valid unique-key JSON")
-
-    def test_switch_parameters_are_validated(self):
-        declared = {"summary": "Owner-set limit per fixture measure.", "values": ["fast"],
-                    "declared_by": {"path": MEASURES_RELPATH, "key": "measures"},
-                    "type": "positive_integer", "min_count": 1}
-        (self.root / PLUGIN_ROOT / MEASURES_RELPATH).write_text(json.dumps({"measures": {
-            "acceptance_criteria": {"summary": "Criteria per story."},
-            "touched_files": {"summary": "Files per change."}}}) + "\n", encoding="utf-8")
-        self.anchor()
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=declared))
-        self.assertEqual(self.messages(), [])
-        # A promotion of a value that takes parameters ships package limits.
-        measure = sorted(json.loads((self.root / PLUGIN_ROOT / MEASURES_RELPATH).read_text(
-            encoding="utf-8"))["measures"])[0]
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=dict(
-            declared, package_limits={measure: 8})))
-        self.assertEqual(self.messages(), [])
-        cases = (
-            (dict(declared, values=["current"]),
-             "parameters belong to a declared value other than the default, not 'current'"),
-            (dict(declared, values=["ghost"]),
-             "parameters belong to a declared value other than the default, not 'ghost'"),
-            (dict(declared, values=[]), "parameters must list the values that take them"),
-            (dict(declared, type="fraction"), "parameter type 'fraction' is not one of"),
-            (dict(declared, declared_by={"path": "skill-content/ghost.json", "key": "measures"}),
-             "declared_by path 'skill-content/ghost.json' is not a file of the package"),
-            (dict(declared, declared_by={"path": "../outside.json", "key": "measures"}),
-             "is not a file of the package"),
-            (dict(declared, declared_by={"path": MEASURES_RELPATH, "key": "ghost"}),
-             "key 'ghost' must map snake_case parameter ids to a summary"),
-            (dict(declared, declared_by=MEASURES_RELPATH),
-             "declared_by must name the package data file and the key"),
-            (dict(declared, min_count=5), "min_count must be a whole number no larger than"),
-            (dict(declared, min_count=True), "min_count must be a whole number no larger than"),
-            (dict(declared, summary=" "), "parameters need a summary"),
-            ({key: value for key, value in declared.items() if key != "type"},
-             "parameters hold exactly summary, values, declared_by, type and min_count"),
-            (dict(declared, limits={}),
-             "parameters hold exactly summary, values, declared_by, type and min_count"),
-            (dict(declared, package_limits={"ghost": 3}),
-             "package_limits must map declared parameter ids to positive whole numbers"),
-            (dict(declared, package_limits={"acceptance_criteria": 0}),
-             "package_limits must map declared parameter ids to positive whole numbers"),
-        )
-        for parameters, fragment in cases:
-            with self.subTest(fragment=fragment):
-                self.declare(fixture_mode=dict(FIXTURE_SWITCH, parameters=parameters))
-                self.assert_rejected(fragment)
-
-    def test_flows_and_switches_must_name_each_other(self):
-        self.declare(fixture_mode=FIXTURE_SWITCH)
-        self.assert_rejected("switch 'fixture_mode' is not named by its owning flow 'fast-lane'")
-
-        self.registry.write_bytes(self.original)
-        self.anchor()
-        self.assert_rejected("flow fast-lane.md names undeclared switch 'fixture_mode'")
-
-        self.registry.unlink()
-        self.assert_rejected("process switches are named but the switch registry is missing")
-
-    @integration
-    def test_switch_references_are_bound_by_the_policy_never_linked(self):
-        self.use_whole_root()
-        reference = "skill-content/deliver/references/switch-fixture_mode-fast.md"
-        path = self.root / PLUGIN_ROOT / reference
-        self.declare(fixture_mode=FIXTURE_SWITCH)
-        self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
-        path.write_text("# Fast fixture step\n", encoding="utf-8")
-        # No SKILL.md links it, and no unlinked-reference warning is raised for it.
-        self.assertEqual(validate.run(self.root), [])
-
-        self.anchor()
-        self.assert_rejected(f"switch reference {reference} is named by no owning flow of"
-                             " switch 'fixture_mode'")
-        self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
-        cases = (
-            ("switch-ghost_mode-fast.md", "switch reference names undeclared switch 'ghost_mode'"),
-            ("switch-fixture_mode-slow.md",
-             "switch reference names undeclared value 'slow' of switch 'fixture_mode'"),
-            ("switch-fixture_mode-current.md",
-             "switch reference names the default value 'current' of switch 'fixture_mode'"),
-            ("switch-fixture.md", "switch reference must be named switch-<switch>-<value>.md"),
-        )
-        for name, fragment in cases:
-            with self.subTest(name=name):
-                extra = path.with_name(name)
-                extra.write_text("# Other\n", encoding="utf-8")
-                self.assert_rejected(fragment)
-                extra.unlink()
-        skill = self.root / PLUGIN_ROOT / "skill-content/deliver/SKILL.md"
-        skill.write_text(skill.read_text(encoding="utf-8")
-                         + "\n- [fast](references/switch-fixture_mode-fast.md): fast mode."
-                           " Read when fast.\n", encoding="utf-8")
-        self.assert_rejected("SKILL.md links a switch reference")
-        self.registry.unlink()
-        self.flow.write_text(self.flow_text, encoding="utf-8")
-        self.assert_rejected("process switches are named but the switch registry is missing")
-
-    def test_value_data_is_bound_with_one_value_and_its_references(self):
-        reference = "skill-content/deliver/references/switch-fixture_mode-fast.md"
-        data = "skill-content/deliver/data/fast-table.json"
-        (self.root / PLUGIN_ROOT / reference).write_text("# Fast fixture step\n", encoding="utf-8")
-        (self.root / PLUGIN_ROOT / data).write_text("{}\n", encoding="utf-8")
-        self.anchor(FIXTURE_ANCHOR + f"At `fast` follow `{reference}`.\n")
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data]}))
-        self.assertEqual(self.messages(), [])
-        # A file that values of several switches read is listed under each.
-        shared = "skill-content/deliver/data/targets.json"
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data, shared]}))
-        self.assertEqual(self.messages(), [])
-        cases = (
-            ({"current": [data]}, "value data belongs to a declared value other than the default"),
-            ({"slow": [data]}, "value data belongs to a declared value other than the default"),
-            ({"fast": []}, "value data must list at least one data file"),
-            ({"fast": ["skill-content/deliver/references/switch-step_timing-recorded.md"]},
-             "is not a skill data JSON file"),
-            ({"fast": ["skill-content/deliver/data/ghost.json"]}, "does not exist"),
-            ({"fast": [data, data]}, f"value data {data!r} is listed more than once"),
-            ({}, "value_data must map a switch value to its data files"),
-        )
-        for value_data, fragment in cases:
-            with self.subTest(fragment=fragment):
-                self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data=value_data))
-                self.assert_rejected(fragment)
-        (self.root / PLUGIN_ROOT / reference).unlink()
-        self.anchor()
-        self.declare(fixture_mode=dict(FIXTURE_SWITCH, value_data={"fast": [data]}))
-        self.assert_rejected("value data needs a switch reference of that value to bind it")
-
-
 # ---------------------------------------------------------------------------
 # Builder registry: one deliberately broken fixture per validator check.
 # Each builder breaks the valid fixture repository so that its check reports
@@ -677,7 +448,7 @@ VALIDATOR_BUILDERS = {
         lambda value: value.update(dependencies=["some-team"])),
     "packaged_state_files": lambda root: write(root, f"{PLUGIN_ROOT}/cache.sqlite", "state"),
     "json_hygiene": lambda root: write(
-        root, f"{PLUGIN_ROOT}/skill-content/configure/data/probe.json", '{"camelCase": 1}\n'),
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/probe.json", '{"camelCase": 1}\n'),
     "orchestrator_integrity": lambda root: edit(
         root, FLOW, "{{constitution}}", "the constitution"),
     "choice_gate": lambda root: append(root, FLOW, "\n\n\n\nThis needs an explicit user choice.\n"),
@@ -688,15 +459,12 @@ VALIDATOR_BUILDERS = {
         "from datetime import date\n\nTODAY = date.today()\n"),
     "script_references": lambda root: append(root, FLOW, "\nRun scripts/ghost_tool.py first.\n"),
     "template_placeholders": lambda root: append(
-        root, f"{PLUGIN_ROOT}/templates/task-input-contract.md", "\n{{ghost_token}}\n"),
+        root, f"{PLUGIN_ROOT}/templates/ci-tests.yml", "\n{{ghost_token}}\n"),
     "project_instruction_contract": lambda root: remove(
         root, f"{PLUGIN_ROOT}/templates/memory/profile.md"),
     "spawn_shape_constitution": lambda root: append(
-        root, f"{PLUGIN_ROOT}/skill-content/deliver/references/switch-step_timing-recorded.md",
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/references/fast-lane.md",
         "\n## Spawn Shape\n\nSpawn the reviewer with the named files.\n"),
-    "ba_schema_shape": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/skill-content/business-analysis/data/space-schema.json",
-        lambda value: value.update(schema_version="one")),
     "wikilink_ban": lambda root: append(root, FLOW, "\nSee [[ghost]].\n"),
     "version_sync": lambda root: edit_json(
         root, "versions.json",
@@ -712,8 +480,6 @@ VALIDATOR_BUILDERS = {
     "effort_policy": lambda root: edit_json(
         root, "platforms/codex/effort-policy.json",
         lambda value: value["refuse"].update(extreme=value["refuse"]["ultra"])),
-    "process_switches": lambda root: edit_json(
-        root, SWITCHES, lambda value: value["switches"]["step_timing"].update(default="ghost")),
     "autopilot_policy": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/autopilot/data/autopilot-policy.json",
         lambda value: value["goal_kinds"].append(dict(value["goal_kinds"][0]))),
@@ -722,9 +488,6 @@ VALIDATOR_BUILDERS = {
         lambda value: value["authoring_caps"].update(ghost_cap=1)),
     "product_namespace": lambda root: append(
         root, f"{PLUGIN_ROOT}/scripts/marketplace_paths.py", "# drift\n"),
-    "task_input_catalog": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/templates/task-input-policy.json",
-        lambda value: value["role_skills"].pop("qa_engineer")),
 }
 
 

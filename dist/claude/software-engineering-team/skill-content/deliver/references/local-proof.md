@@ -1,10 +1,8 @@
 # Local proof before a pull request
 
-These are the instructions of process switch `pr_proof` at `local_record`. A
-fast-lane task binds this file only when the project's Process Policy selects
-that value; at the default, `remote_ci`, the project's CI proves the change
-after the push. Read the value with `process_policy.py value --switch
-pr_proof`.
+Read this only when `workspace/config.json` sets `pr_proof` to
+`local_record`. At the default, `remote_ci`, the project's CI proves the
+change after the push.
 
 A project whose checks run on one machine, with no remote CI, otherwise opens
 and merges pull requests whose tests nobody ran.

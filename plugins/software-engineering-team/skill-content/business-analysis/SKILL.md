@@ -9,7 +9,9 @@ exposure: internal
 The project's analysis lives as tracked Markdown under
 `workspace/docs/business-analysis/<topic>/`: goals, actors, processes, rules,
 acceptance criteria, assumptions, open questions, decisions and measurable
-non-functional budgets. `data/space-schema.json` declares its document types.
+non-functional budgets. Its document types are space, domain, process,
+entity, rule set, acceptance set, decision, glossary, actor roster, budget set
+and integration.
 
 ## When to Use
 

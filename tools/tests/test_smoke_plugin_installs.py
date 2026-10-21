@@ -53,7 +53,7 @@ class HostSmokeContracts(unittest.TestCase):
             root.mkdir()
             for relative in (
                 "scripts/setup_project.py", "scripts/setup_check.py",
-                "scripts/task_lane.py", "scripts/task_inputs.py", "flows/fast-lane.md",
+                "scripts/task_lane.py", "flows/fast-lane.md",
             ):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +68,7 @@ class HostSmokeContracts(unittest.TestCase):
             root.mkdir()
             for relative in (
                 "scripts/setup_project.py", "scripts/setup_check.py",
-                "scripts/task_lane.py", "scripts/task_inputs.py", "flows/fast-lane.md",
+                "scripts/task_lane.py", "flows/fast-lane.md",
             ):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)

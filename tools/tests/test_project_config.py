@@ -79,6 +79,14 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertIn("tests_root must lie in a folder workspace_layout.workspace allows", errors)
         self.assertEqual(project_config.layout_errors({}), [])
 
+    def test_pr_proof_takes_only_its_two_values(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import project_config
+        self.assertNotIn("pr_proof must be one of remote_ci, local_record",
+                         project_config.base_errors({"pr_proof": "local_record"}))
+        self.assertIn("pr_proof must be one of remote_ci, local_record",
+                      project_config.base_errors({"pr_proof": "ghost"}))
+
     def test_only_declared_fields_have_a_config_writer(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = self.unit_config(Path(temporary))

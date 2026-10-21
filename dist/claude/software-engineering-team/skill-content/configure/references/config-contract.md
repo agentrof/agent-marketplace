@@ -2,8 +2,8 @@
 
 `workspace/config.json` is a closed bootstrap contract, not a project-design
 database. Its keys are `schema_version`, `team_id`, `output_language`,
-`terminology_language`, `tests_root`, `workspace_layout` and, once the
-project overrides the package's role settings, `class_models` and
+`terminology_language`, `tests_root`, `workspace_layout`, the optional
+`pr_proof` and, once the project overrides the package's role settings, `class_models` and
 `role_classes`. Setup deterministically
 reconstructs this shape, preserving valid language values and overrides
 while dropping retired and unknown keys. Setup writes neither key; an
@@ -13,8 +13,13 @@ or role, and `project_config.py set-class --default` or `set-role-class
 has. The retired `tier_models` and `role_tiers` fail the check; setup drops
 them.
 
-`output_language`, `terminology_language`, `tests_root` and
-`workspace_layout` are changed through `project_config.py set`.
+`output_language`, `terminology_language`, `tests_root`, `workspace_layout`
+and `pr_proof` are changed through `project_config.py set`.
+`pr_proof` says who proves a fast-lane task before its pull request:
+`remote_ci` (the default when absent) leaves it to the project's CI;
+`local_record` makes `open-pr` require a green `task_lane.py prove` record of
+the clean HEAD, as the deliver entry's `references/local-proof.md` defines.
+Setup writes no `pr_proof` and keeps the project's value.
 `tests_root` (default `workspace/tests`) is where the project's tests live.
 `workspace_layout` lists the only top-level folders a write may create under
 `workspace/` (`workspace`) and `workspace/docs/` (`docs`); setup creates them
@@ -39,11 +44,9 @@ The other configuration targets are documents with their own lifecycle:
 | Test, mutation and dependency-audit commands | `workspace/docs/operation/` | QA Engineer |
 | Runtime environment command and scenarios | `workspace/docs/operation/` | DevOps Engineer |
 | Role model and reasoning effort | the installed package's class map, resolved per spawn by `model_class.py resolve`; `class_models` sets a class slot's model and effort per host and `role_classes` a role's class; a personal session-wide override follows the host contract | Package release for the defaults; `/configure models` for the project's overrides; User for a session-wide override |
-| Process switch values | `workspace/docs/operation/process-policy.md` over the package registry `data/process-switches.json` | Process Policy lifecycle, `/configure process` |
 
-No `scale`, `limits`, stack, source-directory, command or process switch field
-is accepted in config: the config stays closed, and the Process Policy is the
-one place for process choices. Product capacity and performance are concrete
+No `scale`, `limits`, stack, source-directory or command field is accepted in
+config: the config stays closed. Product capacity and performance are concrete
 BA/Solution requirements, not global configuration knobs.
 
 Before approving a change, show the exact consumer, lifecycle and downstream

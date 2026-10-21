@@ -21,7 +21,6 @@ TEAM = ROOT / "plugins" / "software-engineering-team"
 sys.path.insert(0, str(TEAM / "scripts"))
 sys.path.insert(0, str(ROOT / "platforms/shared/software-engineering-team/overlay/scripts"))
 sys.path.insert(0, str(ROOT / "tools"))
-import process_policy  # noqa: E402
 import task_lane  # noqa: E402
 
 try:
@@ -70,14 +69,6 @@ Export the month's invoices as CSV.
 """
 
 
-def run_policy(docs: Path, command: str, *argv: str) -> None:
-    output = io.StringIO()
-    with contextlib.redirect_stdout(output):
-        code = process_policy.main([command, "--docs", str(docs), *argv])
-    if code:
-        raise AssertionError(output.getvalue())
-
-
 class TaskTests(unittest.TestCase):
     def write(self, text: str) -> Path:
         directory = Path(tempfile.mkdtemp())
@@ -109,13 +100,13 @@ class TaskTests(unittest.TestCase):
 
     def test_the_skeleton_is_valid_once_filled(self):
         text = task_lane.task_text("TK-007", "Rotate keys", "Rotate the signing keys.",
-                                    "2026-10-16T10:00:00+00:00", "DLV-009", "high")
+                                    "2026-10-16T10:00:00+00:00", "high")
         text = (text.replace("1. \n", "1. One.\n").replace("Live wiring: \n", "Live wiring: seen.\n")
                 .replace("Docs delta: \n", "Docs delta: none.\n").replace(": \n", ": t\n"))
         path = self.write(text)
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
-        self.assertEqual((props["rigor"], props["delivery"]), ("high", "DLV-009"))
+        self.assertEqual(props["rigor"], "high")
 
     def test_set_field_adds_and_replaces_only_its_scalar(self):
         path = self.write(TASK.replace("approved_at: 2026-10-16T10:03:00+00:00\n", ""))
@@ -190,12 +181,10 @@ class RetrospectiveTests(unittest.TestCase):
         self.assertEqual(task_lane.export(data, "csv").splitlines()[0].split(",")[:3],
                          ["task_id", "title", "size"])
 
-    def test_scope_selects_a_delivery_a_window_or_the_latest(self):
-        tasks = [{"id": f"TK-00{n}", "requested_at": f"2026-10-{10 + n}T10:00:00+00:00",
-                  "delivery": "DLV-007" if n % 2 else ""} for n in range(1, 6)]
+    def test_scope_selects_a_window_or_the_latest(self):
+        tasks = [{"id": f"TK-00{n}", "requested_at": f"2026-10-{10 + n}T10:00:00+00:00"}
+                 for n in range(1, 6)]
         at = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
-        self.assertEqual([task["id"] for task in task_lane.select(tasks, delivery="DLV-007")],
-                         ["TK-001", "TK-003", "TK-005"])
         self.assertEqual([task["id"] for task in task_lane.select(tasks, since="3d", at=at)],
                          ["TK-004", "TK-005"])
         self.assertEqual([task["id"] for task in task_lane.select(tasks, recent=2)],
@@ -214,12 +203,6 @@ class RetrospectiveTests(unittest.TestCase):
         comments = [{"body": "looks fine", "createdAt": "2026-10-16T10:06:00Z"},
                     {"body": task_lane.REVIEW_MARK, "createdAt": "2026-10-16T10:09:00Z"}]
         self.assertEqual(task_lane.review_at(comments), "2026-10-16T10:09:00Z")
-
-    def test_the_retrospective_note_is_vault_shaped(self):
-        data = task_lane.report([task_lane.task_row(self.task, None)], "DLV-007")
-        note = task_lane.retrospective_note(data, "DLV-007")
-        self.assertIn("type: retrospective", note)
-        self.assertIn("<!-- sec: nav -->", note)
 
 
 class GitHubCommandTests(unittest.TestCase):
@@ -439,19 +422,16 @@ class RoleRoutingTests(unittest.TestCase):
 
 @integration
 class LocalProofTests(unittest.TestCase):
-    """Switch `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
+    """Config `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
 
     def project(self, value: str | None = "local_record") -> Path:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
-        docs = root / "workspace" / "docs"
-        (docs / "delivery").mkdir(parents=True)
         if value:
-            run_policy(docs, "init")
-            run_policy(docs, "set", "--switch", "pr_proof", "--value", value)
-            run_policy(docs, "approve")
+            (root / "workspace" / "config.json").write_text(json.dumps({"pr_proof": value}),
+                                                            encoding="utf-8")
         self.git(root, "init", "-q")
         self.git(root, "add", "-A")
         self.git(root, "commit", "-qm", "start")
@@ -488,10 +468,6 @@ class LocalProofTests(unittest.TestCase):
     def body(self, calls: list) -> str:
         create = next(call for call in calls if call[:3] == ("gh", "pr", "create"))
         return create[create.index("--body") + 1]
-
-    def test_the_switch_defaults_to_remote_ci(self):
-        spec = process_policy.load_registry()["pr_proof"]
-        self.assertEqual((spec["default"], spec["values"]), ("remote_ci", ["remote_ci", "local_record"]))
 
     def test_the_default_opens_the_pull_request_without_a_record(self):
         for value in (None, "remote_ci"):
@@ -757,7 +733,7 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         path = root / "tk-009-fix-wording.md"
         path.write_text(task_lane.task_text("TK-009", "Fix wording", "Reword rule 3.",
-                                            "2026-10-16T10:00:00Z", "", "normal", kind="knowledge"),
+                                            "2026-10-16T10:00:00Z", "normal", kind="knowledge"),
                         encoding="utf-8")
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
@@ -1079,7 +1055,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
     def test_a_fixing_task_names_the_task_it_repairs_and_counts_as_its_escaped_defect(self):
         path = Path(tempfile.mkdtemp()) / "tk-009-fix.md"
         self.addCleanup(lambda: __import__("shutil").rmtree(path.parent))
-        path.write_text(task_lane.task_text("TK-009", "Fix export", "Fix it.", "2026-10-16T10:00:00Z", "",
+        path.write_text(task_lane.task_text("TK-009", "Fix export", "Fix it.", "2026-10-16T10:00:00Z",
                                             "normal", kind="knowledge", fixes="TK-004"), encoding="utf-8")
         self.assertEqual(task_lane.task_props(path)["fixes"], "TK-004")
         self.assertEqual(task_lane.lint(path), [])

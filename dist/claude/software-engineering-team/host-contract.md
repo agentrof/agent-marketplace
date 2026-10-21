@@ -42,18 +42,9 @@
   effort, for every subagent in the session. Rendered roles set
   `omitClaudeMd: true` and the `disallowedTools` of
   `platforms/claude/agent-tools.json`.
-- A role whose pinned model cannot run falls back to this session's model
-  with a visible warning. When an Agent result or completion message names its
-  pinned model as unavailable, refused or unsupported (`model_not_found`,
-  `There's an issue with the selected model`, `is not available on your ...
-  deployment`, `is not available with the ... plan`, `don't have access to the
-  model`, `does not support this model`), tell the user which role, model and
-  why. Spawn it again once, same `subagent_type` with `model` set to this
-  session's family alias, only when the failed run changed nothing: its
-  manifest's `write_boundary` is `read_only`, or its `task_inputs.py`
-  invocation still passes with `--expected-hash <source_hash>`. Otherwise, or
-  if that spawn fails too, stop and report. The `model_fallback.py` hooks on
-  `Agent` add this warning; they stay silent for a spawn that passes `model`.
+- A spawn whose pinned model errors as unavailable is spawned once more on
+  this session's family alias only if it changed nothing; tell the user which
+  role and model, and stop if it fails again.
 
 ## Autopilot
 

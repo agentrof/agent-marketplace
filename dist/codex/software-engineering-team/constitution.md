@@ -25,7 +25,7 @@ Behavioral law for every role and the orchestrating session. Pasted into every s
 ## 5. Sources first
 
 - Start from the sources the task file lists, then grep `workspace/docs/` for anything missing. Read only what the change needs; context lists are advice, and a read cost out of proportion to the change is a defect to report. Hard reading obligations are only those a rule names, such as the diff under review and the task's acceptance criteria.
-- If context is insufficient or wrong, search and read on your initiative or the parent agent's direction. Record the sources and reasons and preserve every owning-flow gate.
+- If context is insufficient or wrong, search and read on your initiative or the parent agent's direction. Record the extra sources and reasons.
 - Return context failures and recurring friction in `context_findings` with impact, recovery and a proposed fix. The parent follows `issue-report`; only explicit user approval of the displayed payload permits filing.
 
 ## 6. Safe by default
@@ -56,4 +56,3 @@ These rules bias caution over speed; for trivial work use judgment.
 - No version pins, vendor bias or concrete model names in outputs, except exact image tags in environment definitions.
 - One evolving record per report, never versioned copies. Files over memory: re-read state before acting. Never invent facts, numbers, sources or quotes; when data is missing, say "I don't know".
 - `workspace/config.json` changes only through the configure entry.
-- Delegation follows `templates/task-input-contract.md`: derived inputs preserve full and conditional reads and grant no approval.

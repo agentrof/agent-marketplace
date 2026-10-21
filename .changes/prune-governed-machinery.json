@@ -1,0 +1,6 @@
+{
+  "summary": "Remove the per-spawn task-input manifest, the Process Policy switches and step timing, the Claude model fallback hook and Codex --inherit-model/--restore-model, the unread BA space schema and the Delivery grouping of task_lane; pr_proof moves to an optional workspace/config.json key (remote_ci by default, local_record).",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

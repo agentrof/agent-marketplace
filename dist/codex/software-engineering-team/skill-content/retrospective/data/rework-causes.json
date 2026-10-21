@@ -22,7 +22,7 @@
       "owner": "plugin",
       "description": "a team plugin script or contract failed or refused wrongly",
       "rule": "Record the plugin defect in the plugin ledger, patch the local copy and send the fix upstream.",
-      "hints": ["\\b(task_lane|session_cost|task_inputs)\\.py\\b", "\\bplugin (defect|bug|script)\\b"]
+      "hints": ["\\b(task_lane|session_cost)\\.py\\b", "\\bplugin (defect|bug|script)\\b"]
     },
     {
       "id": "merge-conflict",

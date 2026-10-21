@@ -8,9 +8,6 @@ exposure: entry
 
 Where the task time went, who owns each loss, and what to cut next.
 
-Before delegating a role, follow the packaged `templates/task-input-contract.md`
-and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
-
 ## When to Use
 
 - The user, or an agent reporting progress, wants the measured task times.
@@ -19,7 +16,6 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
 ## Invocation
 
 - `/retrospective`: the latest 20 tasks.
-- `/retrospective DLV-###`: the tasks that name that Delivery.
 - `/retrospective --since 7d`: the tasks requested in the window (`<n>d` or `<n>h`).
 - `--deep` adds reading waste: files read 5 or more times and tool results
   over 200 KB.
@@ -29,7 +25,7 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
 ## Procedure
 
 1. From the project checkout, after `git fetch` and on the target branch, run
-   `scripts/task_lane.py report` with `--delivery DLV-###`, `--since <window>`,
+   `scripts/task_lane.py report` with `--since <window>`,
    `--deep` and `--export <format>` as asked. The tasks give the request and
    approval times; the pull request, review, CI and merge times come from
    GitHub; agent count, models, effort, tokens, dollars and the active
@@ -100,12 +96,9 @@ and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
      minutes, dollars or tasks they address, each with its evidence per kind, cause owner (project, plugin, host
      tool, owner or process), expected gain and how to verify it.
    Add nothing it does not measure; an empty scope says so.
-3. For a Delivery scope the user may keep the summary: `--write-report` writes
-   `workspace/docs/backlog/retrospectives/dlv-###-retrospective.md`, which a
-   task or docs pull request commits.
-4. `--write-lessons` updates the tracked lessons file as
+3. `--write-lessons` updates the tracked lessons file as
    [rework causes](references/rework.md) describes; it never writes memory.
-5. Act only when the user approves proposals by number or id in this
+4. Act only when the user approves proposals by number or id in this
    conversation: run `scripts/task_lane.py file-issues --ids <list>` with the
    same scope flags. A plugin-caused proposal is appended once to the pending
    upstream table of `.agentrof/plugin-ledger.md`, never filed upstream. Any

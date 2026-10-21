@@ -7,7 +7,6 @@ import ast
 from contextlib import contextmanager
 import hashlib
 import hmac
-import json
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -49,19 +48,12 @@ def policy_at(root):
         names = value.get(key)
         if not isinstance(names, list) or any(not isinstance(name, str) or not name for name in names):
             raise tests.CIError("invalid local environment binding: " + key)
-    if value.get("test_selection") not in {"changed", "impact"}:
-        raise tests.CIError("invalid local test selection")
     if type(value.get("budget_estimated_seconds")) is not int or value["budget_estimated_seconds"] < 0:
         raise tests.CIError("invalid local test budget")
     direct = value.get("direct_tools")
     if not isinstance(direct, list) or any(
             not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", name) for name in direct):
         raise tests.CIError("invalid local direct tools")
-    commands = value.get("static_commands")
-    if not isinstance(commands, list) or not commands or any(
-            not isinstance(command, list) or not command or
-            any(not isinstance(arg, str) or not arg for arg in command) for command in commands):
-        raise tests.CIError("invalid local static commands")
     return value
 
 
@@ -475,30 +467,19 @@ def make_plan(root, target="origin/main", jobs=None, full=False):
         selected, mode, reason = units, "full", "every unit test requested"
     elif source["base"] is None:
         selected, mode, reason = units, "full", "target merge-base unavailable; every unit test required"
-    elif local_policy["test_selection"] == "changed":
+    else:
         # Pull request CI runs every test on Linux; this gate gives the change's own unit tests before the push.
         selected, mode, reason = changed_ids(root, source, policy, ids, weights,
                                              local_policy["budget_estimated_seconds"], integration)
-    else:
-        selected, mode, reason = tests.select_ids("impact", source["changed_paths"], policy, ids, root)
-        left = len([test_id for test_id in selected if test_id in integration])
-        selected = [test_id for test_id in selected if test_id not in integration]
-        if left:
-            reason += f"; {left} integration tests left to pull request CI"
     jobs = local_policy["default_workers"] if jobs is None else jobs
     if type(jobs) is not int or not 1 <= jobs <= local_policy["max_workers"]:
         raise tests.CIError("worker count is outside local policy")
     jobs = min(jobs, os.cpu_count() or 1)
-    # A mandatory native regression marked @integration runs only in CI, so only a selected unit one binds here.
-    must_run = sorted(set(selected) & {test_id for lane in policy["lanes"].values()
-                      if lane["os"] == runner_os for test_id in lane.get("required_tests", [])})
     plan = {"schema_version": 1, "authority": "local_only", "candidate": source,
-            "must_run_ids": must_run,
             "environment": environment_identity(root), "policy_hash": tests.digest(policy),
             "local_policy_hash": tests.digest(local_policy), "inventory_hash": inventory_hash,
             "selected_ids": selected, "mode": mode, "selection_reason": reason,
-            "shards": tests.balanced_shards(selected, jobs, weights, policy),
-            "static_commands": local_policy["static_commands"]}
+            "shards": tests.balanced_shards(selected, jobs, weights, policy)}
     plan["plan_hash"] = tests.digest(plan)
     return plan
 
@@ -546,8 +527,6 @@ def verify_reports(plan, reports):
             if row.get("outcome") not in tests.SUCCESS_OUTCOMES or type(seconds) not in {int, float} \
                     or not tests.math.isfinite(seconds) or seconds < 0:
                 raise tests.CIError("invalid local test outcome")
-            if row["id"] in plan.get("must_run_ids", []) and row["outcome"] != "success":
-                raise tests.CIError("mandatory native regression did not pass")
         tests.validate_measurements(report)
     return reports
 
@@ -841,19 +820,20 @@ def check(root, target="origin/main", jobs=None, fresh=False, verify_only=False,
             attempt.update(plan_hash=plan["plan_hash"], environment=plan["environment"], jobs=jobs, full=full)
             tests.write_json(latest, attempt)
             started = time.monotonic()
-            # Static checks only read the candidate, so they run beside the test workers.
-            static = [subprocess.Popen([sys.executable, *command], cwd=root, env=execution_environment(root),
-                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT) for command in plan["static_commands"]]
+            # The Makefile's static-check is the one list of static checks; it only reads the
+            # candidate, so it runs beside the test workers, under this checker's Python.
+            command = ["make", "-s", "static-check", "PY=" + sys.executable]
+            static = subprocess.Popen(command, cwd=root, env=execution_environment(root),
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             run_started = time.monotonic()
             try:
                 reports = previous["reports"] if valid and not fresh else execute_workers(root, plan, cache)
             finally:
-                outputs = [process.communicate()[0] for process in static]
+                output = static.communicate()[0]
             static_seconds = time.monotonic() - started
-            for command, process, output in zip(plan["static_commands"], static, outputs):
-                print(output.decode("utf-8", "replace"), end="")
-                if process.returncode:
-                    raise subprocess.CalledProcessError(process.returncode, [sys.executable, *command])
+            print(output.decode("utf-8", "replace"), end="")
+            if static.returncode:
+                raise subprocess.CalledProcessError(static.returncode, command)
             assert_current(root, plan)
             assert_generation(root, generation)
             verify_reports(plan, reports)

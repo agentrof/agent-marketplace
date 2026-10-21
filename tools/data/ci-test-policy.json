@@ -1,195 +1,25 @@
 {
   "schema_version": 1,
-  "description": "Impact groups are conservative dependency closures. Unmapped/shared inputs run the complete suite. Every lane runs the one supported `python` version, its shards as separate jobs and each shard in `workers` processes. Measured per-test reports weigh the partition; test_seconds keeps, per runner operating system, the tests that took at least five seconds (refresh it with `tools/ci_tests.py estimates`) for a plan whose policy changed, and every other test weighs default_seconds.",
+  "description": "Every lane runs the one supported `python` version, its shards as separate jobs and each shard in `workers` processes. test_seconds keeps, per runner operating system, the tests that took at least five seconds (refresh it with `tools/ci_tests.py estimates`); every other test weighs default_seconds. generated_paths are distribution copies the local gate selects through their canonical source.",
   "default_seconds": 1.0,
   "python": "3.14",
-  "module_seconds": {},
-  "always_groups": [
-    "contracts"
-  ],
   "generated_paths": [
     "dist/*"
   ],
-  "generated_sources": [
-    "plugins/*",
-    "platforms/*",
-    "product.json",
-    "package-modes.json",
-    "versions.json",
-    "tools/build_distributions.py"
-  ],
-  "full_paths": [
-    ".github/workflows/*",
-    "Makefile",
-    "tools/ci_*.py",
-    "tools/data/ci-*.json",
-    "tools/data/*",
-    "platforms/*",
-    "package-modes.json",
-    "product.json",
-    ".gitattributes",
-    ".claude-plugin/*",
-    ".agents/*",
-    "plugins/*/*.md",
-    "plugins/*/scripts/atomic_file.py",
-    "plugins/*/scripts/file_lock.py",
-    "plugins/*/scripts/project_config.py",
-    "plugins/*/scripts/setup*.py",
-    "plugins/*/scripts/marketplace_paths.py",
-    "plugins/*/templates/*",
-    "plugins/*/skill-content/*",
-    ".gitignore",
-    "tools/tests/test_ci_*.py",
-    "tools/tests/fixtures.py",
-    "tools/tests/git_fixture.py",
-    "tools/tests/fixture_cache.py"
-  ],
-  "rules": [
-    {
-      "paths": [
-        "README.md",
-        "CHANGELOG.md",
-        "AGENTS.md",
-        "CLAUDE.md",
-        "docs/*",
-        "memory/*",
-        "LICENSE"
-      ],
-      "groups": [
-        "documentation"
-      ]
-    },
-    {
-      "paths": [
-        "versions.json",
-        ".release/*"
-      ],
-      "groups": [
-        "release"
-      ]
-    },
-    {
-      "paths": [
-        "dist/*"
-      ],
-      "groups": [
-        "contracts"
-      ]
-    },
-    {
-      "paths": [
-        "tools/counts.py"
-      ],
-      "groups": [
-        "documentation"
-      ]
-    },
-    {
-      "paths": [
-        "tools/model_drift.py"
-      ],
-      "groups": [
-        "contracts"
-      ]
-    },
-    {
-      "paths": [
-        "plugins/software-engineering-team/scripts/task_lane.py"
-      ],
-      "groups": [
-        "delivery"
-      ]
-    },
-    {
-      "paths": [
-        ".changes/*"
-      ],
-      "groups": [
-        "release_metadata"
-      ]
-    }
-  ],
   "groups": {
-    "contracts": {
-      "tests": [
-        "tools.tests.test_adapter_registry.*",
-        "tools.tests.test_single_team_distribution.*",
-        "tools.tests.test_packaged_state_contract.*",
-        "tools.tests.test_validator_contract.*",
-        "tools.tests.test_model_drift.*",
-        "tools.tests.test_model_fallback.*",
-        "tools.tests.test_host_models.*",
-        "tools.tests.test_tier_models.*",
-        "tools.tests.test_await_outputs.*",
-        "tools.tests.test_autopilot.*",
-        "tools.tests.test_autopilot_guard.*",
-        "tools.tests.test_workspace_guard.*",
-        "tools.tests.test_fast_lane_decoupling.*",
-        "tools.tests.test_companions.*",
-        "tools.tests.test_counts.*",
-        "tools.tests.test_ci_*.*",
-        "tools.tests.test_runtime_floor.*",
-        "tools.tests.test_python_entry.*"
-      ]
-    },
-    "documentation": {
-      "tests": [
-        "tools.tests.test_maintainer_protocol.*",
-        "tools.tests.test_release_workflows.*"
-      ],
-      "depends_on": [
-        "contracts"
-      ]
-    },
-    "release": {
-      "tests": [
-        "tools.tests.test_release.*",
-        "tools.tests.test_release_publish.*",
-        "tools.tests.test_release_workflows.*",
-        "tools.tests.test_maintainer_protocol.*",
-        "tools.tests.test_package_refresh.*",
-        "tools.tests.test_setup_project.*",
-        "tools.tests.test_smoke_plugin_installs.*",
-        "tools.tests.test_ci_*.*",
-        "tools.tests.test_python_entry.*"
-      ],
-      "depends_on": [
-        "contracts"
-      ]
-    },
-    "delivery": {
-      "tests": [
-        "tools.tests.test_writer_line_endings.*"
-      ],
-      "depends_on": [
-        "contracts"
-      ]
-    },
     "platform": {
       "tests": [
-        "tools.tests.test_ci_local.LocalValidationTests.test_a_worker_test_that_reaches_a_host_binary_through_the_environment_fails",
-        "tools.tests.test_ci_local.LocalValidationTests.test_cache_reparse_alias_and_lock_hardlink_are_rejected",
-        "tools.tests.test_ci_local.LocalValidationTests.test_executable_mode_change_cannot_hide_behind_core_filemode_false",
-        "tools.tests.test_ci_local.LocalValidationTests.test_json_writer_does_not_follow_predictable_temporary_alias",
         "tools.tests.test_ci_local.LocalValidationTests.test_partial_staging_untracked_merge_flags_and_same_stat_edits_are_rejected",
-        "tools.tests.test_ci_local.LocalValidationTests.test_prior_branch_commits_and_staged_rename_deletion_are_in_impact",
         "tools.tests.test_ci_local.LocalValidationTests.test_real_workers_have_distinct_temporary_directories_and_account_for_all_tests",
-        "tools.tests.test_ci_local.LocalValidationTests.test_stdlib_prewarm_ignores_project_modules_and_never_reuses_or_populates_fixture_bytecode",
-        "tools.tests.test_ci_local.LocalValidationTests.test_tracked_symlink_cannot_hide_ignored_source_content",
-        "tools.tests.test_ci_local.LocalValidationTests.test_worker_cannot_populate_shared_read_only_cache",
         "tools.tests.test_ci_local.LocalValidationTests.test_worker_temp_parent_rejects_candidate_and_other_git_ancestry",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_a_failed_or_crashed_worker_fails_the_shard",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_a_test_that_reaches_a_host_binary_through_the_runner_environment_fails",
-        "tools.tests.test_ci_tests.CITestPlannerTests.test_each_worker_keeps_its_own_host_tripwire",
-        "tools.tests.test_ci_tests.CITestPlannerTests.test_impact_selection_preserves_nul_delimited_renames_and_unknown_fallback",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_import_side_effect_cannot_add_a_test_without_accounting",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_independent_workers_cover_a_plan_and_merge_real_duration_reports",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_interrupted_shard_never_leaves_complete_evidence",
-        "tools.tests.test_ci_tests.CITestPlannerTests.test_mandatory_native_regressions_cannot_pass_as_skipped",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_parallel_shard_runs_each_test_once_in_isolated_workers",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_policy_inventory_and_tree_changes_invalidate_a_plan",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_selected_shard_runs_only_its_tests_and_writes_durable_report",
-        "tools.tests.test_ci_tests.CITestPlannerTests.test_skipped_subtests_are_recorded_and_cannot_hide_mandatory_assertions",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_subtest_failure_and_class_setup_failure_do_not_pass",
         "tools.tests.test_runtime_floor.RuntimeFloorTests.test_at_or_above_the_floor_the_launcher_runs_a_script_as_python_would",
         "tools.tests.test_runtime_floor.RuntimeFloorTests.test_below_the_floor_every_other_generic_event_passes_silently",
@@ -219,20 +49,12 @@
       "depends_on": [
         "platform"
       ]
-    },
-    "release_metadata": {
-      "tests": [
-        "tools.tests.test_release.*"
-      ],
-      "depends_on": [
-        "contracts"
-      ]
     }
   },
   "lanes": {
     "linux": {
       "os": "ubuntu-latest",
-      "shards": 8,
+      "shards": 3,
       "workers": 3,
       "groups": [
         "all"
@@ -248,62 +70,13 @@
     },
     "windows": {
       "os": "windows-latest",
-      "shards": 2,
+      "shards": 1,
       "workers": 3,
       "groups": [
         "windows"
       ]
     }
   },
-  "known_test_modules": [
-    "tools.tests.test_adapter_registry",
-    "tools.tests.test_await_outputs",
-    "tools.tests.test_atomic_file",
-    "tools.tests.test_autopilot",
-    "tools.tests.test_autopilot_guard",
-    "tools.tests.test_workspace_guard",
-    "tools.tests.test_ci_evidence",
-    "tools.tests.test_ci_host_policy",
-    "tools.tests.test_ci_local",
-    "tools.tests.test_ci_performance",
-    "tools.tests.test_ci_plan",
-    "tools.tests.test_ci_tests",
-    "tools.tests.test_counts",
-    "tools.tests.test_git_fixture",
-    "tools.tests.test_host_models",
-    "tools.tests.test_issue_report",
-    "tools.tests.test_maintainer_protocol",
-    "tools.tests.test_model_class",
-    "tools.tests.test_model_drift",
-    "tools.tests.test_model_fallback",
-    "tools.tests.test_package_refresh",
-    "tools.tests.test_packaged_state_contract",
-    "tools.tests.test_fast_lane_decoupling",
-    "tools.tests.test_companions",
-    "tools.tests.test_project_config",
-    "tools.tests.test_project_instructions",
-    "tools.tests.test_python_entry",
-    "tools.tests.test_release",
-    "tools.tests.test_release_publish",
-    "tools.tests.test_release_workflows",
-    "tools.tests.test_runtime_floor",
-    "tools.tests.test_scaffold",
-    "tools.tests.test_setup_project",
-    "tools.tests.test_single_team_distribution",
-    "tools.tests.test_smoke_plugin_installs",
-    "tools.tests.test_task_lane",
-    "tools.tests.test_tier_models",
-    "tools.tests.test_validator_contract",
-    "tools.tests.test_writer_line_endings"
-  ],
-  "impact_groups": [
-    "contracts",
-    "documentation",
-    "release",
-    "delivery",
-    "release_metadata"
-  ],
-  "fixture_startup_seconds": {},
   "test_seconds": {
     "macos-latest": {
       "tools.tests.test_autopilot.DistributionTests.test_the_question_hook_denies_only_while_a_grant_is_active": 6.5,
@@ -334,17 +107,13 @@
       "tools.tests.test_setup_project.WindowsLongPathsChoiceTests.test_answering_set_writes_the_local_config": 5.2,
       "tools.tests.test_tier_models.SetupTests.test_setup_keeps_valid_overrides_writes_none_and_stops_on_an_invalid_one": 7.7,
       "tools.tests.test_validator_contract.ValidatorBuilderTests.test_each_builder_fires_its_check": 12.7,
-      "tools.tests.test_validator_contract.ValidatorContractTests.test_delivery_verification_policy_bounds_every_wait_under_the_prompt_cache": 30.3,
       "tools.tests.test_validator_contract.ValidatorContractTests.test_malformed_model_config_is_a_finding_not_a_crash": 6.0,
       "tools.tests.test_validator_contract.ValidatorContractTests.test_valid_single_team_fixture_is_clean_and_deterministic": 7.6
     },
     "ubuntu-latest": {
       "tools.tests.test_ci_plan.CIPlanIntegrationTests.test_main_merge_reuses_only_a_successful_exact_pr_tree": 11.6,
-      "tools.tests.test_ci_tests.CITestPlannerTests.test_acceleration_contracts_have_impact_and_native_windows_coverage": 7.0,
-      "tools.tests.test_ci_tests.CITestPlannerTests.test_known_runtime_and_regression_changes_select_dependency_closure": 8.2,
       "tools.tests.test_package_refresh.PackageRefreshAcceptanceTests.test_real_n_to_next_refresh_converges_on_native_marketplace_hosts": 39.7,
       "tools.tests.test_project_config.ProjectConfigTests.test_setup_migrates_v1_config_without_touching_authored_titles": 7.8,
-      "tools.tests.test_project_config.ProjectConfigTests.test_setup_moves_a_recognized_legacy_environment_contract_transactionally": 5.0,
       "tools.tests.test_release.ReleaseCommitPolicyTests.test_every_edit_of_the_release_commit_is_refused": 5.6,
       "tools.tests.test_runtime_floor.RuntimeFloorTests.test_each_packaged_hook_answers_through_the_launcher_as_it_did_directly": 8.0,
       "tools.tests.test_setup_project.SetupProjectTests.test_bootstrap_is_project_local_and_idempotent": 9.8,
@@ -364,7 +133,6 @@
       "tools.tests.test_setup_project.WindowsLongPathsChoiceTests.test_a_directory_reaching_248_characters_leaves_its_short_files_out": 5.1,
       "tools.tests.test_tier_models.SetupTests.test_setup_keeps_valid_overrides_writes_none_and_stops_on_an_invalid_one": 8.9,
       "tools.tests.test_validator_contract.ValidatorBuilderTests.test_each_builder_fires_its_check": 15.5,
-      "tools.tests.test_validator_contract.ValidatorContractTests.test_delivery_verification_policy_bounds_every_wait_under_the_prompt_cache": 23.6,
       "tools.tests.test_validator_contract.ValidatorContractTests.test_malformed_model_config_is_a_finding_not_a_crash": 6.9,
       "tools.tests.test_validator_contract.ValidatorContractTests.test_valid_single_team_fixture_is_clean_and_deterministic": 7.2
     },

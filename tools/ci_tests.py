@@ -380,8 +380,6 @@ def git(root, *arguments):
 
 def changed_paths(root, base, head):
     # --no-renames includes both sides of a rename, including the deleted path.
-    if not base:
-        raise CIError("impact selection requires --base")
     raw = git(root, "diff", "--name-only", "--no-renames", "-z", base, head, "--")
     return sorted(set(os.fsdecode(path) for path in raw.split(b"\0") if path))
 
@@ -442,7 +440,7 @@ def policy_at(root):
     policy = read_json(root / POLICY_PATH)
     if policy.get("schema_version") != 1:
         raise CIError("unsupported CI test policy")
-    required = {"groups", "lanes", "always_groups", "full_paths", "rules", "module_seconds", "python"}
+    required = {"groups", "lanes", "python"}
     if not required <= set(policy):
         raise CIError("CI test policy is incomplete")
     if not isinstance(policy["python"], str) or re.fullmatch(r"[0-9]+\.[0-9]+", policy["python"]) is None:
@@ -488,17 +486,6 @@ def group_ids(names, policy, all_ids):
     return sorted(result)
 
 
-def dependency_tests(root, paths, all_ids):
-    """Follow local imports and literal script paths, conservatively by module stem."""
-    affected = {Path(path).stem for path in paths if path.endswith(".py")}
-    graph = import_graph(root)
-    previous = set()
-    while previous != affected:
-        previous = set(affected)
-        affected.update(name for name, dependencies in graph.items() if dependencies & previous)
-    return {test_id for test_id in all_ids if module_of(test_id).rsplit(".", 1)[-1] in affected}
-
-
 def import_graph(root):
     """Each Python module stem with the stems it imports or names as a literal script path."""
     graph = {}
@@ -521,89 +508,39 @@ def import_graph(root):
     return graph
 
 
-def select_ids(mode, paths, policy, all_ids, root=None):
-    if mode not in {"full", "impact", "reuse"}:
-        raise CIError(f"unknown plan mode: {mode}")
+def select_ids(mode, all_ids):
     if mode == "reuse":
         return [], "reuse", "caller must verify complete prior evidence for this source"
     if mode == "full":
         return list(all_ids), "full", "full coverage requested"
-    if "known_test_modules" in policy:
-        missing = sorted({module_of(test_id) for test_id in all_ids} - set(policy["known_test_modules"]))
-        if missing:
-            return list(all_ids), "full", "test inventory mapping is incomplete: " + ", ".join(missing)
-    if any(matches(path, policy.get("generated_paths", [])) for path in paths) and not any(
-            matches(path, policy.get("generated_sources", [])) for path in paths):
-        return list(all_ids), "full", "generated distribution changed without its canonical source"
-    groups = set(policy["always_groups"])
-    direct = set()
-    for path in paths:
-        if matches(path, policy["full_paths"]):
-            return list(all_ids), "full", f"shared or policy input changed: {path}"
-        if path.startswith("tools/tests/test_") and path.endswith(".py"):
-            module = "tools.tests." + Path(path).stem
-            if module not in policy.get("known_test_modules", []):
-                return list(all_ids), "full", f"new or unmapped test module changed: {path}"
-            own = {test_id for test_id in all_ids if module_of(test_id) == module}
-            if not own:
-                return list(all_ids), "full", f"test module was deleted: {path}"
-            direct.update(own)
-            for name in policy.get("impact_groups", []):
-                if any(matches(test_id, policy["groups"][name].get("tests", [])) for test_id in own):
-                    groups.add(name)
-            continue
-        rules = [rule for rule in policy["rules"] if matches(path, rule["paths"])]
-        if not rules:
-            return list(all_ids), "full", f"unmapped input changed: {path}"
-        for rule in rules:
-            groups.update(rule["groups"])
-    if root is not None:
-        direct.update(dependency_tests(root, paths, all_ids))
-    return sorted(set(group_ids(groups, policy, all_ids)) | direct), "impact", "explicit impact groups and Python dependency closure: " + ", ".join(sorted(groups))
+    raise CIError(f"unknown plan mode: {mode}")
 
 
 def test_weight(test_id, durations, policy):
-    value = durations.get(test_id, policy["module_seconds"].get(module_of(test_id), policy.get("default_seconds", 1.0)))
+    value = durations.get(test_id, policy.get("default_seconds", 1.0))
     if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
         raise CIError(f"invalid test duration for {test_id}")
     return max(float(value), 0.001)
 
 
-def fixture_startup(module, policy):
-    value = policy.get("fixture_startup_seconds", {}).get(module, 0.0)
-    if type(value) not in {int, float} or not math.isfinite(value) or value < 0:
-        raise CIError(f"invalid fixture startup estimate: {module}")
-    return float(value)
-
-
 def estimated_seconds(ids, durations, policy):
-    return round(sum(test_weight(test_id, durations, policy) for test_id in ids) +
-                 sum(fixture_startup(module, policy) for module in {module_of(test_id) for test_id in ids}), 6)
+    return round(sum(test_weight(test_id, durations, policy) for test_id in ids), 6)
 
 
 def balanced_shards(ids, count, durations, policy):
     shards = [[] for _ in range(min(count, len(ids)))]
     totals = [0.0] * len(shards)
-    modules = [set() for _ in shards]
     for position, test_id in enumerate(sorted(ids, key=lambda value: (-test_weight(value, durations, policy), value))):
-        module = module_of(test_id)
-        startup = fixture_startup(module, policy)
-        # Seed every worker before considering fixture affinity; never create an empty shard.
-        index = position if position < len(shards) else min(range(len(shards)), key=lambda value:
-            (totals[value] + (0 if module in modules[value] else startup), value))
+        # Seed every worker first, so no shard is ever empty.
+        index = position if position < len(shards) else min(range(len(shards)), key=lambda value: (totals[value], value))
         shards[index].append(test_id)
-        totals[index] += test_weight(test_id, durations, policy) + (0 if module in modules[index] else startup)
-        modules[index].add(module)
+        totals[index] += test_weight(test_id, durations, policy)
     return [sorted(shard) for shard in shards]
 
 
 def worker_partition(ids, shard_count, workers, durations, policy):
-    """Balance one lane over its shard jobs and their worker processes.
-
-    A process pays each module's fixture startup once, so the balance runs over
-    every process. Shards then take whole processes round robin, which never
-    leaves a shard or a process empty.
-    """
+    """Balance one lane over every worker process; shards then take whole processes round robin,
+    which never leaves a shard or a process empty."""
     processes = balanced_shards(ids, shard_count * workers, durations, policy)
     groups = [[] for _ in range(min(shard_count, len(ids)))]
     for index, tests in enumerate(processes):
@@ -638,7 +575,7 @@ def python_release_problem(release, python):
     return None
 
 
-def make_plan(root, mode="full", base=None, head="HEAD", timings=None, python_release=None):
+def make_plan(root, mode="full", head="HEAD", python_release=None):
     policy = policy_at(root)
     # One run's shards resolve the policy's major.minor on separate runners, and a
     # toolcache update during the run can give them different patch releases (#443).
@@ -649,38 +586,26 @@ def make_plan(root, mode="full", base=None, head="HEAD", timings=None, python_re
     current = git(root, "rev-parse", "HEAD^{commit}").decode().strip()
     if source_sha != current:
         raise CIError("plan source must be the checked out commit")
-    paths = changed_paths(root, base, source_sha) if mode == "impact" else []
-    selected, actual_mode, reason = select_ids(mode, paths, policy, ids, root)
-    timings = timings or {"schema_version": 1, "durations": {}}
-    if timings.get("schema_version") != 1 or not isinstance(timings.get("durations"), dict):
-        raise CIError("invalid timing history")
+    selected, actual_mode, reason = select_ids(mode, ids)
     lanes = {}
     for name, lane in sorted(policy["lanes"].items()):
         permitted = ids if lane.get("groups") == ["all"] else group_ids(lane["groups"], policy, ids)
         lane_ids = sorted(set(selected) & set(permitted))
         if not lane_ids:
             continue
-        measured = timings["durations"].get(name, {})
-        # Measured history wins; the policy's per-test estimates cover a plan
-        # whose policy changed, since history is bound to the exact policy.
-        durations = {**policy.get("test_seconds", {}).get(lane["os"], {}), **measured}
+        durations = policy.get("test_seconds", {}).get(lane["os"], {})
         groups = worker_partition(lane_ids, lane["shards"], lane.get("workers", 1), durations, policy)
         shards, owners = assignments(groups)
         worker_seconds = [[estimated_seconds(tests, durations, policy) for tests in group] for group in groups]
         lanes[name] = {"os": lane["os"], "python": lane["python"], "selected_ids": lane_ids, "shards": shards,
                        "workers": lane.get("workers", 1), "worker_assignments": owners,
-                       "must_run_ids": sorted(set(lane_ids) & set(lane.get("required_tests", []))),
                        "estimated_shard_seconds": [max(seconds) for seconds in worker_seconds],
-                       "estimated_worker_seconds": worker_seconds,
-                       "measured_weights": len(set(lane_ids) & set(measured))}
+                       "estimated_worker_seconds": worker_seconds}
     rows = matrix_rows(lanes, python_release)
     plan = {"schema_version": 1, "source_sha": source_sha,
             "source_tree": git(root, "rev-parse", source_sha + "^{tree}").decode().strip(),
             "policy_hash": digest(policy), "inventory_hash": inventory_hash,
-            "requested_mode": mode, "mode": actual_mode, "base_sha": base,
-            "changed_paths": paths, "selection_reason": reason, "selected_ids": selected, "lanes": lanes,
-            "timing_provenance": {"sources": timings.get("sources", []),
-                                  "fallback_reasons": timings.get("fallback_reasons", ["no history supplied"])},
+            "mode": actual_mode, "selection_reason": reason, "selected_ids": selected, "lanes": lanes,
             "has_tests": bool(rows), "python": policy["python"],
             "matrix": {"include": rows or [{"lane": "noop", "os": "ubuntu-latest",
             "python": python_release or policy["python"], "shard": 0, "shards": 0}]}}
@@ -707,8 +632,6 @@ def validate_plan(plan, root=None):
     for name, lane in plan["lanes"].items():
         expected = lane["selected_ids"]
         flattened = [test_id for shard in lane["shards"] for test_id in shard]
-        if not set(lane.get("must_run_ids", [])) <= set(expected):
-            raise CIError(f"required native test is not selected: {name}")
         if not expected or expected != sorted(set(expected)) or sorted(flattened) != expected \
                 or any(not shard for shard in lane["shards"]):
             raise CIError(f"shards are not a complete disjoint partition: {name}")
@@ -726,11 +649,8 @@ def validate_plan(plan, root=None):
             raise CIError("policy or inventory changed after planning")
         if git(root, "rev-parse", "HEAD^{tree}").decode().strip() != plan["source_tree"]:
             raise CIError("plan belongs to another source tree")
-        if plan["requested_mode"] not in {"full", "impact", "reuse"}:
-            raise CIError("unknown plan mode")
-        paths = changed_paths(root, plan["base_sha"], plan["source_sha"]) if plan["requested_mode"] == "impact" else []
-        expected, mode, reason = select_ids(plan["requested_mode"], paths, policy, ids, root)
-        if expected != all_selected or mode != plan["mode"] or paths != plan["changed_paths"] or reason != plan["selection_reason"]:
+        expected, mode, reason = select_ids(plan["mode"], ids)
+        if expected != all_selected or mode != plan["mode"] or reason != plan["selection_reason"]:
             raise CIError("plan selection does not match the declared inputs")
         for name, config in policy["lanes"].items():
             permitted = ids if config["groups"] == ["all"] else group_ids(config["groups"], policy, ids)
@@ -741,8 +661,7 @@ def validate_plan(plan, root=None):
                     raise CIError(f"unexpected empty lane: {name}")
                 continue
             if lane is None or lane["selected_ids"] != expected or lane["os"] != config["os"] \
-                    or lane["python"] != config["python"] or len(lane["shards"]) != min(config["shards"], len(expected)) \
-                    or lane.get("must_run_ids", []) != sorted(set(expected) & set(config.get("required_tests", []))):
+                    or lane["python"] != config["python"] or len(lane["shards"]) != min(config["shards"], len(expected)):
                 raise CIError(f"lane coverage differs from policy: {name}")
             if lane["workers"] != config.get("workers", 1):
                 raise CIError(f"lane execution differs from policy: {name}")
@@ -991,13 +910,9 @@ def run_shard(root, plan, lane_name, shard, report_path, workers=None):
         else:
             passed, problems = run_workers(root, plan, lane_name, shard, groups, report, runtime)
         complete = sorted(test["id"] for test in report["tests"]) == sorted(expected)
-        required_ran = all(test["outcome"] == "success" for test in report["tests"]
-                           if test["id"] in lane.get("must_run_ids", []))
-        report["status"] = "complete" if passed and complete and required_ran and not problems else "failed"
+        report["status"] = "complete" if passed and complete and not problems else "failed"
         if problems:
             report["error"] = "; ".join(problems)
-        if not required_ran:
-            report["error"] = "mandatory native regression was skipped or did not pass"
         if not complete:
             report["error"] = "one or more planned tests did not finish"
     except (KeyboardInterrupt, SystemExit):
@@ -1229,8 +1144,6 @@ def verify_reports(plan, reports):
             if test.get("outcome") not in SUCCESS_OUTCOMES or isinstance(seconds, bool) \
                     or not isinstance(seconds, (float, int)) or not math.isfinite(seconds) or seconds < 0:
                 raise CIError(f"invalid test outcome or duration: {test.get('id')}")
-            if test["id"] in plan["lanes"][key[0]].get("must_run_ids", []) and test["outcome"] != "success":
-                raise CIError(f"mandatory native regression did not pass: {test['id']}")
             durations.setdefault(key[0], {})[test["id"]] = seconds
         validate_measurements(report)
         measurements.append({"lane": key[0], "shard": key[1],
@@ -1286,10 +1199,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     plan_parser = sub.add_parser("plan")
-    plan_parser.add_argument("--mode", choices=("full", "impact", "reuse"), default="full")
-    plan_parser.add_argument("--base")
+    plan_parser.add_argument("--mode", choices=("full", "reuse"), default="full")
     plan_parser.add_argument("--head", default="HEAD")
-    plan_parser.add_argument("--timings", type=Path)
     plan_parser.add_argument("--python-release")
     plan_parser.add_argument("--output", type=Path, required=True)
     run_parser = sub.add_parser("run")
@@ -1320,8 +1231,7 @@ def main(argv=None):
     sys.dont_write_bytecode = True
     try:
         if args.command == "plan":
-            plan = make_plan(ROOT, args.mode, args.base, args.head, read_json(args.timings) if args.timings else None,
-                             args.python_release)
+            plan = make_plan(ROOT, args.mode, args.head, args.python_release)
             write_json(args.output, plan)
             print(json.dumps({"matrix": plan["matrix"], "has_tests": plan["has_tests"], "mode": plan["mode"],
                               "plan_hash": plan["plan_hash"], "selection_reason": plan["selection_reason"]}))

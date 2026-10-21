@@ -17,8 +17,8 @@ counts-check:
 dist-check:
 	$(PY) tools/build_distributions.py --check
 
-test:
-	PYTHONDONTWRITEBYTECODE=1 $(PY) -m unittest discover -s tools/tests -p 'test_*.py' -v
+# The full suite runs in pull request CI; locally a change runs its own unit tests.
+test: check-local
 
 static-check: validate release-validate counts-check dist-check
 

@@ -839,6 +839,20 @@ class RetrospectiveDollarTests(unittest.TestCase):
         self.assertEqual(sum(row["cost"]["tokens"]["output"] for row in rows) + rest["tokens"]["output"],
                          self.session_cost.cost(self.scan(), self.prices)["tokens"]["output"])
 
+    def test_a_task_session_counts_its_calls_before_start_once_across_a_resume(self):
+        # Base branch named task/...; m1 runs before start; m2 streams twice; the resumed run adds m3.
+        (self.folder / "s1.jsonl").write_text("\n".join([
+            self.call(1, "m1", branch="task/trial", model="claude-sonnet-5-5", output_tokens=100),
+            self.call(6, "m2", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=1),
+            self.call(6, "m2", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=200),
+            self.call(30, "m3", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=300)]) + "\n",
+            encoding="utf-8")
+        task = {**RetrospectiveTests.task, "id": "TK-001", "file": "tk-001-a.md",
+                "requested_at": "2026-10-16T10:05:00+00:00"}
+        row = task_lane.task_row(task, pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:40:00Z"))
+        rest = task_lane.attach_sessions([row], [task], self.scan(), False, 1e12, self.prices)
+        self.assertEqual((row["cost"]["main"]["tokens"]["output"], row["cost"]["usd"], rest["usd"]), (600, 0.006, 0))
+
     def test_codex_tokens_split_cached_and_written_input_and_name_their_branch(self):
         folder = self.home / "codex" / "2026" / "10" / "16"
         folder.mkdir(parents=True)

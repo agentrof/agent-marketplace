@@ -954,6 +954,10 @@ def attach_sessions(rows: list[dict], tasks: list[dict], events: list[dict], dee
         end = parse_time(row["merged"]).timestamp() if row.get("merged") else until
         claims.append([session_cost.belongs(event, task_branch(task), start, end, task.get("id", ""))
                        for event in events])
+    ids = [task.get("id", "") for task in tasks]
+    for index, event in enumerate(events):
+        if event.get("lead") in ids and not any(claimed[index] for claimed in claims):
+            claims[ids.index(event["lead"])][index] = True
     holders = [sum(column) for column in zip(*claims)] if claims else [0] * len(events)
     for row, claimed in zip(rows, claims):
         mine = [{**event, "share": 1 / holders[index]} for index, event in enumerate(events) if claimed[index]]

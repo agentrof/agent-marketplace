@@ -89,11 +89,6 @@ class SetupProjectTests(unittest.TestCase):
                 cwd=project, check=False,
             )
             self.assertEqual(ignored.returncode, 0)
-            tracked = subprocess.run(
-                ["git", "check-ignore", "--no-index", "-q", ".agentrof/local-proof.json"],
-                cwd=project, check=False,
-            )
-            self.assertEqual(tracked.returncode, 1)
             runtime_sentinel = runtime / "cache.txt"
             runtime_sentinel.write_text("disposable\n", encoding="utf-8")
             workspace = project / "workspace"
@@ -105,6 +100,7 @@ class SetupProjectTests(unittest.TestCase):
             config_path = project / "workspace/config.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))
             config["custom_project_field"] = {"owner": "consumer"}
+            config["local_proof"] = ["make check"]
             config_path.write_text(
                 json.dumps(config, indent=2) + "\n", encoding="utf-8"
             )
@@ -139,6 +135,7 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(runtime_sentinel.read_text(encoding="utf-8"), "disposable\n")
             refreshed_config = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertNotIn("custom_project_field", refreshed_config)
+            self.assertEqual(refreshed_config["local_proof"], ["make check"])
             for script in (SETUP, CHECK):
                 checked = self.run_script(
                     script, "check", "--project-root", str(project), "--json"

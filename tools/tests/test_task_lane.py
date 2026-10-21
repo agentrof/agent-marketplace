@@ -359,13 +359,13 @@ class RoleRoutingTests(unittest.TestCase):
 
     def test_a_project_rule_replaces_adds_or_drops_a_packaged_rule(self):
         root = self.project()
-        (root / ".agentrof").mkdir()
-        (root / task_lane.PROJECT_ROUTING).write_text(json.dumps({"rules": [
+        (root / "workspace").mkdir(exist_ok=True)
+        (root / "workspace/config.json").write_text(json.dumps({"role_routing": {"rules": [
             {"role": "software-architect", "mode": "suggest", "step": "pre_check", "kinds": ["build"],
              "keywords": ["table"], "time_budget_minutes": 2, "ask": "Check the table."},
             {"role": "qa-engineer", "mode": "off", "step": "pre_check"},
             {"role": "security-reviewer", "mode": "require", "step": "pre_check", "kinds": ["build"],
-             "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}),
+             "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}}),
             encoding="utf-8")
         found = self.roles("Add a table, a regression check and a login screen in src/auth/login.tsx",
                            size="l", root=root)
@@ -480,8 +480,8 @@ class LocalProofGitTests(unittest.TestCase):
         init_repository(root)
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
-        (root / ".agentrof").mkdir()
-        (root / task_lane.PROJECT_PROOF).write_text(json.dumps({"commands": ["true", "echo {base}; exit 3"]}),
+        (root / "workspace").mkdir(exist_ok=True)
+        (root / "workspace/config.json").write_text(json.dumps({"local_proof": ["true", "echo {base}; exit 3"]}),
                                                     encoding="utf-8")
 
         def git(*args: str) -> str:
@@ -1430,9 +1430,9 @@ class TaskTriggerTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        (root / ".agentrof").mkdir()
-        (root / ".agentrof/task-triggers.json").write_text(json.dumps({"method_skills": [
-            {"skill": "docker-compose", "path_globs": ["*infra/*"]}]}), encoding="utf-8")
+        (root / "workspace").mkdir()
+        (root / "workspace/config.json").write_text(json.dumps({"task_triggers": {"method_skills": [
+            {"skill": "docker-compose", "path_globs": ["*infra/*"]}]}}), encoding="utf-8")
         triggers = task_lane.task_triggers(root)
         self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "", {"infra/x"}),
                          ["container-environment"])

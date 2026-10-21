@@ -98,14 +98,8 @@ def runtime_findings(root: Path) -> list[str]:
     return findings
 
 
-TRACKED_RUNTIME_FILES = ("local-proof.json", "role-routing.json")
-
-
 def managed_block(workspace: str) -> str:
-    runtime, *projections = local_roots()
-    # The runtime root is ignored by content, so the deliver settings a project owns there stay tracked.
-    return "\n".join((START, f"/{runtime}/*", *(f"/{value}/" for value in projections),
-                      *(f"!/{runtime}/{name}" for name in TRACKED_RUNTIME_FILES),
+    return "\n".join((START, *(f"/{value}/" for value in local_roots()),
                       f"{workspace}/junit-*.xml", END))
 
 

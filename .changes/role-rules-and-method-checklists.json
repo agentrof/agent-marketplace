@@ -1,6 +1,0 @@
-{
-  "summary": "Role prompts gain compact Rules lists (identity source, membership filters, deadlines, idempotency, hashed tokens, secrets from files, test tiers, flaky tests, restart survival); the relational skill adds a tenant isolation reference, the environment skill covers Helm and kind with a cluster patterns reference, and the review checklists gain deadline, idempotency, docs-delta, file and browser-session checks.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

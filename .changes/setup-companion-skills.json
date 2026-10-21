@@ -1,6 +1,0 @@
-{
-  "summary": "Setup gains a companions check and apply step for optional third-party skills, driven by one registry that also generates the Companion skills routing table in the project instructions and the README section.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

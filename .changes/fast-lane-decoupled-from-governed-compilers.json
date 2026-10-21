@@ -1,6 +1,0 @@
-{
-  "summary": "The fast lane, vault tooling, autopilot and setup no longer import any governed compiler; open-pr stops resealing business-analysis spaces.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

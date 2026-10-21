@@ -320,7 +320,7 @@
       "a943c897c98fa7b7923571c8111bb0e52b7d8e1e3176732d677675946ad195c2"
     ,
     "skill-content/setup/data/companions.json":
-      "0a82f230abd05eb1a4f2e26a9a4b0b11ab50e2c89e79ca91cb54e271a1caa7c9"
+      "b5df2b9a150ab07a322f8a19799348e914c7bb6fbe3924e9b9fb771243d1d3d5"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "d1a8d26ff998f886f46a7d776118fba73ccee242b1d817e89dfee6afc1cc51d8"
@@ -446,10 +446,10 @@
       "7c533d07a527237a4ac3e25af85734213f458daa1c3f9eda901d5b37846ad62f"
     ,
     "templates/AGENTS.override.md":
-      "373cd02759b4a35be2460215f5e8b3526f8ef1f9916bb57581c7dab03b069dba"
+      "5e94a4d3a58a3f4dc4ea61f1628e13a2d9d2f09cdff01d9f0a3d0e8be16be30f"
     ,
     "templates/CLAUDE.md":
-      "77a6a426cc67b6182f230329745970968e5f60f99069594e40a6f9f0d88a23c7"
+      "245e36625b244a2310531aaa71965557ac00d30f9f0f47688f9367c4a21535ee"
     ,
     "templates/ci-tests.yml":
       "1e6c663045ba2a1fdd79cbc1e3efa47bba670a42bcb527cd2d57f2078465bfaf"

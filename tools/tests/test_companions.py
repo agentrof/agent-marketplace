@@ -268,6 +268,14 @@ class CompanionCheckTests(unittest.TestCase):
             self.assertEqual(last.returncode, 1)
             self.assertEqual(len(json.loads(last.stdout)["findings"]), 1)
 
+
+class GraphifyNoteTests(unittest.TestCase):
+    def test_docs_graph_is_named_as_built_on_demand(self):
+        note = next(n for n in REGISTRY["notes"] if "docs graph" in n)
+        self.assertIn(".agentrof/graphify/docs/graph.json", note)
+        self.assertIn("only after its first build", note)
+
+
 @integration
 class GraphifyRefreshTests(unittest.TestCase):
     def test_refresh_extracts_only_after_a_docs_markdown_change(self):

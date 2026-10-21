@@ -34,6 +34,9 @@ runs `open-pr`, step 6 when `review-inputs` routes a reviewer, and `merge`.
 | `normal` (default) | `code-reviewer` | only when the change affects a live group | auto-merge on green CI |
 | `high` | `code-reviewer` and `security-reviewer` | every affected live group | the owner, or auto under a delegation |
 
+Reviewers per rigor and risk are the `reviewers` rules of
+`skill-content/deliver/data/task-triggers.json`.
+
 Rigor is `high` for authentication, credentials, secrets, tenant data, money,
 data deletion or an irreversible action. Any flag in `risks` (`auth`,
 `secrets`, `data_placement`, `migration`, `irreversible`) also adds the
@@ -45,14 +48,19 @@ paths and words it matches; a stack no rule names is worked from the code.
 Role routing: `start` and `approve` match the task against
 `skill-content/deliver/data/role-routing.json` (project rules in
 `.agentrof/role-routing.json`) and write `roles` as `<role>:<mode>:<step>`.
-The software architect is `require` for a data model, schema or migration
-change, a structural change or size `l`; other roles are `suggest`. Spawn
-each routed role with the task, the plan and only the notes it rests on,
-within the rule's `time_budget_minutes` and with its `ask`; the architect
-applies the record changes its pre-check calls for in the same spawn. Record
-the answer with `role-check --task <id> --role <role> --verdict go|changes
---note "<reasons>"` and apply `changes` before writing. `open-pr` refuses
-while a `require` role has no verdict.
+Its `pre_check_triggers` set which triggers route at each size: none at `s`
+(writer and reviewer only), path rules at `m`, every trigger at `l`. The
+software architect is `require` on its path rules (schema, migrations,
+models, contracts, manifests) and at size `l`; other roles are `suggest`.
+Spawn only the roles `start` or `approve` lists in `spawn` (its
+`spawn_modes`), in one parallel batch, each with the task, the plan and only
+the notes it rests on, within the rule's `time_budget_minutes`, with its
+`ask` and on the rule's `model_class` as `--class`. A `suggest` role spawns
+only when the owner asks. Record the answer with `role-check --task <id>
+--role <role> --verdict go|changes --note "<reasons>"` and apply `changes`
+before writing; architecture record changes a pre-check calls for run in a
+separate architect spawn on its own class. `open-pr` refuses while a
+`require` role has no verdict.
 
 1. Request. `start --title "<short title>" --request-file <file>` with the
    request verbatim (`--source-story ST-### --covers <numbers>`, `--epic
@@ -74,7 +82,8 @@ while a `require` role has no verdict.
    every `applied_skills` skill, loaded before writing. It writes the change
    and its tests (app tests inside the app, shared suites under `tests_root`),
    records and contracts the change needs, commits, and runs the CI test
-   command for the suites it touched.
+   command for the suites it touched. The main session does not run those
+   tests again; CI runs the full suite on the pull request.
 4. Live tests. At `normal`, run a live group only when the diff can alter what
    it proves, and say which and why; at `high`, every affected group. Each
    worktree that runs live checks gets its own environment namespace.
@@ -82,8 +91,11 @@ while a `require` role has no verdict.
    Switch `pr_proof`: at `local_record`, run `prove --task <id>` first, as
    `skill-content/deliver/references/switch-pr_proof-local_record.md` defines.
 6. Review. Spawn every reviewer `review-inputs --task <id>` lists, in
-   parallel, with the task, `gh pr diff <pr>` and its result. Each checks
-   every criterion against the diff and tests; an unfollowed skill in
+   parallel, passing only the pull request number, the branch, the task file
+   path, its `risks` and the result's `diff_file`, `missing_skills` and
+   `changed_sources`; the main session never reads the diff. Each reviewer
+   reads the task and the diff file itself and checks every criterion
+   against the diff, its tests and the CI result; an unfollowed skill in
    `missing_skills` is major, and a source in `changed_sources` is checked for
    a contradiction. Merge needs 0 critical and 0 major. The same writer fixes
    them on the branch and only the raising reviewer re-reads once; after one

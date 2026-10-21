@@ -12,14 +12,17 @@ Every implementation request runs through this script:
   ``applied_skills`` (the method skills ``task-triggers.json`` makes mandatory)
   and ``sources`` (each doc it relies on with a short sha256); ``approve``
   hashes a source added since. ``review-inputs`` lists the reviewers the diff
-  routes to, triggered skills the task did not apply and changed sources.
+  and the task's rigor and risks route to, writes the diff to a file the
+  reviewers read themselves, and reports triggered skills the task did not
+  apply and changed sources.
 - ``overlap`` warns, never refuses, when an open pull request touches the
   same files as this branch.
 - ``start`` and ``approve`` also route roles: each rule in
   ``skill-content/deliver/data/role-routing.json`` (and the project's
   ``.agentrof/role-routing.json``) that matches the task's kind, size, named
-  files or keywords lands in its ``roles`` field; ``role-check`` records a
-  role's verdict in the task's ``## Role Checks`` section.
+  files or keywords, at the trigger kinds its size allows, lands in its
+  ``roles`` field, and the roles of a ``spawn_modes`` mode in ``spawn``;
+  ``role-check`` records a role's verdict in the task's ``## Role Checks`` section.
 - ``open-pr`` marks the task delivered, pushes the branch and opens the PR; it
   refuses while a ``require`` role, routed by the task or its diff, has no verdict.
 - ``prove`` runs the project's local proof commands on HEAD and records each
@@ -120,6 +123,7 @@ GRAPH_REFRESH = Path(__file__).resolve().with_name("graphify_refresh.py")
 PROJECT_PROOF = Path(".agentrof") / "local-proof.json"
 PROOF_COMMANDS = ("make test",)
 PROOFS = Path(".agentrof") / "agent-marketplace" / ".runtime" / "proof"
+REVIEWS = PROOFS.with_name("review")
 ROLE_MODES = ("require", "suggest", "off")
 ROLE_STEPS = ("pre_check", "author")
 VERDICTS = ("go", "changes")
@@ -281,20 +285,41 @@ def role_rules(root: Path | None = None) -> list[dict]:
     return [rule for rule in rules.values() if rule["mode"] != "off"]
 
 
+def routing_policy(root: Path | None = None) -> dict:
+    """pre_check_triggers and spawn_modes, a project's .agentrof/role-routing.json value replacing the packaged one."""
+    keys = ("pre_check_triggers", "spawn_modes")
+    policy = {key: value for key, value in json.loads(ROUTING_FILE.read_text(encoding="utf-8")).items() if key in keys}
+    own = root / PROJECT_ROUTING if root else None
+    if own and own.is_file():
+        policy |= {key: value for key, value in json.loads(own.read_text(encoding="utf-8")).items() if key in keys}
+    return policy
+
+
+def spawn_roles(roles: list[dict], root: Path | None = None) -> list[str]:
+    """The routed roles the flow spawns on its own; any other routed role spawns only when the owner asks."""
+    modes = routing_policy(root).get("spawn_modes", ["require"])
+    return [item["role"] for item in roles if item["mode"] in modes]
+
+
 def named_files(text: str) -> set[str]:
     return {token.rstrip(".") for token in PATH_RE.findall(text) if token.rstrip(".")}
 
 
-def route(rules: list[dict], text: str, kind: str, size: str, files: set[str]) -> list[dict]:
-    """The rules a task hits, each with the triggers that matched as its reasons."""
+def route(rules: list[dict], text: str, kind: str, size: str, files: set[str],
+          allowed: list[str] | None = None) -> list[dict]:
+    """The rules a task hits, each with the triggers that matched as its reasons; ``allowed``
+    names the trigger kinds (size, path, keyword) that may route at this size, all when None."""
+    allowed = ["size", "path", "keyword"] if allowed is None else allowed
     found = []
     for rule in rules:
         if kind not in rule.get("kinds", KINDS):
             continue
-        reasons = [f"size {size}"] if size in rule.get("sizes", []) else []
-        reasons += trigger_reasons(rule, text, files)
+        reasons = [f"size {size}"] if "size" in allowed and size in rule.get("sizes", []) else []
+        reasons += [reason for reason in trigger_reasons(rule, text, files)
+                    if ("path" if reason.startswith("file ") else "keyword") in allowed]
         if reasons:
-            found.append({key: rule.get(key) for key in ("role", "mode", "step", "time_budget_minutes", "ask")}
+            found.append({key: rule.get(key)
+                          for key in ("role", "mode", "step", "model_class", "time_budget_minutes", "ask")}
                          | {"reasons": reasons})
     return found
 
@@ -401,8 +426,9 @@ def routed_roles(root: Path | None, path: Path, files: set[str] = frozenset()) -
     body = task_body(path)
     text = f"{props.get('title', '')}\n{body}"
     roles = task_roles(props)
-    for item in route(role_rules(root), text, props.get("task_kind", "build"), props.get("size", "s"),
-                      named_files(body) | set(files)):
+    size = props.get("size", "s")
+    for item in route(role_rules(root), text, props.get("task_kind", "build"), size,
+                      named_files(body) | set(files), routing_policy(root).get("pre_check_triggers", {}).get(size)):
         roles.setdefault(item["role"], item)
         if item["mode"] == "require":
             roles[item["role"]] |= {"mode": "require"}
@@ -2056,7 +2082,8 @@ def cmd_start(args, root: Path) -> dict:
         raise Refused("--covers needs --source-story")
     kind = "knowledge" if args.knowledge else "build"
     text, files = f"{args.title}\n{request}", named_files(request)
-    roles = route(role_rules(root), text, kind, args.size, files)
+    roles = route(role_rules(root), text, kind, args.size, files,
+                  routing_policy(root).get("pre_check_triggers", {}).get(args.size))
     triggers = task_triggers(root)
     flags = {rule["flag"] for rule in triggers["risk_flags"]}
     asked = set(getattr(args, "risk", None) or [])
@@ -2082,7 +2109,7 @@ def cmd_start(args, root: Path) -> dict:
         set_field(path, "roles", roles_value(roles))
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     return {"task_id": task, "branch": branch, "task": str(path.relative_to(root)),
-            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles,
+            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles, "spawn": spawn_roles(roles, root),
             "risks": risks, "applied_skills": skills, "sources": sources}
 
 
@@ -2110,23 +2137,28 @@ def cmd_approve(args, root: Path) -> dict:
         set_field(path, "roles", roles_value(roles))
     props = task_props(path)
     return {"ok": True, "task_id": args.task, "approved_at": props["approved_at"],
-            "rigor": props.get("rigor", "normal"), "roles": roles, "pending_roles": missing}
+            "rigor": props.get("rigor", "normal"), "roles": roles, "spawn": spawn_roles(roles, root),
+            "pending_roles": missing}
 
 
 def cmd_review_inputs(args, root: Path) -> dict:
-    """What the review needs beyond the diff: its reviewers, triggered skills the task did not
-    apply and sources whose content changed since the task was defined."""
+    """What the review needs: its reviewers, the diff written to a file each reviewer reads itself,
+    triggered skills the task did not apply and sources whose content changed since the task was defined."""
     path = task_path(root, args.task)
     props = task_props(path)
     files = changed_files(root, args.base)
     triggers = task_triggers(root)
     skills = triggered(triggers["method_skills"], "skill", f"{props.get('title', '')}\n{task_body(path)}",
                        named_files(task_body(path)) | files)
-    reviewers = triggered(triggers["reviewers"], "role", "", files)
     risks = field_items(props, "risks")
-    if props.get("rigor") == "high" or risks:
-        reviewers.append("security-reviewer")
-    return {"ok": True, "task_id": args.task, "reviewers": reviewers, "risks": risks,
+    reviewers = triggered(triggers["reviewers"], "role", "", files) + [
+        rule["role"] for rule in triggers["reviewers"]
+        if props.get("rigor", "normal") in rule.get("rigors", []) or (risks and rule.get("on_any_risk"))]
+    diff = REVIEWS / f"{args.task.lower()}.diff"
+    (root / diff).parent.mkdir(parents=True, exist_ok=True)
+    (root / diff).write_bytes(run("git", "diff", f"origin/{args.base}...HEAD", cwd=root).encode("utf-8"))
+    return {"ok": True, "task_id": args.task, "reviewers": list(dict.fromkeys(reviewers)), "risks": risks,
+            "diff_file": diff.as_posix(),
             "triggered_skills": skills,
             "missing_skills": sorted(set(skills) - set(applied_skills(props))),
             "changed_sources": changed_sources(root, field_items(props, "sources"))}
@@ -2474,7 +2506,7 @@ def main(argv: list[str] | None = None) -> int:
     checked.add_argument("--note", help="the reasons, one line")
     checked.add_argument("--at")
     sub.add_parser("overlap").add_argument("--base", default="main")
-    reviewed = sub.add_parser("review-inputs", help="reviewers, missing triggered skills and changed sources")
+    reviewed = sub.add_parser("review-inputs", help="reviewers, the diff file, missing triggered skills and changed sources")
     reviewed.add_argument("--task", required=True)
     reviewed.add_argument("--base", default="main")
     opened = sub.add_parser("open-pr")

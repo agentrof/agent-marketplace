@@ -76,7 +76,7 @@ updated set for the orchestrator to record.
 
 Fixed order, both on every cycle. Full checklists per pass live in the
 passes reference. Follow the
-[verification bounds](references/passes.md#verification). Read when planning verification in any review cycle.
+[verification bounds](references/passes.md#verification); CI owns the full suite. Read when about to start a check of your own.
 
 1. **Correctness:** logic, edge cases, error propagation, type safety, and
    the correctness of identity source, membership filters, bounds, deadlines
@@ -114,6 +114,6 @@ Everything else enters the normal fix loop via `fix_required`.
 
 ## References
 
-- [passes](references/passes.md): the full per-pass checklists (correctness, conformance) and the architectural impact rating. Read when executing the two passes on any cycle.
+- [passes](references/passes.md): the full per-pass checklists (correctness, conformance) and the architectural impact rating. At size `s` and `m` the pass summaries above and the stack checklists suffice. Read when the task is size `l` or rigor `high`, or a pass needs its detailed checklist.
 - [pitfalls](references/pitfalls.md): reviewer anti-patterns plus feedback craft for human-facing notes. Read when a verdict feels off (too harsh, too lenient) or when writing PR-body notes for a human.
 - [smells](references/smells.md): smell-to-named-move table for maintainability findings. Read when a finding concerns code structure and its Fix field needs a named refactoring move.

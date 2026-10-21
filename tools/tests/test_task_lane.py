@@ -329,9 +329,10 @@ class RoleRoutingTests(unittest.TestCase):
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
         return root
 
-    def roles(self, text: str, kind: str = "build", size: str = "s", root: Path | None = None) -> dict:
+    def roles(self, text: str, kind: str = "build", size: str = "m", root: Path | None = None) -> dict:
+        allowed = task_lane.routing_policy(root)["pre_check_triggers"][size]
         return {item["role"]: item for item in task_lane.route(task_lane.role_rules(root), text, kind, size,
-                                                               task_lane.named_files(text))}
+                                                               task_lane.named_files(text), allowed)}
 
     def fake_run(self, changed: str = ""):
         def run(*args, **_kwargs):
@@ -351,34 +352,38 @@ class RoleRoutingTests(unittest.TestCase):
         return task_lane.cmd_role_check(SimpleNamespace(task="TK-004", role=role, verdict="go",
                                                         note="fits the records", at=at), root)
 
-    def test_a_keyword_routes_the_architect_as_required(self):
-        found = self.roles("Add an invoice_lines table for partial payments")
+    def test_only_a_path_rule_routes_the_architect_at_size_m_on_the_cheaper_class(self):
+        found = self.roles("Rename the total column in db/migrations/0007_totals.sql please")
         self.assertEqual(found["software-architect"]["mode"], "require")
         self.assertEqual(found["software-architect"]["step"], "pre_check")
-        self.assertIn("keyword table", found["software-architect"]["reasons"])
-        self.assertNotIn("software-architect", self.roles("Add a CSV export button"))
-
-    def test_a_named_file_routes_the_architect(self):
-        found = self.roles("Rename the total column in db/migrations/0007_totals.sql please")
+        self.assertEqual(found["software-architect"]["model_class"], "routine_review")
         self.assertIn("file db/migrations/0007_totals.sql matches *migrations/*",
                       found["software-architect"]["reasons"])
+        self.assertEqual(self.roles("Refactor the invoice model and its database table interface"), {})
+
+    def test_size_s_routes_no_role(self):
+        self.assertEqual(self.roles("Rename the column in db/migrations/0007_totals.sql", size="s"), {})
 
     def test_size_l_routes_the_architect_only_for_build_tasks(self):
         self.assertEqual(self.roles("Polish the export", size="l")["software-architect"]["reasons"], ["size l"])
         self.assertNotIn("software-architect", self.roles("Polish the export", size="m"))
         self.assertEqual(self.roles("Rewrite the schema notes", kind="knowledge", size="l"), {})
 
-    def test_start_writes_the_roles_field_and_prints_the_reasons(self):
+    def test_start_writes_the_roles_field_and_lists_only_require_roles_to_spawn(self):
         root = self.project()
-        args = SimpleNamespace(delivery=None, at=None, request="Add a payments table", request_file=None,
+        args = SimpleNamespace(delivery=None, at=None, request="Add db/migrations/0009_payments.sql for the"
+                               " approval workflow", request_file=None,
                                title="Payments", epic=None, source_story=None, covers=None, fixes=None,
-                               knowledge=False, size="s", base="main")
+                               knowledge=False, size="l", base="main")
         with self.fake_run():
             result = task_lane.cmd_start(args, root)
-        self.assertEqual(result["roles"][0]["role"], "software-architect")
-        self.assertIn("keyword table", result["roles"][0]["reasons"])
+        self.assertEqual([item["role"] for item in result["roles"]], ["software-architect", "business-analyst",
+                                                                   "qa-engineer"])
+        self.assertIn("file db/migrations/0009_payments.sql matches *migrations/*", result["roles"][0]["reasons"])
+        self.assertEqual(result["spawn"], ["software-architect"])
         props = task_lane.task_props(root / result["task"])
-        self.assertEqual(props["roles"], "software-architect:require:pre_check")
+        self.assertEqual(props["roles"], "software-architect:require:pre_check, business-analyst:suggest:pre_check,"
+                                        " qa-engineer:suggest:pre_check")
 
     def test_a_required_role_blocks_open_pr_until_its_verdict_is_recorded(self):
         root = self.project(TASK.replace("size: s", "size: l"))
@@ -395,16 +400,18 @@ class RoleRoutingTests(unittest.TestCase):
             self.assertEqual(self.open_pr(root)["pr"], "9")
 
     def test_a_changed_migration_in_the_diff_requires_the_architect(self):
-        root = self.project()
+        root = self.project(TASK.replace("size: s", "size: m"))
         with self.fake_run("db/migrations/0008_add_index.sql\n"), \
                 self.assertRaisesRegex(task_lane.Refused, "software-architect"):
             self.open_pr(root)
 
     def test_suggested_roles_never_block(self):
-        root = self.project(TASK.replace("as CSV.", "as CSV with a regression check."))
+        root = self.project(TASK.replace("as CSV.", "as CSV with a regression check.").replace("size: s", "size: l"))
         roles, missing = task_lane.routed_roles(root, task_lane.task_path(root, "TK-004"))
-        self.assertEqual([(item["role"], item["mode"]) for item in roles], [("qa-engineer", "suggest")])
-        self.assertEqual(missing, [])
+        self.assertIn(("qa-engineer", "suggest"), [(item["role"], item["mode"]) for item in roles])
+        self.assertEqual(missing, ["software-architect"])
+        self.assertEqual(task_lane.spawn_roles(roles, root), ["software-architect"])
+        self.check(root)
         with self.fake_run():
             self.assertEqual(self.open_pr(root)["pr"], "9")
 
@@ -418,7 +425,8 @@ class RoleRoutingTests(unittest.TestCase):
             {"role": "security-reviewer", "mode": "require", "step": "pre_check", "kinds": ["build"],
              "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}),
             encoding="utf-8")
-        found = self.roles("Add a table, a regression check and a login screen in src/auth/login.tsx", root=root)
+        found = self.roles("Add a table, a regression check and a login screen in src/auth/login.tsx",
+                           size="l", root=root)
         self.assertEqual(found["software-architect"]["mode"], "suggest")
         self.assertEqual(found["security-reviewer"]["mode"], "require")
         self.assertNotIn("qa-engineer", found)
@@ -1607,9 +1615,11 @@ class TaskTriggerTests(unittest.TestCase):
         root = self.project(task)
         self.assertEqual(task_lane.lint(root / task_lane.TASKS / "tk-004-export-invoices.md"), [])
         changed = {"api/models.py", "workspace/docs/business-analysis/rules.md"}
-        with mock.patch.object(task_lane, "changed_files", return_value=changed):
+        with mock.patch.object(task_lane, "changed_files", return_value=changed), \
+                mock.patch.object(task_lane, "run", return_value="diff --git a/api/models.py"):
             result = task_lane.cmd_review_inputs(SimpleNamespace(task="TK-004", base="main"), root)
         self.assertEqual(result["reviewers"], ["analysis-challenger", "code-reviewer", "security-reviewer"])
+        self.assertEqual((root / result["diff_file"]).read_text(encoding="utf-8"), "diff --git a/api/models.py")
         self.assertEqual(result["missing_skills"], ["python-fastapi", "sql-database-design"])
 
     def test_an_unknown_risk_flag_fails_lint(self):

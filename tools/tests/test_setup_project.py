@@ -91,6 +91,11 @@ class SetupProjectTests(unittest.TestCase):
             self.assertEqual(ignored.returncode, 0)
             runtime_sentinel = runtime / "cache.txt"
             runtime_sentinel.write_text("disposable\n", encoding="utf-8")
+            workspace = project / "workspace"
+            for relative in ("tests", "project", "memory", "docs/backlog/tasks",
+                             "docs/backlog/retrospectives", "docs/operation"):
+                self.assertTrue((workspace / relative).is_dir(), relative)
+            self.assertTrue((workspace / "experience-design/DESIGN.md").is_file())
 
             config_path = project / "workspace/config.json"
             config = json.loads(config_path.read_text(encoding="utf-8"))

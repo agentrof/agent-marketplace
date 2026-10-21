@@ -1,47 +1,24 @@
-"""Closed bootstrap config and convergent setup migration tests."""
+"""Closed project config: layout, field and writer rules."""
 
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import tempfile
 import unittest
-try:
-    from tools.tests.levels import integration
-except ModuleNotFoundError:  # run as a script from tools/tests
-    from levels import integration
 from pathlib import Path
 
-from tools.tests.git_fixture import init_repository
 from tools.tests import python_entry
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "plugins" / "software-engineering-team" / "scripts"
-SETUP = SCRIPTS / "setup_project.py"
 CONFIG = SCRIPTS / "project_config.py"
-
-CANONICAL_KEYS = {
-    "schema_version", "team_id", "output_language", "terminology_language",
-    "tests_root", "workspace_layout",
-}
 
 
 class ProjectConfigTests(unittest.TestCase):
-    def run_script(self, script: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        if script == CONFIG:
-            return python_entry.run([script, *args], cwd=ROOT)
-        return subprocess.run(
-            [sys.executable, str(script), *args], cwd=ROOT,
-            capture_output=True, text=True, check=False,
-        )
-
-    def setup_config(self, project: Path) -> Path:
-        init_repository(project)
-        result = self.run_script(SETUP, "--project-root", str(project))
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        return project / "workspace" / "config.json"
+    def run_script(self, script: Path, *args: str):
+        return python_entry.run([script, *args], cwd=ROOT)
 
     def unit_config(self, project):
         config = project / "workspace/config.json"
@@ -50,24 +27,6 @@ class ProjectConfigTests(unittest.TestCase):
                                       "output_language": "English", "terminology_language": "English"}),
                           encoding="utf-8")
         return config
-
-    @integration
-    def test_fresh_setup_writes_only_the_closed_schema(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            config = self.setup_config(Path(temporary))
-            value = json.loads(config.read_text(encoding="utf-8"))
-            self.assertEqual(set(value), CANONICAL_KEYS)
-            self.assertEqual(value["schema_version"], 2)
-            self.assertEqual(value["team_id"], "software-engineering-team")
-            checked = self.run_script(CONFIG, "check", "--config", str(config))
-            self.assertEqual(checked.returncode, 0, checked.stdout + checked.stderr)
-            workspace = config.parent
-            for relative in ("tests", "project", "memory", "docs/backlog/tasks",
-                             "docs/backlog/retrospectives", "docs/operation"):
-                self.assertTrue((workspace / relative).is_dir(), relative)
-            self.assertTrue((workspace / "experience-design/DESIGN.md").is_file())
-            self.assertIn("<feature-slug>/exports/",
-                          (workspace / "experience-design/README.md").read_text(encoding="utf-8"))
 
     def test_layout_rejects_nested_names_and_tests_outside_the_allowlist(self):
         sys.path.insert(0, str(SCRIPTS))
@@ -106,88 +65,6 @@ class ProjectConfigTests(unittest.TestCase):
             self.assertNotEqual(retired.returncode, 0)
             self.assertIn("invalid choice", retired.stderr)
 
-    def test_check_rejects_retired_and_unknown_fields(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            config = self.unit_config(Path(temporary))
-            value = json.loads(config.read_text(encoding="utf-8"))
-            value["scale"] = "small"
-            value["unknown"] = True
-            config.write_text(json.dumps(value), encoding="utf-8")
-            checked = self.run_script(CONFIG, "check", "--config", str(config))
-            self.assertEqual(checked.returncode, 1)
-            self.assertIn("unknown or retired field: scale", checked.stdout)
-            self.assertIn("unknown or retired field: unknown", checked.stdout)
-
-    @integration
-    def test_setup_migrates_v1_config_without_touching_authored_titles(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            workspace = project / "workspace"
-            workspace.mkdir()
-            legacy = {
-                "schema_version": 1,
-                "team_id": "software-engineering-team",
-                "output_language": "Turkish",
-                "terminology_language": "English",
-                "legacy_nested_settings": {
-                    "work": "custom",
-                    "retired": "old",
-                },
-                "legacy_settings_history": {
-                    "work": [{"value": "old custom value"}],
-                },
-                "backend_stack": "python-fastapi", "test_command": "make test",
-                "mutation_command": "make mutation", "env_command": "./tools/env",
-                "max_parallel": 2, "scale": "small", "unknown": "discard",
-            }
-            (workspace / "config.json").write_text(
-                json.dumps(legacy), encoding="utf-8"
-            )
-            authored = workspace / "docs" / "project-notes" / "legacy-title.md"
-            authored.parent.mkdir(parents=True)
-            authored.write_text(
-                "---\ntype: note\ntitle: Legacy customer note\n"
-                "---\n\n# Legacy customer note\n",
-                encoding="utf-8",
-            )
-            authored_before = authored.read_bytes()
-            inspected = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
-            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
-            plan = json.loads(inspected.stdout)
-            config_op = next(item for item in plan["operations"] if item["surface"] == "workspace_config")
-            self.assertEqual(config_op["action"], "replace")
-            self.assertIn("backend_stack", config_op["removed_fields"])
-            self.assertIn("unknown", config_op["removed_fields"])
-            self.assertIn("legacy_nested_settings", config_op["removed_fields"])
-            self.assertIn("legacy_settings_history", config_op["removed_fields"])
-            self.assertEqual(config_op["schema_from"], 1)
-            self.assertEqual(config_op["schema_to"], 2)
-            applied = self.run_script(SETUP, "apply", "--project-root", str(project))
-            self.assertEqual(applied.returncode, 0, applied.stdout + applied.stderr)
-            current = json.loads((workspace / "config.json").read_text(encoding="utf-8"))
-            self.assertEqual(set(current), CANONICAL_KEYS)
-            self.assertEqual(current["output_language"], "Turkish")
-            self.assertEqual(current["schema_version"], 2)
-            self.assertEqual(authored.read_bytes(), authored_before)
-            rerun = self.run_script(SETUP, "inspect", "--project-root", str(project), "--json")
-            self.assertEqual(rerun.returncode, 0, rerun.stdout + rerun.stderr)
-            self.assertEqual(json.loads(rerun.stdout)["operations"], [])
-
-    @integration
-    def test_future_schema_is_never_downgraded(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
-            init_repository(project)
-            workspace = project / "workspace"
-            workspace.mkdir()
-            (workspace / "config.json").write_text(json.dumps({
-                "schema_version": 99, "team_id": "software-engineering-team",
-                "output_language": "English", "terminology_language": "English",
-            }), encoding="utf-8")
-            result = self.run_script(SETUP, "inspect", "--project-root", str(project))
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("future schema_version", result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

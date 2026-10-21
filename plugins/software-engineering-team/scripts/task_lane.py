@@ -8,7 +8,7 @@ Every implementation request runs through this script:
   ``requested_at`` time and the proposed ``rigor``.
 - ``lint`` checks one task: title, size, rigor, 3 to 8 acceptance criteria
   and a test list. ``approve`` lints it and writes ``approved_at``.
-- ``start`` also writes ``risks`` (``--risk`` and the risk flags its request hits),
+- ``start`` also writes ``risks`` (``--risk`` and, for a build task, the risk flags its request hits),
   ``applied_skills`` (the method skills ``task-triggers.json`` makes mandatory)
   and ``sources`` (each doc it relies on with a short sha256); ``approve``
   hashes a source added since. ``review-inputs`` lists the reviewers the diff
@@ -2042,7 +2042,6 @@ def cmd_start(args, root: Path) -> dict:
     parse_time(requested_at)
     request = Path(args.request_file).read_text(encoding="utf-8") if args.request_file else args.request
     request = request or args.title
-    rigor, reasons = proposed_rigor(f"{args.title}\n{request}")
     epic, covers = args.epic or "", []
     if args.epic and not EPIC_RE.match(args.epic):
         raise Refused("--epic must be EP-<number>")
@@ -2063,6 +2062,8 @@ def cmd_start(args, root: Path) -> dict:
     elif args.covers:
         raise Refused("--covers needs --source-story")
     kind = "knowledge" if args.knowledge else "build"
+    # A documents-only task names risky words without touching them: no keyword rigor or risk flags.
+    rigor, reasons = proposed_rigor(f"{args.title}\n{request}") if kind == "build" else ("normal", [])
     text, files = f"{args.title}\n{request}", named_files(request)
     roles = route(role_rules(root), text, kind, args.size, files,
                   routing_policy(root).get("pre_check_triggers", {}).get(args.size))
@@ -2071,7 +2072,7 @@ def cmd_start(args, root: Path) -> dict:
     asked = set(getattr(args, "risk", None) or [])
     if asked - flags:
         raise Refused(f"--risk must be one of {', '.join(sorted(flags))}")
-    risks = sorted(asked | set(triggered(triggers["risk_flags"], "flag", text, files)))
+    risks = sorted(asked | (set(triggered(triggers["risk_flags"], "flag", text, files)) if kind == "build" else set()))
     skills = triggered(triggers["method_skills"], "skill", text, files)
     run("git", "fetch", "--prune", "origin", cwd=root)
     task = next_id(taken_names(root, args.base))

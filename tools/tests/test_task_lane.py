@@ -325,6 +325,18 @@ class RoleRoutingTests(unittest.TestCase):
         self.assertEqual(props["roles"], "software-architect:require:pre_check, business-analyst:suggest:pre_check,"
                                         " qa-engineer:suggest:pre_check")
 
+    def test_a_knowledge_task_naming_risky_words_starts_normal_with_only_explicit_risks(self):
+        root = self.project()
+        args = SimpleNamespace(delivery=None, at=None, request="Document where the credential and token live",
+                               request_file=None, title="Secrets notes", epic=None, source_story=None,
+                               covers=None, fixes=None, knowledge=True, size="s", base="main", risk=None)
+        with self.fake_run():
+            result = task_lane.cmd_start(args, root)
+        self.assertEqual((result["proposed_rigor"], result["risks"]), ("normal", []))
+        args.risk = ["secrets"]
+        with self.fake_run():
+            self.assertEqual(task_lane.cmd_start(args, root)["risks"], ["secrets"])
+
     def test_a_required_role_blocks_open_pr_until_its_verdict_is_recorded(self):
         root = self.project(TASK.replace("size: s", "size: l"))
         lint = task_lane.cmd_lint(SimpleNamespace(file=None, task="TK-004"), root)

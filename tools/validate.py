@@ -1822,25 +1822,7 @@ def _nonblank(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def implemented_derivations(source: str, registry: str = "STORY_SIZE_DERIVATIONS") -> set[str] | None:
-    """Return the keys of a script's module-level registry dict, by default the
-    backlog compiler's STORY_SIZE_DERIVATIONS, read from its source so the
-    validator never imports a plugin script."""
-    try:
-        module = ast.parse(source)
-    except SyntaxError:
-        return None
-    for node in module.body:
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict) and any(
-                isinstance(target, ast.Name) and target.id == registry
-                for target in node.targets):
-            return {key.value for key in node.value.keys
-                    if isinstance(key, ast.Constant) and isinstance(key.value, str)}
-    return None
-
-
 AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
-AUTOPILOT_SCRIPT_RELPATH = "skill-content/autopilot/scripts/autopilot.py"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
                      "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts",
                      "native_arming_wait_seconds", "native_watch_seconds", "native_poll_seconds", "native_retry_delay_seconds", "native_permit_ttl_seconds")
@@ -1887,11 +1869,6 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
             problems.append(f"class {entry['id']!r} has unknown default {entry['default']!r}")
     if not any(isinstance(entry, dict) and entry.get("default") == "never" for entry in classes):
         problems.append("the never set is empty: at least one class is never delegated")
-    script = plugin / AUTOPILOT_SCRIPT_RELPATH
-    readers = implemented_derivations(read_text(script), "GOAL_READERS") if script.is_file() else None
-    if readers is None:
-        problems.append(f"{AUTOPILOT_SCRIPT_RELPATH} declares no GOAL_READERS registry")
-        readers = set()
     kinds = data["goal_kinds"] if isinstance(data["goal_kinds"], list) else []
     if not kinds:
         problems.append("goal_kinds must declare at least one goal kind")
@@ -1901,22 +1878,8 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
             problems.append("every goal kind holds exactly an id, a description and its end")
             continue
         ids["goal kind"].append(entry["id"])
-        end = entry["end"]
-        if end == "none":
-            continue
-        if not isinstance(end, dict) or set(end) != {"compiler", "terminal_statuses"}:
-            problems.append(f"goal kind {entry['id']!r} end is none or holds exactly a compiler"
-                            " and terminal_statuses")
-            continue
-        statuses = end["terminal_statuses"]
-        if not isinstance(statuses, list) or not statuses \
-                or not all(_nonblank(status) for status in statuses) \
-                or len(set(statuses)) != len(statuses):
-            problems.append(f"readable goal kind {entry['id']!r} declares no distinct terminal"
-                            " statuses")
-        if end["compiler"] not in readers or not (plugin / str(end["compiler"])).is_file():
-            problems.append(f"goal kind {entry['id']!r} names compiler {end['compiler']!r},"
-                            " which is no package script autopilot.py reads")
+        if entry["end"] != "none":
+            problems.append(f"goal kind {entry['id']!r} end must be none: no packaged compiler reads a goal")
     for label, values in ids.items():
         problems += [f"{label} id {value!r} must be lowercase snake_case"
                      for value in values if not REVIEW_STEP_ID_RE.match(value)]
@@ -1927,7 +1890,7 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
 
 def check_autopilot_policy(tree: Tree, findings: list[Finding]) -> None:
     """The autopilot entry's classes, goal kinds and durations are validated
-    data, and each readable goal ends at statuses its owning compiler reads."""
+    data."""
     for plugin in plugin_dirs(tree):
         path = plugin / AUTOPILOT_POLICY_RELPATH
         if not path.is_file():

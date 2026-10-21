@@ -2414,23 +2414,6 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
                 "regenerate it from the canonical product contract",
             ))
 
-def check_task_input_catalog(tree: Tree, findings: list[Finding]) -> None:
-    """Every shipped team role, skill and flow has one declared task route."""
-    import importlib.util
-    for plugin in plugin_dirs(tree):
-        path = plugin / "scripts" / "task_inputs.py"
-        if not path.is_file():
-            continue
-        try:
-            spec = importlib.util.spec_from_file_location("validated_task_inputs", path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            module.catalog(plugin)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            findings.append(Finding("error", rel(tree, path), 1, "task_input_catalog",
-                                    str(exc), "align canonical task routes with the shipped catalog"))
-
-
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
     "agent_name": check_agent_name,
@@ -2468,7 +2451,6 @@ CHECKS = {
     "autopilot_policy": check_autopilot_policy,
     "limits_config_shape": check_limits_config_shape,
     "product_namespace": check_product_namespace,
-    "task_input_catalog": check_task_input_catalog,
 }
 
 

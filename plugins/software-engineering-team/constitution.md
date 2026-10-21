@@ -56,4 +56,3 @@ These rules bias caution over speed; for trivial work use judgment.
 - No version pins, vendor bias or concrete model names in outputs, except exact image tags in environment definitions.
 - One evolving record per report, never versioned copies. Files over memory: re-read state before acting. Never invent facts, numbers, sources or quotes; when data is missing, say "I don't know".
 - `workspace/config.json` changes only through the configure entry.
-- Delegation follows `templates/task-input-contract.md`: derived inputs preserve full and conditional reads and grant no approval.

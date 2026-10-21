@@ -8,9 +8,6 @@ exposure: entry
 
 Where the task time went, who owns each loss, and what to cut next.
 
-Before delegating a role, follow the packaged `templates/task-input-contract.md`
-and derive its inputs with `scripts/task_inputs.py --entry retrospective`.
-
 ## When to Use
 
 - The user, or an agent reporting progress, wants the measured task times.

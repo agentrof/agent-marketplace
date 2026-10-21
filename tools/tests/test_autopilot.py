@@ -33,7 +33,6 @@ for _path in (PACKAGE / "scripts", ROOT / "tools", ROOT / "tools" / "tests"):
         sys.path.insert(0, str(_path))
 
 import build_distributions  # noqa: E402
-import task_inputs  # noqa: E402
 import validate  # noqa: E402
 from git_fixture import init_repository, temporary_directory  # noqa: E402
 
@@ -1290,28 +1289,6 @@ class ContractTests(unittest.TestCase):
                      "default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
                      "not a process switch", "Only the user arms a grant"):
             self.assertIn(name, section)
-
-    def test_no_task_binds_the_autopilot_entry(self):
-        policy = task_inputs.catalog()
-        self.assertEqual(policy["session_entries"], ["autopilot", "retrospective"])
-        self.assertNotIn("autopilot", policy["entries"])
-        self.assertFalse(any("autopilot" in skills for skills in policy["role_skills"].values()))
-        self.assertFalse((PACKAGE / "scripts" / "autopilot.py").exists())
-        with self.assertRaisesRegex(ValueError, "unknown entry"):
-            task_inputs.manifest(entry="autopilot", role=None, mode="review")
-        with tempfile.TemporaryDirectory() as raw:
-            package = Path(raw) / "package"
-            shutil.copytree(PACKAGE, package, ignore=shutil.ignore_patterns("__pycache__"))
-            path = package / "templates/task-input-policy.json"
-            value = json.loads(path.read_text(encoding="utf-8"))
-            value["session_entries"] = ["retrospective"]
-            path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "every current role and entry"):
-                task_inputs.catalog(package)
-            value["session_entries"] = ["autopilot", "deliver"]
-            path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "session entries"):
-                task_inputs.catalog(package)
 
 
 class PhaseStartTests(unittest.TestCase):

@@ -6,10 +6,6 @@ exposure: entry
 
 # Configure
 
-Before delegating a role, follow the packaged `templates/task-input-contract.md`
-and derive its inputs with `scripts/task_inputs.py --entry configure`.
-Use the owning compiler's exact scope and source bindings.
-
 ## When to Use
 
 - Changing language or a process switch (`process`).

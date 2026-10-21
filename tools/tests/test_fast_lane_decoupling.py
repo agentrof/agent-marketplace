@@ -29,8 +29,7 @@ GOVERNED = (
     r"|verification_reference|artifact_check)$"
 )
 KEPT = (
-    "task_lane", "process_policy", "task_inputs", "model_class", "session_cost",
-    "step_timing", "vault_markdown", "reader_manifest", "autopilot", "setup_project",
+    "task_lane", "model_class", "session_cost", "vault_markdown", "autopilot", "setup_project",
     "setup_check", "hook_launcher",
 )
 # Kept modules that still import a governed one, each with its reason.

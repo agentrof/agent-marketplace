@@ -688,11 +688,11 @@ VALIDATOR_BUILDERS = {
         "from datetime import date\n\nTODAY = date.today()\n"),
     "script_references": lambda root: append(root, FLOW, "\nRun scripts/ghost_tool.py first.\n"),
     "template_placeholders": lambda root: append(
-        root, f"{PLUGIN_ROOT}/templates/task-input-contract.md", "\n{{ghost_token}}\n"),
+        root, f"{PLUGIN_ROOT}/templates/ci-tests.yml", "\n{{ghost_token}}\n"),
     "project_instruction_contract": lambda root: remove(
         root, f"{PLUGIN_ROOT}/templates/memory/profile.md"),
     "spawn_shape_constitution": lambda root: append(
-        root, f"{PLUGIN_ROOT}/skill-content/deliver/references/switch-step_timing-recorded.md",
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/references/fast-lane.md",
         "\n## Spawn Shape\n\nSpawn the reviewer with the named files.\n"),
     "ba_schema_shape": lambda root: edit_json(
         root, f"{PLUGIN_ROOT}/skill-content/business-analysis/data/space-schema.json",
@@ -722,9 +722,6 @@ VALIDATOR_BUILDERS = {
         lambda value: value["authoring_caps"].update(ghost_cap=1)),
     "product_namespace": lambda root: append(
         root, f"{PLUGIN_ROOT}/scripts/marketplace_paths.py", "# drift\n"),
-    "task_input_catalog": lambda root: edit_json(
-        root, f"{PLUGIN_ROOT}/templates/task-input-policy.json",
-        lambda value: value["role_skills"].pop("qa_engineer")),
 }
 
 

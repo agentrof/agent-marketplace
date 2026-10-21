@@ -8,9 +8,6 @@ exposure: entry
 
 One request to one merged pull request, timed end to end.
 
-Before delegating a role, follow the packaged `templates/task-input-contract.md`
-and derive its inputs with `scripts/task_inputs.py --entry deliver`.
-
 ## When to Use
 
 - The user asks for a change in free text.

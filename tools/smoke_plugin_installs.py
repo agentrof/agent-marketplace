@@ -284,20 +284,6 @@ def installed_root(inventory: dict | list, host: str) -> Path:
     raise SmokeFailure(f"{host} inventory has no enabled {TEAM} install")
 
 
-def exercise_task_inputs(team_root: Path, env: dict[str, str]) -> None:
-    """Check the installed role catalog and derive one role task from it."""
-    task_inputs = team_root / "scripts" / "task_inputs.py"
-    if not task_inputs.is_file():
-        raise SmokeFailure("installed package is missing scripts/task_inputs.py")
-    for arguments in (["--check-catalog"],
-                      ["--entry", "deliver", "--role", "code-reviewer",
-                       "--mode", "review"]):
-        derived = json.loads(run([sys.executable, str(task_inputs), *arguments], env))
-        if derived.get("ok") is False:
-            raise SmokeFailure("installed task input derivation failed: "
-                               + str(derived.get("error")))
-
-
 def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> None:
     env = dict(env, PYTHONDONTWRITEBYTECODE="1")
     setup = team_root / "scripts" / "setup_project.py"
@@ -306,7 +292,6 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
                  team_root / "flows" / "fast-lane.md"):
         if not path.is_file():
             raise SmokeFailure(f"installed package is missing {path.relative_to(team_root)}")
-    exercise_task_inputs(team_root, env)
     inspected = json.loads(run([
         sys.executable, str(setup), "inspect", "--project-root", str(project),
         "--json",

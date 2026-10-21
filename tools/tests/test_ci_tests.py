@@ -132,6 +132,9 @@ class CITestPlannerTests(unittest.TestCase):
         plan = self.plan()
         reports = self.reports(plan)
         self.assertEqual(set(ci_tests.verify_reports(plan, reports)["durations"]["local"]), set(self.ids))
+        kernels = copy.deepcopy(reports)
+        kernels[-1]["runtime"]["os_release"] = "another kernel"
+        self.assertEqual(set(ci_tests.verify_reports(plan, kernels)["durations"]["local"]), set(self.ids))
         for change in ("missing", "duplicate", "plan", "tests", "failure"):
             with self.subTest(change=change):
                 altered = copy.deepcopy(reports)

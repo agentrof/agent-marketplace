@@ -1156,7 +1156,8 @@ def verify_reports(plan, reports):
             "estimated_worker_seconds": plan["lanes"][key[0]].get("estimated_worker_seconds",
                                                                   [None] * len(expected))[key[1]]})
         identity = report["runtime"]
-        if key[0] in runtimes and runtimes[key[0]] != identity:
+        # Hosted runners of one image roll kernels in place, so shards of a lane may differ in os_release only.
+        if key[0] in runtimes and {**runtimes[key[0]], "os_release": None} != {**identity, "os_release": None}:
             raise CIError(f"runtime changed between shards: {key[0]}")
         runtimes[key[0]] = identity
     if seen != set(expected):

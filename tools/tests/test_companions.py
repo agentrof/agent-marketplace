@@ -47,6 +47,30 @@ class CompanionAvailabilityTests(unittest.TestCase):
                         [], 0, json.dumps({"installed": [record]}), "")):
                 self.assertEqual(self.module.installed(verify, ROOT), expected)
 
+    def test_claude_plugin_record_must_be_user_scoped_enabled_and_installed(self):
+        verify = REGISTRY["companions"][0]["hosts"]["claude"]["verify"]
+        with tempfile.TemporaryDirectory() as raw:
+            good = {"id": verify["plugin_id"], "scope": "user", "enabled": True, "installPath": raw}
+            cases = [
+                ({**good, "scope": "project"}, False),
+                ({**good, "enabled": False}, False),
+                ({**good, "installPath": raw + "/missing"}, False),
+                ({**good, "id": "other@market"}, False),
+                (good, True),
+            ]
+            for record, expected in cases:
+                with self.subTest(record=record), \
+                        mock.patch.object(self.module.shutil, "which", return_value="claude"), \
+                        mock.patch.object(self.module.subprocess, "run", return_value=subprocess.CompletedProcess(
+                            [], 0, json.dumps([record]), "")):
+                    self.assertEqual(self.module.installed(verify, ROOT), expected)
+
+    def test_every_companion_installs_at_user_level_except_the_git_hook(self):
+        specs = [(host["scope"], " ".join(host["install"])) for companion in REGISTRY["companions"]
+                 for host in companion["hosts"].values()]
+        self.assertEqual({scope for scope, _ in specs}, {"user"})
+        self.assertFalse([command for _, command in specs if "--project" in command or "--scope project" in command])
+
     def test_host_skill_probe_checks_local_loading_and_reads_remote_contents(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw)
@@ -128,7 +152,7 @@ class CompanionCheckTests(unittest.TestCase):
                 path.mkdir()
             ids = [spec["verify"]["plugin_id"] for companion in REGISTRY["companions"]
                    for spec in companion["hosts"].values() if "plugin_id" in spec["verify"]]
-            listings = {"claude": json.dumps([{"id": value} for value in ids]),
+            listings = {"claude": json.dumps([{"id": value, "scope": "user", "enabled": True, "installPath": str(temporary)} for value in ids]),
                         "codex": json.dumps({"installed": [{"pluginId": value, "installed": True, "enabled": True} for value in ids]})}
             listings["graphify"] = "post-commit: installed"
             for name, listing in listings.items():
@@ -169,6 +193,7 @@ class CompanionCheckTests(unittest.TestCase):
                         skill.parent.mkdir(parents=True, exist_ok=True)
                         skill.write_text("x\n", encoding="utf-8")
             settings = project / ".claude" / "settings.json"
+            settings.parent.mkdir(exist_ok=True)
             settings.write_text('{"permissions": {"allow": ["Bash(ls)"]}}\n', encoding="utf-8")
             ignore = project / "workspace" / "docs" / ".graphifyignore"
             ignore.parent.mkdir(parents=True)

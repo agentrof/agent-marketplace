@@ -30,10 +30,10 @@
       ],
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add obra/superpowers-marketplace",
-            "claude plugin install superpowers@superpowers-marketplace --scope project"
+            "claude plugin install superpowers@superpowers-marketplace --scope user"
           ],
           "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "superpowers@superpowers-marketplace"}
         },
@@ -60,19 +60,19 @@
       "why": "Pull request bodies, documents and issues read as written by the team, without changing what they say.",
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add blader/humanizer",
-            "claude plugin install humanizer@humanizer --scope project"
+            "claude plugin install humanizer@humanizer --scope user"
           ],
           "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "humanizer@humanizer"}
         },
         "codex": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx skills add blader/humanizer --agent codex -y"
+            "npx skills add blader/humanizer --agent codex -g -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md", "skills": ["humanizer:humanizer"]}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md", "base": "home", "skills": ["humanizer:humanizer"]}
         }
       },
       "routing": [
@@ -87,18 +87,18 @@
       "why": "High-rigor reviews get a security method; guidance mode writes nothing.",
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -y"
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -g -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/security-audit/SKILL.md"}
+          "verify": {"kind": "path_exists", "path": ".claude/skills/security-audit/SKILL.md", "base": "home"}
         },
         "codex": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -y"
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -g -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md", "skills": ["security-audit"]}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md", "base": "home", "skills": ["security-audit"]}
         }
       },
       "routing": [
@@ -117,10 +117,10 @@
       ],
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add cathrynlavery/diagram-design",
-            "claude plugin install diagram-design@diagram-design --scope project"
+            "claude plugin install diagram-design@diagram-design --scope user"
           ],
           "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "diagram-design@diagram-design"}
         },
@@ -154,18 +154,18 @@
       "forbidden_reason": "DESIGN.md and PRODUCT.md live only in workspace/experience-design.",
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx impeccable install --providers=claude --project --no-hooks -y"
+            "npx impeccable install --providers=claude --user --no-hooks -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/impeccable/SKILL.md"}
+          "verify": {"kind": "path_exists", "path": ".claude/skills/impeccable/SKILL.md", "base": "home"}
         },
         "codex": {
-          "scope": "project",
+          "scope": "user",
           "install": [
-            "npx impeccable install --providers=codex --project --no-hooks -y"
+            "npx impeccable install --providers=codex --user --no-hooks -y"
           ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md", "skills": ["impeccable"]}
+          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md", "base": "home", "skills": ["impeccable"]}
         }
       },
       "routing": [
@@ -239,10 +239,10 @@
       ],
       "hosts": {
         "claude": {
-          "scope": "project",
+          "scope": "user",
           "install": [
             "claude plugin marketplace add DietrichGebert/ponytail",
-            "claude plugin install ponytail@ponytail --scope project"
+            "claude plugin install ponytail@ponytail --scope user"
           ],
           "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "ponytail@ponytail"}
         },

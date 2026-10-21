@@ -52,16 +52,6 @@ def blocked_names(companion: dict) -> list[str]:
     return [f"{namespace}:{skill}" for skill in companion.get("blocked_skills", [])]
 
 
-def strings(value) -> set[str]:
-    if isinstance(value, str):
-        return {value}
-    if isinstance(value, dict):
-        value = list(value.values())
-    if isinstance(value, list):
-        return set().union(*(strings(item) for item in value)) if value else set()
-    return set()
-
-
 def installed(verify: dict, root: Path) -> bool:
     if verify["kind"] == "path_exists":
         base = Path.home() if verify.get("base") == "home" else root
@@ -80,7 +70,9 @@ def installed(verify: dict, root: Path) -> bool:
             return any(item.get("pluginId") == verify["plugin_id"]
                        and item.get("installed") is True and item.get("enabled") is True
                        for item in listing.get("installed", []))
-        return verify["plugin_id"] in strings(listing)
+        return any(item.get("id") == verify["plugin_id"] and item.get("scope") == "user"
+                   and item.get("enabled") is True and Path(item.get("installPath", "")).is_dir()
+                   for item in listing if isinstance(item, dict))
     except json.JSONDecodeError:
         return False
 

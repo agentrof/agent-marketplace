@@ -9,10 +9,9 @@ and merges pull requests whose tests nobody ran.
 
 ## Rules
 
-1. The proof commands come from `.agentrof/local-proof.json`, `{"commands":
-   ["<command>", ...]}`, each run by the shell from the project root, `{base}`
-   replaced by the target branch. Without the file the command is
-   `make test`. A check the project needs for some
+1. The proof commands come from `local_proof` in `workspace/config.json`,
+   `["<command>", ...]`, each run by the shell from the project root, `{base}`
+   replaced by the target branch. Without it the command is `make test`. A check the project needs for some
    changes only, such as live evidence for the affected live groups, is one
    more command that exits non-zero when that evidence is missing for HEAD.
 2. After the last commit of the change, run `task_lane.py prove --task <id>`.

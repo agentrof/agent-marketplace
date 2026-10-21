@@ -34,7 +34,8 @@ Reviewers per rigor and risk are the `reviewers` rules of
 Rigor is `high` for authentication, credentials, secrets, tenant data, money,
 data deletion or an irreversible action. Any flag in `risks` (`auth`,
 `secrets`, `data_placement`, `migration`, `irreversible`) also adds the
-`security-reviewer` and escalates the resolved spawns.
+`security-reviewer` and escalates the resolved spawns. A knowledge task
+starts at rigor `normal` with only the `--risk` flags passed explicitly.
 
 Method skills: `skill-content/deliver/data/task-triggers.json` (project rules
 in `.agentrof/task-triggers.json`) makes a method skill mandatory for the

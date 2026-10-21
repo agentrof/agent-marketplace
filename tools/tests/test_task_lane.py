@@ -325,6 +325,18 @@ class RoleRoutingTests(unittest.TestCase):
         self.assertEqual(props["roles"], "software-architect:require:pre_check, business-analyst:suggest:pre_check,"
                                         " qa-engineer:suggest:pre_check")
 
+    def test_a_knowledge_task_naming_risky_words_starts_normal_with_only_explicit_risks(self):
+        root = self.project()
+        args = SimpleNamespace(delivery=None, at=None, request="Document where the credential and token live",
+                               request_file=None, title="Secrets notes", epic=None, source_story=None,
+                               covers=None, fixes=None, knowledge=True, size="s", base="main", risk=None)
+        with self.fake_run():
+            result = task_lane.cmd_start(args, root)
+        self.assertEqual((result["proposed_rigor"], result["risks"]), ("normal", []))
+        args.risk = ["secrets"]
+        with self.fake_run():
+            self.assertEqual(task_lane.cmd_start(args, root)["risks"], ["secrets"])
+
     def test_a_required_role_blocks_open_pr_until_its_verdict_is_recorded(self):
         root = self.project(TASK.replace("size: s", "size: l"))
         lint = task_lane.cmd_lint(SimpleNamespace(file=None, task="TK-004"), root)
@@ -826,6 +838,20 @@ class RetrospectiveDollarTests(unittest.TestCase):
         # Every scanned token lands exactly once: tasks plus the unattributed rest equal the scan.
         self.assertEqual(sum(row["cost"]["tokens"]["output"] for row in rows) + rest["tokens"]["output"],
                          self.session_cost.cost(self.scan(), self.prices)["tokens"]["output"])
+
+    def test_a_task_session_counts_its_calls_before_start_once_across_a_resume(self):
+        # Base branch named task/...; m1 runs before start; m2 streams twice; the resumed run adds m3.
+        (self.folder / "s1.jsonl").write_text("\n".join([
+            self.call(1, "m1", branch="task/trial", model="claude-sonnet-5-5", output_tokens=100),
+            self.call(6, "m2", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=1),
+            self.call(6, "m2", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=200),
+            self.call(30, "m3", branch="task/tk-001-a", model="claude-sonnet-5-5", output_tokens=300)]) + "\n",
+            encoding="utf-8")
+        task = {**RetrospectiveTests.task, "id": "TK-001", "file": "tk-001-a.md",
+                "requested_at": "2026-10-16T10:05:00+00:00"}
+        row = task_lane.task_row(task, pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:40:00Z"))
+        rest = task_lane.attach_sessions([row], [task], self.scan(), False, 1e12, self.prices)
+        self.assertEqual((row["cost"]["main"]["tokens"]["output"], row["cost"]["usd"], rest["usd"]), (600, 0.006, 0))
 
     def test_codex_tokens_split_cached_and_written_input_and_name_their_branch(self):
         folder = self.home / "codex" / "2026" / "10" / "16"

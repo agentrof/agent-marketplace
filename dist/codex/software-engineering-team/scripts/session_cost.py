@@ -7,7 +7,8 @@ retrospective attributes an event to a task by one rule (``belongs``): a subagen
 whose spawn description or first prompt names exactly one task id (``TK-###``)
 is that task's; else a record on a ``task/...`` branch is that branch's task;
 else a main-session event on the base branch falls in every task window that
-holds it and its cost is split evenly between them. A subagent with neither a
+holds it and its cost is split evenly between them; one no window holds goes
+to the task branch its session switches to next (the calls before ``start``). A subagent with neither a
 task id nor a task branch is other work and stays unattributed.
 What matches no task is the unattributed remainder. Only times, counts, roles,
 models, task ids, spawn descriptions, file paths and result sizes are kept; no
@@ -45,6 +46,8 @@ REPEATED_READS = 5
 PRICING_FILE = Path(__file__).resolve().parent.parent / "skill-content" / "retrospective" / "data" / "pricing.json"
 PROJECT_PRICING = Path(".agentrof") / "pricing.json"
 TASK_ID_RE = re.compile(r"\b(?:TK|tk)-([0-9]{3,})\b")
+# The branch task_lane.py start creates; a base branch may also be named task/... .
+TASK_BRANCH_RE = re.compile(r"^task/tk-([0-9]{3,})-")
 
 
 def epoch(value) -> float | None:
@@ -156,6 +159,13 @@ def claude_events(path: Path, role: str, purpose: str = "") -> list[dict]:
                     events.append({**base, "kind": "result", "bytes": result_size(block.get("content"))})
             if isinstance(content, str):
                 events.append({**base, "kind": "activity"})
+    if role == "main":
+        # A session's calls before start stamped requested_at lead to the task branch it switches to next.
+        lead = ""
+        for event in sorted(events, key=lambda event: event["at"], reverse=True):
+            match = TASK_BRANCH_RE.match(event["branch"])
+            lead = f"TK-{match.group(1)}" if match else lead
+            event["lead"] = "" if match else lead
     return events
 
 
@@ -227,7 +237,7 @@ def belongs(event: dict, branch: str, start: float, end: float, task: str = "") 
     window decides. A subagent with neither belongs to no task: it is other work running at the same time."""
     if event.get("task"):
         return event["task"] == task
-    if event["branch"].startswith("task/"):
+    if TASK_BRANCH_RE.match(event["branch"]):
         return event["branch"] == branch
     return event["role"] == "main" and start <= event["at"] <= end
 

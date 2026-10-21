@@ -182,11 +182,8 @@ def preflight(root: Path, workspace: str) -> list[str]:
     return findings
 
 
-def legacy_experience_findings(docs: Path) -> list[str]:
+def experience_link_findings(docs: Path) -> list[str]:
     experience = docs / "experience-design"
-    if not experience.exists() and not experience.is_symlink():
-        return []
-    findings: list[str] = []
     if experience.is_symlink():
         return [
             "Experience subtree symlink exists at experience-design; remove"
@@ -194,18 +191,8 @@ def legacy_experience_findings(docs: Path) -> list[str]:
         ]
     if not experience.is_dir():
         return []
-    if (experience / "baselines").exists():
-        findings.append(
-            "legacy Experience baseline tree exists at docs/experience-design/baselines; no migration is available"
-        )
-    for name in ("artifact-registry.json", "artifact-manifest.md"):
-        path = experience / name
-        if path.exists():
-            findings.append(
-                f"legacy Experience artifact index exists at {path.relative_to(docs)}"
-            )
-    entries = sorted(experience.rglob("*"))
-    for path in entries:
+    findings: list[str] = []
+    for path in sorted(experience.rglob("*")):
         relative = path.relative_to(docs)
         if path.is_symlink():
             findings.append(
@@ -217,32 +204,7 @@ def legacy_experience_findings(docs: Path) -> list[str]:
                 "Experience Design file has a hard-link alias at "
                 f"{relative.as_posix()}; remove every alias before setup"
             )
-        if (path.name == "artifact-registry.json"
-                and "_generated" in relative.parts):
-            findings.append(
-                f"legacy Experience artifact index exists at {relative.as_posix()}"
-            )
-    experiences = experience / "experiences"
-    for path in experiences.glob("exp-*") \
-            if experiences.is_dir() and not experiences.is_symlink() \
-            else []:
-        if path.is_dir():
-            findings.append(
-                f"retired exp- Experience slug exists at {path.relative_to(docs)}"
-            )
-    for path in experience.rglob("*.md"):
-        if path.is_symlink():
-            continue
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        if any(marker in text for marker in (
-            "baseline_id:", "program_id:", "release_id:",
-            "type: experience-baseline", "type: experience-space",
-            "type: experience-domain", "type: artifact-manifest",
-        )):
-            findings.append(
-                f"legacy Experience metadata exists at {path.relative_to(docs)}"
-            )
-    return sorted(set(findings))
+    return findings
 
 
 def listed_paths(listing: bytes) -> list[str]:
@@ -317,7 +279,7 @@ def closing(root: Path, workspace: str) -> list[str]:
             + ", ".join(listed_paths(tracked_local.stdout))
         )
     findings.extend(runtime_findings(root))
-    findings.extend(legacy_experience_findings(work / "docs"))
+    findings.extend(experience_link_findings(work / "docs"))
     return findings
 
 

@@ -168,47 +168,19 @@ class CIPlanIntegrationTests(unittest.TestCase):
                 event_name, self.git("rev-parse", "HEAD"), self.output,
             )
 
-    def test_normal_pr_runs_the_full_suite_without_consulting_prior_runs(self):
-        self.assertEqual(self.choose(), ("full", ""))
-        self.assertEqual(self.queries, [])
-
     def test_main_merge_reuses_only_a_successful_exact_pr_tree(self):
-        self.assertEqual(self.choose(api=self.api(), event_name="push"), ("reuse", ""))
+        self.assertEqual(self.choose(api=self.api(), event_name="push"), "reuse")
         self.assertEqual(self.queries, [self.merge])
 
     def test_missing_proof_runs_full_on_main(self):
         self.assertEqual(
-            self.choose(api=self.api(missing=True), event_name="push"), ("full", ""),
+            self.choose(api=self.api(missing=True), event_name="push"), "full",
         )
         self.assertEqual(self.queries, [self.merge])
 
-    def test_merge_queue_group_runs_the_full_suite(self):
-        event = {"merge_group": {
-            "base_sha": self.base, "head_sha": self.merge,
-            "base_ref": "refs/heads/main",
-            "head_ref": f"refs/heads/gh-readonly-queue/main/pr-9-{self.base}",
-        }}
-        self.assertEqual(self.choose(event_name="merge_group", event=event), ("full", ""))
-        self.assertEqual(self.queries, [])
-
-    def test_manual_scheduled_and_other_events_always_run_full(self):
-        for event in ("workflow_dispatch", "schedule", "pull_request_target", "workflow_call"):
-            with self.subTest(event=event):
-                self.assertEqual(self.choose(event_name=event), ("full", ""))
-        self.assertEqual(self.queries, [])
-
     def test_the_plan_job_outputs_the_exact_python_release_every_later_job_sets_up(self):
-        original = ci_plan.run
-
-        def run(*arguments):
-            if arguments[1:3] == ("tools/ci_evidence.py", "timings"):
-                output = Path(arguments[arguments.index("--output") + 1])
-                output.write_text(json.dumps({"schema_version": 1, "durations": {}}), encoding="utf-8")
-                return ""
-            return original(*arguments)
-
         outputs = self.output / "github-output"
-        with mock.patch.object(ci_plan, "run", side_effect=run), mock.patch.dict(
+        with mock.patch.dict(
                 os.environ, {"GITHUB_EVENT_NAME": "workflow_dispatch"}), \
                 mock.patch.object(sys, "argv", ["ci_plan.py", "--output-directory", str(self.output / "plan"),
                                                 "--github-output", str(outputs)]):
@@ -224,6 +196,15 @@ class CIPlanIntegrationTests(unittest.TestCase):
         self.assertEqual({row["python"] for row in json.loads(values["matrix"])["include"]}, {release})
         plan = json.loads((self.output / "plan" / "ci-plan.json").read_text(encoding="utf-8"))
         self.assertEqual(plan["python_release"], release)
+
+
+class CIPlanModeTests(unittest.TestCase):
+    def test_pull_requests_and_other_events_run_full_without_consulting_prior_runs(self):
+        with mock.patch.object(ci_plan, "run", side_effect=AssertionError("consulted prior runs")), \
+                mock.patch.dict(os.environ, {"GITHUB_REF": "refs/heads/main"}):
+            for event in ("pull_request", "workflow_dispatch", "schedule", "pull_request_target", "workflow_call"):
+                with self.subTest(event=event):
+                    self.assertEqual(ci_plan.choose_mode({}, event, "0" * 40, Path("unused")), "full")
 
 
 if __name__ == "__main__":

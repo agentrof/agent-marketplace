@@ -35,8 +35,7 @@ def plan(mode="full"):
     value = {
         "schema_version": 1, "source_sha": TESTED, "source_tree": TREE,
         "policy_hash": "1" * 64, "inventory_hash": "2" * 64,
-        "mode": mode, "requested_mode": mode, "base_sha": BASE,
-        "changed_paths": [], "selection_reason": "full coverage requested",
+        "mode": mode, "selection_reason": "full coverage requested",
         "selected_ids": selected, "lanes": ({"linux": {
             "os": "ubuntu-latest", "python": "3.9", "selected_ids": selected,
             "shards": [selected],
@@ -256,12 +255,6 @@ class EvidenceReuseTests(unittest.TestCase):
         api.runs = [api.run]
         self.assertFalse(self.find(api)["reused"])
 
-    def test_impact_profile_is_preserved_and_cannot_claim_full(self):
-        api = FakeGitHub(receipt("impact"))
-        result = self.find(api)
-        self.assertTrue(result["reused"], result)
-        self.assertEqual(result["profile"], "impact")
-
     def test_reuse_profile_requires_a_different_successful_source_link(self):
         api = FakeGitHub(receipt("reuse"))
         self.assertFalse(self.find(api)["reused"])
@@ -383,17 +376,7 @@ class ReceiptCreationTests(unittest.TestCase):
         clone.assert_called_once_with(Path("checkout"), BASE)
         self.assertEqual(fake_tools.validate_plan.call_args.args[1], Path("trusted-source"))
 
-    def test_a_retired_release_profile_never_supplies_evidence(self):
-        api = FakeGitHub(receipt("release"))
-        with mock.patch.object(evidence, "tree", return_value=TREE), \
-             mock.patch.object(evidence, "git", return_value=MERGED), \
-             mock.patch.object(evidence, "contract_hash", return_value=CONTRACT), \
-             mock.patch.object(evidence, "verify_plan_contract"):
-            result = evidence.find_evidence(Path("."), api, MERGED, NOW)
-        self.assertFalse(result["reused"])
-        self.assertIn("profile is invalid", result["reason"])
-
-    def test_only_main_push_validation_inherits_and_no_release_event_records(self):
+    def test_only_main_push_validation_inherits(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             data = plan("reuse")
@@ -412,8 +395,6 @@ class ReceiptCreationTests(unittest.TestCase):
             }
             cases = (
                 ("workflow_dispatch", inherited, "does not match this workflow transition"),
-                ("push", dict(inherited, lookup_mode="prepare"),
-                 "does not match this workflow transition"),
                 ("pull_request_target", inherited, "unsupported receipt event"),
             )
             for event, proof, message in cases:
@@ -428,117 +409,6 @@ class ReceiptCreationTests(unittest.TestCase):
                         with self.assertRaisesRegex(evidence.EvidenceError, message):
                             evidence.create_receipt(root, root / "plan.json", root / "reports",
                                                     root / "inherited.json")
-
-
-class TimingHistoryTests(unittest.TestCase):
-    def setUp(self):
-        self.ids = ["tools.tests.test_example.Example.test_safe"]
-        self.policy = {"lanes": {"linux": {
-            "groups": ["all"], "os": "ubuntu-latest", "python": "3.9",
-        }}}
-        self.runtime = {
-            "os": "Linux", "python_version": "3.9.25", "python_implementation": "CPython",
-            "os_release": "6.8", "machine": "x86_64", "git_version": "git version 2.50.0",
-        }
-        self.payload = {
-            "schema_version": 1, "policy_hash": evidence.digest(self.policy),
-            "durations": {"linux": {self.ids[0]: 32.5}}, "runtimes": {"linux": self.runtime},
-        }
-
-    def source(self, payload=None):
-        api = FakeGitHub()
-        api.artifact_changes = {"name": "ci-durations-123-1"}
-        api.archive_override = archive(payload or self.payload, "ci-durations.json")
-        return api
-
-    def restore(self, api):
-        actual_tools = evidence.test_tools()
-        with mock.patch.object(actual_tools, "policy_at", return_value=self.policy), \
-             mock.patch.object(actual_tools, "inventory", return_value=(self.ids, "inventory")):
-            return evidence.restore_timings(Path("."), api, NOW)
-
-    def test_matching_successful_timing_artifact_restores_only_duration_hints(self):
-        result = self.restore(self.source())
-        self.assertEqual(result["durations"], self.payload["durations"])
-        self.assertEqual(result["sources"][0]["run_id"], 123)
-        self.assertEqual(result["sources"][0]["restored_tests"], 1)
-        self.assertEqual(result["fallback_reasons"], [])
-        self.assertNotIn("reused", result)
-
-    def test_policy_runtime_or_unknown_tests_invalidate_timing_history(self):
-        changes = [
-            {"policy_hash": "9" * 64},
-            {"durations": {"other-lane": {self.ids[0]: 1}}},
-            {"durations": {"linux": {"unknown.test": 1}}},
-            {"runtimes": {"linux": dict(self.runtime, os="Windows")}},
-        ]
-        for fields in changes:
-            with self.subTest(fields=fields):
-                payload = dict(self.payload, **fields)
-                self.assertEqual(self.restore(self.source(payload))["durations"], {})
-
-    def test_invalid_or_excessive_durations_cannot_influence_shards(self):
-        for seconds in (-1, float("inf"), float("nan"), 601, True, "30"):
-            with self.subTest(seconds=seconds):
-                payload = dict(self.payload, durations={"linux": {self.ids[0]: seconds}})
-                self.assertEqual(self.restore(self.source(payload))["durations"], {})
-
-    def test_rounded_zero_duration_preserves_the_rest_of_verified_history(self):
-        self.ids.append("tools.tests.test_example.Example.test_instant_skip")
-        payload = copy.deepcopy(self.payload)
-        payload["durations"]["linux"][self.ids[1]] = 0.0
-        result = self.restore(self.source(payload))
-        self.assertEqual(result["durations"]["linux"], {self.ids[0]: 32.5, self.ids[1]: 0.001})
-
-    def test_expired_fork_stale_or_unavailable_history_uses_defaults(self):
-        for kind in ("expired", "fork", "stale", "api"):
-            with self.subTest(kind=kind):
-                api = self.source()
-                if kind == "expired":
-                    api.artifact_changes["expired"] = True
-                elif kind == "fork":
-                    api.run["head_repository"] = {"full_name": "fork/project"}
-                elif kind == "stale":
-                    api.run["updated_at"] = "2026-09-25T12:00:00Z"
-                else:
-                    api.get = mock.Mock(side_effect=evidence.EvidenceError("no API"))
-                result = self.restore(api)
-                self.assertEqual(result["durations"], {})
-                self.assertTrue(result["fallback_reasons"])
-
-    def test_merge_queue_runs_supply_timing_hints_but_other_events_do_not(self):
-        for event, restored in (("merge_group", True), ("issue_comment", False)):
-            with self.subTest(event=event):
-                api = self.source()
-                api.run["event"] = event
-                result = self.restore(api)
-                self.assertEqual(result["durations"] == self.payload["durations"], restored)
-                self.assertEqual(not result["fallback_reasons"], restored)
-
-    def test_history_lookup_is_bounded_to_five_sources(self):
-        api = self.source()
-        api.runs = [api.run] * 7
-        self.assertEqual(self.restore(api)["durations"], self.payload["durations"])
-        self.assertEqual(api.run_reads, 10)
-
-    def test_timing_archive_cannot_write_a_receipt_or_extra_file(self):
-        api = self.source()
-        api.archive_override = archive(self.payload, "ci-evidence.json")
-        self.assertEqual(self.restore(api)["durations"], {})
-
-    def test_recent_partial_history_preserves_older_timings_for_other_tests(self):
-        self.ids.append("tools.tests.test_example.Example.test_other")
-        api = self.source()
-        older = dict(api.run, id=122, created_at="2026-09-28T09:00:00Z")
-        api.runs = [older, api.run]
-        original = api.get
-        api.get = lambda path: older if path == "actions/runs/122" else original(path)
-        prior = copy.deepcopy(self.payload)
-        prior["durations"]["linux"] = {self.ids[0]: 99, self.ids[1]: 15}
-        with mock.patch.object(evidence, "read_run_artifact", side_effect=lambda api, source, prefix, filename:
-                               (prior if source["id"] == 122 else self.payload, {})):
-            result = self.restore(api)
-        self.assertEqual(result["durations"]["linux"], {self.ids[0]: 32.5, self.ids[1]: 15})
 
 
 if __name__ == "__main__":

@@ -19,17 +19,16 @@ def run(*args: str) -> str:
     return subprocess.check_output(args, cwd=ROOT, text=True, encoding="utf-8").strip()
 
 
-def choose_mode(event: dict, event_name: str, head: str, directory: Path) -> tuple[str, str]:
-    # Every pull request and merge queue group runs the full suite: on the
-    # sharded Linux lane it takes about as long as an impact selection, and
-    # the local gate runs only a change's own tests. Main reuses that proof.
+def choose_mode(event: dict, event_name: str, head: str, directory: Path) -> str:
+    # Every pull request runs the full suite, and the local gate runs only a
+    # change's own tests. Main reuses that proof.
     if event_name != "push" or os.environ.get("GITHUB_REF") != "refs/heads/main":
-        return "full", ""
+        return "full"
     evidence = directory / "ci-reuse.json"
     run(sys.executable, "tools/ci_evidence.py", "find", "--expected-sha", head,
         "--output", str(evidence))
     result = json.loads(evidence.read_text(encoding="utf-8"))
-    return ("reuse" if result.get("reused") else "full"), ""
+    return "reuse" if result.get("reused") else "full"
 
 
 def main() -> int:
@@ -42,15 +41,10 @@ def main() -> int:
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     event = json.loads(Path(event_path).read_text(encoding="utf-8")) if event_path else {}
     head = run("git", "rev-parse", "HEAD")
-    mode, base = choose_mode(event, os.environ.get("GITHUB_EVENT_NAME", ""), head, directory)
-    timings = directory / "ci-timings.json"
-    run(sys.executable, "tools/ci_evidence.py", "timings", "--output", str(timings))
-    command = [sys.executable, "tools/ci_tests.py", "plan", "--mode", mode,
-               "--head", head, "--output", str(directory / "ci-plan.json"),
-               "--timings", str(timings), "--python-release", platform.python_version()]
-    if base:
-        command += ["--base", base]
-    subprocess.run(command, cwd=ROOT, check=True)
+    mode = choose_mode(event, os.environ.get("GITHUB_EVENT_NAME", ""), head, directory)
+    subprocess.run([sys.executable, "tools/ci_tests.py", "plan", "--mode", mode, "--head", head,
+                    "--output", str(directory / "ci-plan.json"), "--python-release", platform.python_version()],
+                   cwd=ROOT, check=True)
     plan = json.loads((directory / "ci-plan.json").read_text(encoding="utf-8"))
     with args.github_output.open("a", encoding="utf-8") as output:
         output.write("matrix=" + json.dumps(plan["matrix"], separators=(",", ":")) + "\n")
@@ -65,18 +59,11 @@ def main() -> int:
             output.write(f"Selected test cases: {len(plan['selected_ids'])}. ")
             output.write(f"Test jobs: {sum(len(lane['shards']) for lane in plan['lanes'].values())}, "
                          f"worker processes: {sum(len(set(owners)) for lane in plan['lanes'].values() for owners in lane['worker_assignments'])}.\n")
-            output.write("\n| Lane | Measured weights | Total tests | Jobs | Workers per job | "
-                         "Longest estimated worker (seconds) |\n")
-            output.write("| --- | ---: | ---: | ---: | ---: | ---: |\n")
+            output.write("\n| Lane | Total tests | Jobs | Workers per job | Longest estimated worker (seconds) |\n")
+            output.write("| --- | ---: | ---: | ---: | ---: |\n")
             for name, lane in plan['lanes'].items():
-                output.write(f"| {name} | {lane['measured_weights']} | {len(lane['selected_ids'])} | "
-                             f"{len(lane['shards'])} | {lane['workers']} | "
+                output.write(f"| {name} | {len(lane['selected_ids'])} | {len(lane['shards'])} | {lane['workers']} | "
                              f"{max(lane['estimated_shard_seconds']):.1f} |\n")
-            for source in plan['timing_provenance']['sources']:
-                output.write(f"\nTiming source: run {source['run_id']}, attempt {source['run_attempt']}, "
-                             f"age {source['age_seconds']} seconds, {source['restored_tests']} weights.\n")
-            for reason in plan['timing_provenance']['fallback_reasons']:
-                output.write(f"\nTiming fallback: {reason}.\n")
     return 0
 
 

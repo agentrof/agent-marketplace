@@ -9,7 +9,6 @@ import datetime as dt
 import hashlib
 import io
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -25,7 +24,7 @@ RECEIPT_NAME = "ci-evidence.json"
 MAX_BYTES = 4 * 1024 * 1024
 MAX_AGE_HOURS = 24
 SHA = re.compile(r"[0-9a-f]{40}\Z")
-PROFILES = {"full", "impact", "reuse"}
+PROFILES = {"full", "reuse"}
 FRESH_REQUIRED = ["repository-policy", "git-history", "release-proof", "public-channel"]
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -290,83 +289,6 @@ def read_run_receipt(api: GitHub, run: dict) -> tuple[dict, dict]:
     return read_run_artifact(api, run, "ci-evidence", RECEIPT_NAME)
 
 
-def validate_timings(payload: dict, policy: dict, known_ids: list[str]) -> dict:
-    require(payload.get("schema_version") == 1 and payload.get("policy_hash") == digest(policy),
-            "timing policy differs")
-    durations = payload.get("durations")
-    runtimes = payload.get("runtimes")
-    require(isinstance(durations, dict) and isinstance(runtimes, dict)
-            and set(durations) == set(runtimes), "timing runtime coverage differs")
-    tools = test_tools()
-    normalized = {}
-    for lane, values in durations.items():
-        require(lane in policy["lanes"] and isinstance(values, dict), "unknown timing lane")
-        lane_policy = policy["lanes"][lane]
-        tools.validate_runtime(runtimes[lane], lane_policy)
-        permitted = set(known_ids if lane_policy.get("groups") == ["all"] else
-                        tools.group_ids(lane_policy["groups"], policy, known_ids))
-        require(set(values) <= permitted, "timings name tests outside the current lane")
-        normalized[lane] = {}
-        for test_id, seconds in values.items():
-            require(type(seconds) in {int, float} and math.isfinite(seconds)
-                    and 0 <= seconds <= 600, "timing duration is outside the accepted range")
-            # Six-decimal reports can round an instant skip to zero. Match the
-            # sharder floor without discarding the run's other measured tests.
-            normalized[lane][test_id] = max(float(seconds), 0.001)
-    return normalized
-
-
-def restore_timings(root: Path, api: GitHub, now: dt.datetime | None = None) -> dict:
-    """Restore bounded performance hints; these never grant test coverage."""
-    result: dict = {"schema_version": 1, "durations": {}, "sources": [], "fallback_reasons": []}
-    now = now or dt.datetime.now(dt.timezone.utc)
-    try:
-        tools = test_tools()
-        policy = tools.policy_at(root)
-        known_ids, _ = tools.inventory(root)
-        listing = api.get("actions/workflows/validate.yml/runs?status=success&per_page=5")
-        require(isinstance(listing, dict) and isinstance(listing.get("workflow_runs"), list),
-                "timing workflow list is invalid")
-        runs = sorted(listing["workflow_runs"][:5],
-                      key=lambda item: (timestamp(item.get("created_at")), item.get("id", 0)),
-                      reverse=True)
-        for candidate in runs:
-            try:
-                require(isinstance(candidate, dict) and positive(candidate.get("id")),
-                        "timing source run is invalid")
-                run = api.get(f"actions/runs/{candidate['id']}")
-                require(isinstance(run, dict) and run.get("event") in {
-                    "push", "pull_request", "workflow_dispatch", "schedule", "merge_group",
-                }, "timing source event is invalid")
-                validate_run(run, api.repository, run["event"], run["head_sha"], now)
-                payload, artifact_digest = read_run_artifact(api, run, "ci-durations", "ci-durations.json")
-                durations = validate_timings(payload, policy, known_ids)
-                observed = api.get(f"actions/runs/{run['id']}")
-                require(isinstance(observed, dict) and observed.get("run_attempt") == run["run_attempt"],
-                        "timing source was rerun during verification")
-                validate_run(observed, api.repository, run["event"], run["head_sha"], now)
-                restored = 0
-                for lane, values in durations.items():
-                    for test_id, seconds in values.items():
-                        lane_values = result["durations"].setdefault(lane, {})
-                        if test_id not in lane_values:
-                            lane_values[test_id] = seconds
-                            restored += 1
-                result["sources"].append({"run_id": run["id"], "run_attempt": run["run_attempt"],
-                    "created_at": run["created_at"], "age_seconds": max(0, int((now - timestamp(run["created_at"])).total_seconds())),
-                    "artifact_digest": artifact_digest, "restored_tests": restored})
-            except (EvidenceError, OSError, subprocess.SubprocessError, ValueError,
-                    KeyError, TypeError, AttributeError) as error:
-                result["fallback_reasons"].append(str(error))
-                continue
-    except (EvidenceError, OSError, subprocess.SubprocessError, ValueError,
-            KeyError, TypeError, AttributeError) as error:
-        result["fallback_reasons"].append(str(error))
-    if not result["durations"]:
-        result["fallback_reasons"].append("no valid measured history; policy estimates used")
-    return result
-
-
 def validate_receipt(receipt: dict, run: dict, expected_tree: str,
                      contract: str, pull: dict, api: GitHub) -> dict:
     require(receipt.get("schema_version") == 1, "unsupported receipt schema")
@@ -556,19 +478,10 @@ def main() -> int:
     create.add_argument("--reports", type=Path, required=True)
     create.add_argument("--output", type=Path, required=True)
     create.add_argument("--inherited", type=Path)
-    timings = commands.add_parser("timings")
-    timings.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
-    timings.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "create":
             value = create_receipt(args.root, args.plan, args.reports, args.inherited)
-        elif args.command == "timings":
-            try:
-                value = restore_timings(args.root, GitHub(args.repository))
-            except EvidenceError:
-                value = {"schema_version": 1, "durations": {}, "sources": [],
-                         "fallback_reasons": ["timing service unavailable; policy estimates used"]}
         else:
             try:
                 value = find_evidence(args.root, GitHub(args.repository), args.expected_sha,
@@ -582,11 +495,7 @@ def main() -> int:
             with args.github_output.open("a", encoding="utf-8") as target:
                 target.write(f"reused={str(value['reused']).lower()}\n")
                 target.write(f"source_run_id={value.get('source_run_id', '')}\n")
-        displayed = value
-        if args.command == "timings":
-            displayed = {"restored_lanes": len(value["durations"]),
-                         "restored_timings": sum(len(items) for items in value["durations"].values())}
-        print(json.dumps(displayed if args.command != "create" else {
+        print(json.dumps(value if args.command != "create" else {
             "artifact_name": artifact_name(value["run_id"], value["run_attempt"]),
             "tested_sha": value["tested_sha"], "profile": value["plan"]["mode"],
         }, sort_keys=True))

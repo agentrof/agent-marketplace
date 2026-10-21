@@ -2,7 +2,7 @@
   "schema_version": 1,
   "precedence": "The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.",
   "notes": [
-    "Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph is `--graph .agentrof/graphify/docs/graph.json`); otherwise read the task file's sources and grep."
+    "Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph, `--graph .agentrof/graphify/docs/graph.json`, exists only after its first build; without it use the default graph); otherwise read the task file's sources and grep."
   ],
   "companions": [
     {

@@ -1,0 +1,6 @@
+{
+  "summary": "The graphify line the team writes into a project's agent instructions no longer sends agents to a docs graph path that does not exist yet. It now says the docs graph exists only after its first build and that the default graph is used until then.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

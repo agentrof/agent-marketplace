@@ -448,7 +448,7 @@ VALIDATOR_BUILDERS = {
         lambda value: value.update(dependencies=["some-team"])),
     "packaged_state_files": lambda root: write(root, f"{PLUGIN_ROOT}/cache.sqlite", "state"),
     "json_hygiene": lambda root: write(
-        root, f"{PLUGIN_ROOT}/skill-content/configure/data/probe.json", '{"camelCase": 1}\n'),
+        root, f"{PLUGIN_ROOT}/skill-content/deliver/data/probe.json", '{"camelCase": 1}\n'),
     "orchestrator_integrity": lambda root: edit(
         root, FLOW, "{{constitution}}", "the constitution"),
     "choice_gate": lambda root: append(root, FLOW, "\n\n\n\nThis needs an explicit user choice.\n"),

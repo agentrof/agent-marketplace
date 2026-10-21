@@ -34,6 +34,19 @@ CODEX_START = "# agent-marketplace:software-engineering-team:companions:start"
 CODEX_END = "# agent-marketplace:software-engineering-team:companions:end"
 
 
+def find_codex_cli() -> None:
+    """The desktop app ships the Codex CLI without putting it on PATH; add it for this process."""
+    if shutil.which("codex"):
+        return
+    for folder in ("/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin",):
+        if (Path(folder) / "codex").is_file():
+            os.environ["PATH"] = folder + os.pathsep + os.environ.get("PATH", "")
+            return
+
+
+find_codex_cli()
+
+
 def load_registry(path: Path = REGISTRY) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 

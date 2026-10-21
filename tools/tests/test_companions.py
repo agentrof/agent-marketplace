@@ -150,6 +150,13 @@ class CompanionAvailabilityTests(unittest.TestCase):
         self.assertTrue(all(row["installed"] for row in rows))
         self.assertTrue(all(row["skills_available"] is False for row in rows if row["host"] == "codex"))
 
+    def test_codex_cli_inside_the_desktop_app_is_found_without_path(self):
+        with mock.patch.dict(os.environ, {"PATH": "/usr/bin"}), \
+                mock.patch.object(self.module.shutil, "which", return_value=None), \
+                mock.patch.object(self.module.Path, "is_file", return_value=True):
+            self.module.find_codex_cli()
+            self.assertTrue(os.environ["PATH"].startswith("/Applications/ChatGPT.app/"))
+
     def test_unavailable_host_never_reports_verified_skills(self):
         with mock.patch.object(self.module.subprocess, "run", side_effect=OSError):
             skills, findings = self.module.codex_skills(REGISTRY, ROOT)

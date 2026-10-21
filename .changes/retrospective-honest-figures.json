@@ -1,6 +1,0 @@
-{
-  "summary": "The retrospective bounds its figures (filed at most found, shares at most 100%, merge refuses an issue number as a count), stops counting merges from main, the deliver-docs commit and the first feature commit as rework and classifies commit prefixes and role verdicts, adds an unaccounted column and reasons for missing steps and cost, proposes one lever per cause only from kinds with 5 merged tasks, calibrates per-size medians from history, flags a price-table change, and gives every duration a verdict and a baseline.",
-  "components": {
-    "software-engineering-team": "minor"
-  }
-}

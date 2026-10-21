@@ -1,6 +1,0 @@
-{
-  "summary": "Restore the autopilot grant guard as a dedicated hook: file tools cannot write the grant or arming record, and a shell command that adds autopilot authority outside the packaged autopilot.py is put back.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

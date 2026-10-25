@@ -1,0 +1,6 @@
+{
+  "summary": "task_lane.py start now creates the task branch in its own git worktree and no longer switches the current checkout, so a team running many agents from one shared checkout keeps that checkout on its branch, dirty files included. The result names the worktree; --worktree-dir picks its place and --switch keeps the old behaviour.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

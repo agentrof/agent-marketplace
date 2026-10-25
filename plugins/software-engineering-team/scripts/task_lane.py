@@ -3,8 +3,9 @@
 
 Every implementation request runs through this script:
 
-- ``start`` creates ``task/<id>-<slug>`` from the target branch and writes
-  the task ``workspace/docs/backlog/tasks/<id>-<slug>.md`` with its
+- ``start`` creates ``task/<id>-<slug>`` from the target branch in its own
+  git worktree (the current checkout is never switched; ``--switch`` opts back
+  in) and writes the task ``workspace/docs/backlog/tasks/<id>-<slug>.md`` with its
   ``requested_at`` time and the proposed ``rigor``.
 - ``lint`` checks one task: title, size, rigor, 3 to 8 acceptance criteria
   and a test list. ``approve`` lints it and writes ``approved_at``.
@@ -2072,7 +2073,13 @@ def cmd_start(args, root: Path) -> dict:
     task = next_id(taken_names(root, args.base))
     slug = slugify(args.title)
     branch = f"task/{task.lower()}-{slug}"
-    run("git", "switch", "-c", branch, f"origin/{args.base}", cwd=root)
+    if getattr(args, "switch", False):
+        run("git", "switch", "-c", branch, f"origin/{args.base}", cwd=root)
+    else:
+        # The caller's checkout and its uncommitted work stay as they are.
+        tree = Path(getattr(args, "worktree_dir", None) or root.parent / f"{root.name}-{task.lower()}")
+        run("git", "worktree", "add", "-b", branch, str(tree), f"origin/{args.base}", cwd=root)
+        root = tree
     path = root / TASKS / f"{task.lower()}-{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     # The docs the task relies on: the ones it is given and the existing docs its request names.
@@ -2085,7 +2092,7 @@ def cmd_start(args, root: Path) -> dict:
     if roles:
         set_field(path, "roles", roles_value(roles))
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
-    return {"task_id": task, "branch": branch, "task": str(path.relative_to(root)),
+    return {"task_id": task, "branch": branch, "worktree": str(root), "task": str(path.relative_to(root)),
             "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles, "spawn": spawn_roles(roles, root),
             "risks": risks, "applied_skills": skills, "sources": sources}
 
@@ -2468,6 +2475,10 @@ def main(argv: list[str] | None = None) -> int:
     start.add_argument("--fixes", help="the earlier task whose defect this task repairs, such as TK-007")
     start.add_argument("--risk", action="append", help="a risk flag of the task; repeatable")
     start.add_argument("--source", action="append", help="a project file the task relies on; repeatable")
+    start.add_argument("--worktree-dir", help="where the task's own worktree is created; default a sibling"
+                       " folder named <project>-<task id>")
+    start.add_argument("--switch", action="store_true",
+                       help="switch the current checkout to the task branch instead of creating a worktree")
     criteria = sub.add_parser("criteria")
     criteria.add_argument("--story", required=True)
     criteria.add_argument("--base", default="main")

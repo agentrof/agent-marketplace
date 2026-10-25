@@ -8,6 +8,9 @@ derive from a story (`source_story`, `covers`) or stand alone.
 
 - A large or multi-part request is split into tasks, each started with
   `task_lane.py start` and run as an independent `/deliver`, side by side.
+- `start` creates the task branch in its own git worktree (the JSON result
+  names it as `worktree`) and never switches the current checkout, so
+  parallel agents can share one checkout; `--switch` opts back in.
 - Parallel tasks run only on disjoint files, with each task's file ownership
   written in its `### Do` list; work on a shared area is sequenced.
   `task_lane.py overlap` warns about open pull requests that touch the same

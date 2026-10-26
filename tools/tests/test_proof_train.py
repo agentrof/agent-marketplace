@@ -108,6 +108,22 @@ class MergeTrainTests(unittest.TestCase):
         args = SimpleNamespace(**{"verb": verb, "base": "main", "batch": None, "dry_run": False, **options})
         return proof_train.cmd_train(args, self.root, task_lane)
 
+    def test_prove_reads_the_head_of_a_member_recorded_from_a_detached_worktree(self):
+        self.member(1)
+        tree = self.root.parent / "detached"
+        self.git("worktree", "add", "-q", "--detach", str(tree), "t1")
+        state_file = self.root / proof_train.STATE / "state.json"
+        state = json.loads(state_file.read_text())
+        state["batches"][0]["members"][0].update(root=str(tree), branch="HEAD")
+        state_file.write_text(json.dumps(state))
+        (tree / "extra").write_text("y")
+        for args in (("add", "-A"), ("commit", "-qm", "more")):
+            subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args], cwd=tree, check=True)
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=tree, check=True, capture_output=True, text=True).stdout.strip()
+        self.git("checkout", "-q", "main")
+        self.assertTrue(self.train("prove")["ok"])
+        self.assertEqual(json.loads(state_file.read_text())["batches"][0]["members"][0]["head"], head)
+
     def test_a_green_batch_is_proved_once_satisfies_each_member_and_merges_through_the_review_path(self):
         self.member(1)
         self.member(2)

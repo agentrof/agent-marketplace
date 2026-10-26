@@ -2411,7 +2411,7 @@ def cmd_merge(args, root: Path) -> dict:
         run("gh", "pr", "merge", args.pr, "--auto", f"--{args.style}", cwd=root)
     except Refused as refused:
         # GitHub refuses auto-merge once required checks are already green; merge now.
-        if "clean status" not in str(refused):
+        if "clean status" not in str(refused) and "protected branch rules" not in str(refused):
             raise
         run("gh", "pr", "merge", args.pr, f"--{args.style}", cwd=root)
         refresh_graph(root, args.pr)

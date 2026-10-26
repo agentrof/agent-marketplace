@@ -140,7 +140,8 @@ def prove(args, root, lane, state) -> dict:
         raise lane.Refused(f"batch {batch['id']} is being proved")
     before = batch["status"]
     for member in batch["members"]:  # a fix pushed to the member's branch after a red run joins the rerun
-        member["head"] = lane.run("git", "rev-parse", f"refs/heads/{member['branch']}", cwd=root)
+        ref = "HEAD" if member["branch"] == "HEAD" else f"refs/heads/{member['branch']}"  # a detached member worktree has no branch
+        member["head"] = lane.run("git", "rev-parse", ref, cwd=Path(member["root"]))
     if not args.dry_run:
         # sealed before anything else: a pull request added from now on joins the next batch
         batch.update(status=SEALED, pid=os.getpid())

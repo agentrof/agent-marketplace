@@ -1,0 +1,4 @@
+{
+  "summary": "A project can map changed paths to the local proof commands a change needs, queue proof commands through a runner, and prove ready pull requests once on a merge train integration branch.",
+  "components": {"software-engineering-team": "minor"}
+}

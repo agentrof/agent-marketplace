@@ -28,5 +28,40 @@ and merges pull requests whose tests nobody ran.
    body: the proved HEAD and each command with its result and seconds. The
    delivered-status commit `open-pr` adds on top touches only the task file.
 
+## Proof by impact
+
+`local_proof_map` in `workspace/config.json` is an ordered list of rules
+`{"paths": [glob, ...], "commands": [...] | "none": true, "reason": "..."}`;
+`*` in a glob spans folders and matching ignores case. `prove` takes the files changed since the target
+branch and the first rule that matches each one. It runs the union of those
+rules' commands (`none` adds no command). One changed file no rule matches, no
+map, or no changed file selects the whole `local_proof`: an uncovered path never
+skips a test. The record holds `selection` (`impact`, `full`, `train` or
+`deferred`) and why, and the `## Local proof` section repeats them. `prove
+--full` ignores the map. `proof_runner`, when set, is a command that runs each
+proof command as `<runner> sh -c '<command>'`, such as a machine queue.
+
+## Merge train
+
+`prove --deferred` records that the change's proof is the batch proof.
+`task_lane.py train` batches reviewed pull requests behind one proof:
+
+- `train add --task --pr [--critical --non-critical --filed --detail --delegated]`
+  joins the open batch; it needs a valid proof record of the change and no
+  critical finding. A change that needs the full proof must have run it or
+  deferred it. A pull request added after `train prove` started joins the next batch.
+- `train prove [--batch n] [--dry-run]` seals the batch, merges every member
+  into `train/<n>` in its own worktree and runs the full `local_proof` once,
+  through `proof_runner`. One batch proof runs at a time. A green batch writes
+  a `train` record into each member's own checkout, which satisfies that
+  member's `open-pr` proof rule for its recorded HEAD.
+- `train merge [--batch n]` merges each member through the unchanged `merge`
+  step with its recorded review counts; it refuses a batch that is not green or
+  whose target branch moved since the proof.
+- `train bisect [--batch n]` finds the member whose merge turns a red batch red.
+  A red batch is fixed at the failing test; bisect is for a cause that is not evident.
+- `train status` lists the batches. State lives in the main checkout's
+  `.agentrof/agent-marketplace/.runtime/train/`.
+
 The record is scratch, never a durable record; the pull request body keeps
 the proof.

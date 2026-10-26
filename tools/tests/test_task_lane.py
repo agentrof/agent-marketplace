@@ -227,6 +227,20 @@ class GitHubCommandTests(unittest.TestCase):
         self.assertTrue(result["merged"])
         self.assertEqual(calls[-1], ("gh", "pr", "merge", "9", "--merge"))
 
+    def test_checks_merge_at_once_when_the_repository_has_no_auto_merge(self):
+        calls = []
+
+        def run(*args, **kwargs):
+            calls.append(args)
+            if "--auto" in args:
+                raise task_lane.Refused("gh pr merge failed: Pull request does not have required protected branch rules")
+            return ""
+        with mock.patch.object(task_lane, "run", side_effect=run):
+            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
+                                                          detail=None), self.project("normal"))
+        self.assertTrue(result["merged"])
+        self.assertEqual(calls[-1], ("gh", "pr", "merge", "9", "--merge"))
+
     def test_the_graph_refresh_gets_the_project_root_and_the_merged_range(self):
         import graphify_refresh
         script = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/graphify_refresh.py"

@@ -66,6 +66,7 @@ import hashlib
 import io
 import json
 import re
+import shlex
 import shutil
 import statistics
 import subprocess
@@ -2219,6 +2220,38 @@ def proof_commands(root: Path, base: str) -> list[str]:
     return [item.replace("{base}", base) for item in commands]
 
 
+def proof_runner(root: Path, command: str) -> str:
+    """``command`` behind the project's ``proof_runner`` (a machine queue), when it sets one."""
+    runner = project_setting(root, "proof_runner", "")
+    return f"{Path(runner).expanduser()} sh -c {shlex.quote(command)}" if runner else command
+
+
+def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool = False) -> dict:
+    """What the proof must run for the changed files: the first ``local_proof_map`` rule that matches a
+    file selects its commands (``none`` selects no command); one file no rule matches, or no map,
+    selects the whole ``local_proof``. Never skips what the map does not cover."""
+    rules = project_setting(root, "local_proof_map", [])
+    everything = proof_commands(root, base)
+    if full or not rules:
+        return {"selection": "full", "commands": everything, "why": ["full proof requested" if full else "no local_proof_map"]}
+    files = changed_files(root, base) if files is None else files
+    if not files:
+        return {"selection": "full", "commands": everything, "why": ["no changed file found"]}
+    chosen, why = [], []
+    for item in sorted(files):
+        rule = next((r for r in rules if any(fnmatch.fnmatchcase(item.lower(), p.lower()) for p in r.get("paths", []))), None)
+        if rule is None:
+            return {"selection": "full", "commands": everything, "why": [f"{item} matches no local_proof_map rule"]}
+        for command in rule.get("commands", []):
+            command = command.replace("{base}", base)
+            if command not in chosen:
+                chosen.append(command)
+        reason = rule.get("reason") or ",".join(rule["paths"])
+        if reason not in why:
+            why.append(reason)
+    return {"selection": "impact", "commands": chosen, "why": why}
+
+
 def head_state(root: Path) -> tuple[str, bool]:
     """HEAD and whether no tracked file differs from it."""
     return (run("git", "rev-parse", "HEAD", cwd=root),
@@ -2232,19 +2265,23 @@ def proof_path(root: Path, task: str) -> Path:
 
 
 def cmd_prove(args, root: Path) -> dict:
-    """Run every local proof command on HEAD and record each exit code and time."""
+    """Run the local proof commands the change needs on HEAD and record each exit code and time.
+    ``--deferred`` records no run: the change's proof is the merge train's integration proof."""
     path = proof_path(root, args.task)
     head, clean = head_state(root)
+    plan = {"selection": "deferred", "commands": [], "why": ["proof runs once on the merge train's integration HEAD"]} \
+        if getattr(args, "deferred", False) else proof_plan(root, args.base, full=getattr(args, "full", False))
     results = []
-    for command in proof_commands(root, args.base):
+    for command in plan["commands"]:
         started, clock = now(), datetime.now(timezone.utc)
-        done = subprocess.run(command, shell=True, cwd=root, capture_output=True, text=True)
+        done = subprocess.run(proof_runner(root, command), shell=True, cwd=root, capture_output=True, text=True)
         results.append({"command": command, "exit_code": done.returncode,
                         "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 1),
                         "started_at": started, "finished_at": now(),
                         "tail": "" if done.returncode == 0 else scrub((done.stdout + done.stderr)[-2000:], 400),
                         "failed_tests": [] if done.returncode == 0 else failed_test_ids(done.stdout + done.stderr)})
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
+              "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
               "ok": clean and all(item["exit_code"] == 0 for item in results), "commands": results}
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="\n") as handle:
@@ -2281,16 +2318,18 @@ def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
     problems += [f"`{item['command']}` exited {item['exit_code']}"
                  + (f"; failed: {', '.join(item['failed_tests'])}" if item.get("failed_tests") else "")
                  for item in record.get("commands", []) if item.get("exit_code") != 0]
-    if not record.get("commands"):
+    if not record.get("commands") and record.get("selection") not in ("impact", "deferred", "train"):
         problems.append("the proof record holds no command")
     return problems, record
 
 
 def proof_section(record: dict) -> str:
     rows = "\n".join(f"| `{item['command']}` | pass | {item['seconds']} |" for item in record["commands"])
-    finished = record["commands"][-1]["finished_at"]
+    finished = record.get("finished_at") or record["commands"][-1]["finished_at"]
+    selection = record.get("selection", "full")
+    note = f"\nSelection: {selection}. {'; '.join(record.get('why') or [])}\n" if "selection" in record else ""
     return (f"\n\n## Local proof\n\nEvery check passed on HEAD `{record['head']}` with a clean tree,"
-            f" finished {finished}.\n\n| Command | Result | Seconds |\n|---|---|---|\n{rows}\n")
+            f" finished {finished}.\n\n| Command | Result | Seconds |\n|---|---|---|\n{rows}\n{note}")
 
 
 def proof_waived(root: Path, path: Path, base: str) -> bool:
@@ -2372,13 +2411,18 @@ def cmd_merge(args, root: Path) -> dict:
         run("gh", "pr", "merge", args.pr, "--auto", f"--{args.style}", cwd=root)
     except Refused as refused:
         # GitHub refuses auto-merge once required checks are already green; merge now.
-        if "clean status" not in str(refused):
+        if "clean status" not in str(refused) and "protected branch rules" not in str(refused):
             raise
         run("gh", "pr", "merge", args.pr, f"--{args.style}", cwd=root)
         refresh_graph(root, args.pr)
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False, "merged": True}
     refresh_graph(root, args.pr)
     return {"task_id": args.task, "pr": args.pr, "auto_merge": True}
+
+
+def cmd_train(args, root: Path) -> dict:
+    import proof_train
+    return proof_train.cmd_train(args, root, sys.modules[__name__])
 
 
 def cmd_report(args, root: Path):
@@ -2507,6 +2551,20 @@ def main(argv: list[str] | None = None) -> int:
     proved = sub.add_parser("prove", help="run the local proof commands on HEAD and record them")
     proved.add_argument("--task", required=True)
     proved.add_argument("--base", default="main")
+    proved.add_argument("--full", action="store_true", help="ignore local_proof_map and run every local_proof command")
+    proved.add_argument("--deferred", action="store_true", help="the merge train proves this change; run nothing now")
+    train = sub.add_parser("train", help="merge train: one integration proof for the ready pull requests")
+    train.add_argument("verb", choices=("add", "status", "prove", "merge", "bisect"))
+    train.add_argument("--task")
+    train.add_argument("--pr")
+    train.add_argument("--batch", type=int)
+    train.add_argument("--base", default="main")
+    train.add_argument("--dry-run", action="store_true", help="build the integration branch, run and merge nothing")
+    train.add_argument("--delegated", action="store_true")
+    train.add_argument("--style", choices=("merge", "squash", "rebase"), default="merge")
+    train.add_argument("--detail")
+    for key in ("critical", "non-critical", "filed"):
+        train.add_argument(f"--{key}", type=int)
     merge = sub.add_parser("merge")
     merge.add_argument("--task", required=True)
     merge.add_argument("--pr", required=True)
@@ -2541,7 +2599,7 @@ def main(argv: list[str] | None = None) -> int:
                             help="skip transcript cost and wait classification")
     args = parser.parse_args(argv)
     handlers = {"start": cmd_start, "lint": cmd_lint, "approve": cmd_approve,
-                "overlap": cmd_overlap, "open-pr": cmd_open_pr, "prove": cmd_prove, "merge": cmd_merge,
+                "overlap": cmd_overlap, "train": cmd_train, "open-pr": cmd_open_pr, "prove": cmd_prove, "merge": cmd_merge,
                 "report": cmd_report, "file-issues": cmd_file_issues,
                 "criteria": cmd_criteria, "board": cmd_board,
                 "role-check": cmd_role_check, "rework": cmd_rework, "review-inputs": cmd_review_inputs}

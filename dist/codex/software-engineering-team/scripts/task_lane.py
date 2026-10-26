@@ -2239,7 +2239,7 @@ def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool 
         return {"selection": "full", "commands": everything, "why": ["no changed file found"]}
     chosen, why = [], []
     for item in sorted(files):
-        rule = next((r for r in rules if any(fnmatch.fnmatchcase(item, p) for p in r.get("paths", []))), None)
+        rule = next((r for r in rules if any(fnmatch.fnmatchcase(item.lower(), p.lower()) for p in r.get("paths", []))), None)
         if rule is None:
             return {"selection": "full", "commands": everything, "why": [f"{item} matches no local_proof_map rule"]}
         for command in rule.get("commands", []):

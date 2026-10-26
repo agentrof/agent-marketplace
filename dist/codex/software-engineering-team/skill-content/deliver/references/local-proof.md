@@ -32,7 +32,7 @@ and merges pull requests whose tests nobody ran.
 
 `local_proof_map` in `workspace/config.json` is an ordered list of rules
 `{"paths": [glob, ...], "commands": [...] | "none": true, "reason": "..."}`;
-`*` in a glob spans folders. `prove` takes the files changed since the target
+`*` in a glob spans folders and matching ignores case. `prove` takes the files changed since the target
 branch and the first rule that matches each one. It runs the union of those
 rules' commands (`none` adds no command). One changed file no rule matches, no
 map, or no changed file selects the whole `local_proof`: an uncovered path never

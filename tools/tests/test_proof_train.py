@@ -45,6 +45,9 @@ class ProofPlanTests(unittest.TestCase):
         self.assertEqual(self.plan({"apps/a/x.py"})["commands"], ["echo a"])
         self.assertEqual(self.plan({"docs/x.md"}), {"selection": "impact", "commands": [], "why": ["documents"]})
 
+    def test_a_glob_matches_whatever_the_case_of_the_path(self):
+        self.assertEqual(self.plan({"apps/a/AuthCard.tsx"})["commands"], ["echo full"])
+
     def test_one_uncovered_path_or_no_map_selects_the_full_proof(self):
         self.assertEqual(self.plan({"apps/a/x.py", "other.txt"})["selection"], "full")
         self.assertEqual(self.plan({"apps/a/x.py"}, rules=[])["commands"], ["echo full"])

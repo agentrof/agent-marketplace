@@ -14,8 +14,8 @@ has. The retired `tier_models` and `role_tiers` fail the check; setup drops
 them.
 
 `output_language`, `terminology_language`, `tests_root`, `workspace_layout`,
-`pr_proof`, `local_proof`, `role_routing` and `task_triggers` are changed
-through `project_config.py set`. `local_proof` lists the proof commands,
+`pr_proof`, `local_proof`, `local_proof_map`, `proof_runner`, `role_routing` and `task_triggers` are changed
+through `project_config.py set`. `local_proof` lists the proof commands, `local_proof_map` maps changed paths to the commands a change needs and `proof_runner` queues them (see the deliver entry's `references/local-proof.md`),
 `role_routing` and `task_triggers` hold project rules in the shape of the
 deliver entry's `data/role-routing.json` and `data/task-triggers.json`. They
 live here because `.agentrof/` is never tracked; setup writes none of them and

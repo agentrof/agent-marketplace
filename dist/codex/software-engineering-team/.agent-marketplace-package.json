@@ -107,13 +107,16 @@
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/project_config.py":
-      "9f796bf5c7ccb1c96d4e68f6294cb49a0557d96c0bb769b52d136738e6116e2b"
+      "b8d6cccea632fdbf429563f9913c7febfc8887135c9317367e02c1bf47dc775e"
     ,
     "scripts/project_instructions.py":
       "9d47c7f43701efbf02710852b459e7cbf8680372afa58d10b88c460960ad8bd7"
     ,
     "scripts/project_paths.py":
       "40891b6797eb8c6437e4be9173571d451512d9af85fc47aba19db60e09c1f0b8"
+    ,
+    "scripts/proof_train.py":
+      "1c76983a5a3a0eb444c46f575d29efadb13ba43ff67276825bf661c1f3e04da3"
     ,
     "scripts/role_settings.py":
       "475aca567d9cdd762ce51b60c47b6bcf7a9dfce64f062bc4d96212c4fb144526"
@@ -134,7 +137,7 @@
       "681b9fa94f6a55f5fdab66ffe49cf49915f79eaf0f2bc2eb7984f647175464a8"
     ,
     "scripts/task_lane.py":
-      "4efe4f2a0c99722589977686e4c834a2f90d66277dc9a5f25384f64ffee978fc"
+      "8f28b385ef31133401ed70e9300f46b75ddf6d3ef718d4d5df05a4d533197fd4"
     ,
     "scripts/team_guard.py":
       "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
@@ -188,7 +191,7 @@
       "4435393479e488e9e3b3231ea21f21d95237f0b189a1b044478c8a560d1816b1"
     ,
     "skill-content/configure/references/config-contract.md":
-      "aa0597d74997840af6393a3c8fa42f97a2bdc84eb619fa8affdf009adfed80c5"
+      "fc04b0af2cb58d3bc061bfc5fc052761939e7138a07f8f1b4a276d1df6cc0126"
     ,
     "skill-content/configure/references/role-models.md":
       "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
@@ -230,7 +233,7 @@
       "e0b94f47206e0b7d7b05017fc7798dd2041fa038ef14084daa992c19f18ecaf0"
     ,
     "skill-content/deliver/references/local-proof.md":
-      "523286dd5fc3fa74c57a7ceef95eda7cc3aa11f237b9254433a96b82893c8854"
+      "da9a3474d583eb8f67523a6bbd4f968616e92cb1dc6c185df2060a4f713e2a63"
     ,
     "skill-content/issue-report/SKILL.md":
       "884de7d8c8a4b05673233475839a320fb705e50b7b6c230774720045e9e97abc"

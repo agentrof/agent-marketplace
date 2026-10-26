@@ -25,15 +25,17 @@ CONFIG_FIELDS = {
     "workspace_layout",
     "pr_proof",
     "local_proof",
+    "local_proof_map",
+    "proof_runner",
     "role_routing",
     "task_triggers",
     role_settings.CLASS_MODELS,
     role_settings.ROLE_CLASSES,
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout",
-                   "pr_proof", "local_proof", "role_routing", "task_triggers"}
+                   "pr_proof", "local_proof", "local_proof_map", "proof_runner", "role_routing", "task_triggers"}
 # Deliver settings the project owns; setup writes none of them and keeps the project's.
-PROJECT_FIELDS = ("pr_proof", "local_proof", "role_routing", "task_triggers")
+PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "proof_runner", "role_routing", "task_triggers")
 # Who proves a task before its pull request; unset means remote_ci.
 PR_PROOF_VALUES = ("remote_ci", "local_record")
 # Setup writes these into a config that lacks them; the project owns them after.
@@ -137,6 +139,15 @@ def base_errors(config: dict) -> list[str]:
     proof = config.get("local_proof", ["make test"])
     if not isinstance(proof, list) or not proof or not all(isinstance(item, str) and item.strip() for item in proof):
         errors.append("local_proof must be a non-empty list of commands")
+    rules = config.get("local_proof_map", [])
+    if not isinstance(rules, list) or not all(
+            isinstance(r, dict) and isinstance(r.get("paths"), list) and r["paths"]
+            and all(isinstance(p, str) for p in r["paths"])
+            and (r.get("none") is True) != bool(r.get("commands"))
+            and all(isinstance(c, str) and c.strip() for c in r.get("commands", [])) for r in rules):
+        errors.append("local_proof_map must list rules with paths and either commands or none: true")
+    if not isinstance(config.get("proof_runner", ""), str):
+        errors.append("proof_runner must be a string")
     for field in ("role_routing", "task_triggers"):
         if not isinstance(config.get(field, {}), dict):
             errors.append(f"{field} must be an object")

@@ -314,7 +314,7 @@ class RoleRoutingTests(unittest.TestCase):
         args = SimpleNamespace(delivery=None, at=None, request="Add db/migrations/0009_payments.sql for the"
                                " approval workflow", request_file=None,
                                title="Payments", epic=None, source_story=None, covers=None, fixes=None,
-                               knowledge=False, size="l", base="main")
+                               knowledge=False, size="l", base="main", switch=True)
         with self.fake_run():
             result = task_lane.cmd_start(args, root)
         self.assertEqual([item["role"] for item in result["roles"]], ["software-architect", "business-analyst",
@@ -329,7 +329,7 @@ class RoleRoutingTests(unittest.TestCase):
         root = self.project()
         args = SimpleNamespace(delivery=None, at=None, request="Document where the credential and token live",
                                request_file=None, title="Secrets notes", epic=None, source_story=None,
-                               covers=None, fixes=None, knowledge=True, size="s", base="main", risk=None)
+                               covers=None, fixes=None, knowledge=True, size="s", base="main", risk=None, switch=True)
         with self.fake_run():
             result = task_lane.cmd_start(args, root)
         self.assertEqual((result["proposed_rigor"], result["risks"]), ("normal", []))
@@ -507,6 +507,47 @@ class LocalProofGitTests(unittest.TestCase):
         git("add", "src.txt")
         git("commit", "-qm", "change")
         self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
+
+
+@integration
+class TaskStartWorktreeTests(unittest.TestCase):
+    """start gives the task its own worktree; a shared checkout stays on its branch with its dirty files."""
+
+    def setUp(self):
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(base, ignore_errors=True))
+        self.origin, self.root, self.tree = base / "origin.git", base / "shared", base / "task-tree"
+        init_repository(self.origin, bare=True, initial_branch="main")
+        init_repository(self.root, initial_branch="main")
+        self.git("remote", "add", "origin", str(self.origin))
+        (self.root / "app.txt").write_text("one", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "first")
+        self.git("push", "-q", "-u", "origin", "main")
+
+    def git(self, *args: str) -> str:
+        return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=self.root)
+
+    def start(self, **extra) -> dict:
+        args = SimpleNamespace(delivery=None, at=None, request="Fix the export", request_file=None,
+                               title="Fix export", epic=None, source_story=None, covers=None, fixes=None,
+                               knowledge=True, size="s", base="main", risk=None, **extra)
+        return task_lane.cmd_start(args, self.root)
+
+    def test_start_leaves_a_dirty_shared_checkout_on_its_branch_and_works_in_a_worktree(self):
+        (self.root / "app.txt").write_text("edited", encoding="utf-8")
+        result = self.start(worktree_dir=str(self.tree))
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
+        self.assertEqual((self.root / "app.txt").read_text(encoding="utf-8"), "edited")
+        self.assertEqual(result["worktree"], str(self.tree))
+        self.assertTrue((self.tree / result["task"]).is_file())
+        self.assertFalse((self.root / result["task"]).exists())
+        self.assertEqual(task_lane.run("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=self.tree), result["branch"])
+
+    def test_switch_keeps_the_old_behaviour_on_request(self):
+        result = self.start(switch=True)
+        self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), result["branch"])
+        self.assertEqual(result["worktree"], str(self.root))
 
 
 STORY = """---

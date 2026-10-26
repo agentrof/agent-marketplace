@@ -15,6 +15,7 @@ import subprocess
 from argparse import Namespace
 from pathlib import Path
 
+import atomic_file
 import file_lock
 
 STATE = Path(".agentrof") / "agent-marketplace" / ".runtime" / "train"
@@ -31,13 +32,13 @@ class State:
 
     def __init__(self, directory: Path):
         directory.mkdir(parents=True, exist_ok=True)
-        self.file, self.handle = directory / "state.json", open(directory / "state.lock", "a+")
+        self.file, self.handle = directory / "state.json", open(directory / "state.lock", "a+", newline="\n")
         if not file_lock.acquire(self.handle.fileno(), timeout=30):
             raise RuntimeError("the train state is locked by another command")
         self.data = json.loads(self.file.read_text()) if self.file.is_file() else {"batches": []}
 
     def save(self) -> None:
-        self.file.write_text(json.dumps(self.data, indent=2) + "\n")
+        atomic_file.replace_text(self.file, json.dumps(self.data, indent=2) + "\n")
 
     def close(self) -> None:
         self.handle.close()
@@ -105,7 +106,7 @@ def integrate(root: Path, lane, batch: dict, members: list[dict], base: str, suf
                                member["head"]], cwd=tree, capture_output=True, text=True)
         if done.returncode:
             drop(root, tree, name)
-            raise lane.Refused(f"{member['task']} does not merge onto the batch: {done.stdout.strip()[-300:]}")
+            raise lane.Refused(f"{member['task']} does not merge onto the batch: {(done.stdout + done.stderr).strip()[-300:]}")
     return tree
 
 
@@ -182,7 +183,7 @@ def prove(args, root, lane, state) -> dict:
                       "finished_at": lane.now(), "ok": True, "commands": results}
             target = Path(member["root"]) / lane.PROOFS / f"{member['task']}.json"
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(json.dumps(record, indent=2) + "\n")
+            atomic_file.replace_text(target, json.dumps(record, indent=2) + "\n")
     return {"ok": ok, "batch": number, "integration_head": head, "commands": results}
 
 

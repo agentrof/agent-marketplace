@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -74,6 +75,10 @@ class MergeTrainTests(unittest.TestCase):
     def setUp(self):
         base = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
+        identity = {f"GIT_{who}_{key}": value for who in ("AUTHOR", "COMMITTER") for key, value in (("NAME", "t"), ("EMAIL", "t@example.com"))}
+        patcher = mock.patch.dict(os.environ, identity)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         init_repository(base / "origin.git", bare=True, initial_branch="main")
         self.root = base / "work"
         subprocess.run(["git", "clone", "-q", str(base / "origin.git"), str(self.root)], check=True)

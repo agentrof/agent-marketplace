@@ -177,5 +177,18 @@ class MergeTrainTests(unittest.TestCase):
             proof_train.cmd_train(args, self.root, task_lane)
 
 
+class MergeDryRunTests(unittest.TestCase):
+    def test_a_dry_run_merge_checks_the_batch_and_merges_nothing(self):
+        batch = {"id": 1, "status": proof_train.GREEN, "base_head": "proved-base", "head": "h",
+                 "members": [{"task": "a"}, {"task": "b"}]}
+        state = SimpleNamespace(batch=lambda number, lane: batch, save=mock.Mock())
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=lambda *args, **options: "proved-base", cmd_merge=mock.Mock())
+        result = proof_train.merge(SimpleNamespace(batch=1, base="main", dry_run=True), Path("."), lane, state)
+        self.assertEqual(result["would_merge"], ["a", "b"])
+        lane.cmd_merge.assert_not_called()
+        state.save.assert_not_called()
+        self.assertEqual(batch["status"], proof_train.GREEN)
+
+
 if __name__ == "__main__":
     unittest.main()

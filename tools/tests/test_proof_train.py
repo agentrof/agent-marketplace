@@ -70,6 +70,30 @@ class ProofPlanTests(unittest.TestCase):
         self.assertEqual(task_lane.proof_runner(root, "make test"), "/q/run.sh sh -c 'make test'")
 
 
+class TrainAddAutoMergeTests(unittest.TestCase):
+    def add(self, auto_merge):
+        calls = []
+
+        def run(*args, cwd=None):
+            calls.append(args)
+            return json.dumps({"autoMergeRequest": auto_merge}) if args[:3] == ("gh", "pr", "view") else "t7"
+
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=run, head_state=lambda root: ("abc", True),
+                               proof_problems=lambda root, task: ([], {"selection": "full"}),
+                               proof_plan=lambda root, base: {"selection": "full"})
+        state = SimpleNamespace(data={"batches": []}, save=lambda: None)
+        args = SimpleNamespace(task="TK-007", pr="7", base="main", critical=0, non_critical=0, filed=0, detail=None,
+                               delegated=False, style="merge")
+        self.assertTrue(proof_train.add(args, Path("."), lane, state)["ok"])
+        return calls
+
+    def test_joining_a_batch_turns_off_an_auto_merge_armed_earlier(self):
+        self.assertIn(("gh", "pr", "merge", "7", "--disable-auto"), self.add({"enabledAt": "2026-01-01T00:00:00Z"}))
+
+    def test_joining_a_batch_leaves_a_pull_request_without_auto_merge_alone(self):
+        self.assertFalse([call for call in self.add(None) if "--disable-auto" in call])
+
+
 @integration
 class MergeTrainTests(unittest.TestCase):
     def setUp(self):
@@ -105,9 +129,15 @@ class MergeTrainTests(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-qm", f"t{number}")
         task_lane.cmd_prove(SimpleNamespace(task=f"TK-00{number}", base="main", deferred=True), self.root)
-        return proof_train.cmd_train(SimpleNamespace(verb="add", task=f"TK-00{number}", pr=str(number), base="main",
-                                                     critical=0, non_critical=0, filed=0, detail=None,
-                                                     delegated=False, style="merge"), self.root, task_lane)
+        real_run = task_lane.run
+
+        def run(*args, cwd=None):
+            return '{"autoMergeRequest": null}' if args[:3] == ("gh", "pr", "view") else real_run(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run):
+            return proof_train.cmd_train(SimpleNamespace(verb="add", task=f"TK-00{number}", pr=str(number), base="main",
+                                                         critical=0, non_critical=0, filed=0, detail=None,
+                                                         delegated=False, style="merge"), self.root, task_lane)
 
     def train(self, verb, **options):
         args = SimpleNamespace(**{"verb": verb, "base": "main", "batch": None, "dry_run": False, **options})

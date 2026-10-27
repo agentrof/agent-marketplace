@@ -135,7 +135,9 @@ def prove(args, root, lane, state) -> dict:
     busy = [b["id"] for b in state.data["batches"] if b["status"] == SEALED and b is not batch and alive(b.get("pid"))]
     if busy:
         raise lane.Refused(f"batch {busy[0]} is being proved; one batch proof runs at a time")
-    if batch["status"] not in (OPEN, RED, SEALED) or not batch["members"]:
+    # a green batch whose base moved can no longer merge, so it must be provable again
+    stale = batch["status"] == GREEN and lane.run("git", "rev-parse", f"origin/{args.base}", cwd=root) != batch.get("base_head")
+    if (batch["status"] not in (OPEN, RED, SEALED) and not stale) or not batch["members"]:
         raise lane.Refused(f"batch {batch['id']} is {batch['status']}; nothing to prove")
     if batch["status"] == SEALED and alive(batch.get("pid")):
         raise lane.Refused(f"batch {batch['id']} is being proved")

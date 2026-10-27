@@ -70,6 +70,25 @@ class ProofPlanTests(unittest.TestCase):
         self.assertEqual(task_lane.proof_runner(root, "make test"), "/q/run.sh sh -c 'make test'")
 
 
+class StaleGreenBatchTests(unittest.TestCase):
+    def prove(self, origin_head):
+        batch = {"id": 1, "status": proof_train.GREEN, "base_head": "proved-base",
+                 "members": [{"task": "a", "branch": "a", "root": "."}]}
+        state = SimpleNamespace(data={"batches": [batch]}, batch=lambda number, lane: batch,
+                                file=Path("state.json"), close=lambda: None)
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=lambda *args, **options: origin_head)
+        args = SimpleNamespace(batch=1, base="main", dry_run=True)
+        with mock.patch.object(proof_train, "integrate", side_effect=RuntimeError("integration reached")):
+            proof_train.prove(args, Path("."), lane, state)
+
+    def test_a_green_batch_is_proved_again_only_when_its_base_moved(self):
+        # merge refuses a green batch whose base moved, so prove must take it or the batch is stuck
+        with self.assertRaisesRegex(RuntimeError, "integration reached"):
+            self.prove("moved-base")
+        with self.assertRaisesRegex(task_lane.Refused, "green; nothing to prove"):
+            self.prove("proved-base")
+
+
 @integration
 class MergeTrainTests(unittest.TestCase):
     def setUp(self):

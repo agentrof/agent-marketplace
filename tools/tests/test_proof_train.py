@@ -176,6 +176,37 @@ class MergeTrainTests(unittest.TestCase):
         with self.assertRaisesRegex(task_lane.Refused, "critical"):
             proof_train.cmd_train(args, self.root, task_lane)
 
+    def task_tree(self, task, proved):
+        """A worktree on the task's branch, a commit ahead of main; ``proved`` records the deferred proof in it."""
+        tree = self.root.parent / f"tree-{task.lower()}"
+        self.git("worktree", "add", "-q", "-b", f"task/{task.lower()}-fix", str(tree), "main")
+        (tree / "change").write_text("x")
+        self.git("-C", str(tree), "add", "-A")
+        self.git("-C", str(tree), "commit", "-qm", "change")
+        if proved:
+            task_lane.cmd_prove(SimpleNamespace(task=task, base="main", deferred=True), tree)
+        return tree
+
+    def add(self, task):
+        """``train add`` run from the main checkout, which is on main and holds no proof record."""
+        return proof_train.cmd_train(SimpleNamespace(verb="add", task=task, pr="7", base="main", critical=0,
+                                                     non_critical=0, filed=0, detail=None, delegated=False,
+                                                     style="merge"), self.root, task_lane)
+
+    def test_add_finds_the_proof_of_the_pull_requests_own_worktree_from_any_directory(self):
+        proved = task_lane.next_id([])
+        unproved = task_lane.next_id([f"task/{proved.lower()}-fix"])
+        tree = self.task_tree(proved, proved=True)
+        self.task_tree(unproved, proved=False)
+        with self.subTest("the proof record sits in the pull request's worktree"):
+            self.assertEqual(self.add(proved)["members"], [proved])
+            member = json.loads((self.root / proof_train.STATE / "state.json").read_text())["batches"][0]["members"][0]
+            self.assertEqual((Path(member["root"]).resolve(), member["branch"], member["head"]),
+                             (tree.resolve(), f"task/{proved.lower()}-fix", self.git("-C", str(tree), "rev-parse", "HEAD")))
+        with self.subTest("no proof record anywhere"):
+            with self.assertRaisesRegex(task_lane.Refused, "no local proof record"):
+                self.add(unproved)
+
 
 if __name__ == "__main__":
     unittest.main()

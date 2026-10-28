@@ -1,6 +1,7 @@
 """Merge train: ready pull requests share one integration branch and one full proof.
 
-``train add`` puts a reviewed pull request, with a valid proof record of its own, into the open batch.
+``train add`` puts a reviewed pull request, with a valid proof record of its own, into the open batch;
+it reads that record in the worktree of the task's branch, from whatever directory it runs in.
 ``train prove`` seals the batch, builds ``train/<n>`` (base plus every member) in its own worktree and runs
 the project's full ``local_proof`` there once, through the project's ``proof_runner`` queue. A green
 batch writes a ``train`` proof record for each member, which satisfies that member's ``open-pr`` rule, and
@@ -59,11 +60,24 @@ def green_for(root: Path, task: str, head: str | None) -> bool:
                for b in state["batches"] for m in b["members"])
 
 
+def own_root(root: Path, task: str, lane) -> Path:
+    """The worktree that has the task's branch checked out, where ``prove`` wrote its proof record;
+    ``root`` when no single worktree has it, so ``add`` can run from any other worktree."""
+    where, found = "", []
+    for line in lane.run("git", "worktree", "list", "--porcelain", cwd=root).splitlines():
+        if line.startswith("worktree "):
+            where = line[len("worktree "):]
+        elif line.startswith(f"branch refs/heads/task/{task.lower()}-"):
+            found.append(where)
+    return Path(found[0]) if len(found) == 1 else root
+
+
 def add(args, root, lane, state) -> dict:
     if not (args.task and args.pr):
         raise lane.Refused("train add needs --task and --pr")
     if args.critical:
         raise lane.Refused("a review with critical findings cannot join a batch")
+    root = own_root(root, args.task, lane)
     problems, record = lane.proof_problems(root, args.task)
     if problems:
         raise lane.Refused("the pull request has no valid proof of its own: " + "; ".join(problems))

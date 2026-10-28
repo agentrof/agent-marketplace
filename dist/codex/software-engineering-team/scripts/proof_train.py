@@ -1,6 +1,7 @@
 """Merge train: ready pull requests share one integration branch and one full proof.
 
 ``train add`` puts a reviewed pull request, with a valid proof record of its own, into the open batch.
+``train remove`` takes a member that does not merge onto the others out of an open or red batch.
 ``train prove`` seals the batch, builds ``train/<n>`` (base plus every member) in its own worktree and runs
 the project's full ``local_proof`` there once, through the project's ``proof_runner`` queue. A green
 batch writes a ``train`` proof record for each member, which satisfies that member's ``open-pr`` rule, and
@@ -86,6 +87,23 @@ def add(args, root, lane, state) -> dict:
     sealed = [b["id"] for b in state.data["batches"] if b["status"] == SEALED]
     note = f"batch {sealed[0]} is sealed and being proved; this pull request joined the next batch" if sealed else ""
     return {"ok": True, "batch": current["id"], "members": [m["task"] for m in current["members"]], "note": note}
+
+
+def remove(args, root, lane, state) -> dict:
+    """A member that does not merge onto the batch leaves it, so the rest of the batch can be proved again."""
+    if not args.task:
+        raise lane.Refused("train remove needs --task")
+    batch = state.batch(args.batch, lane)
+    if batch["status"] not in (OPEN, RED):
+        raise lane.Refused(f"batch {batch['id']} is {batch['status']}; only an open or red batch gives up a member")
+    left = [m for m in batch["members"] if m["task"] != args.task]
+    if len(left) == len(batch["members"]):
+        raise lane.Refused(f"{args.task} is not in batch {batch['id']}")
+    batch.update(members=left, status=OPEN)
+    for key in ("head", "base_head", "commands"):
+        batch.pop(key, None)
+    state.save()
+    return {"ok": True, "batch": batch["id"], "members": [m["task"] for m in left]}
 
 
 def drop(root: Path, tree: Path, name: str) -> None:
@@ -230,7 +248,7 @@ def cmd_train(args, root: Path, lane) -> dict:
         if args.verb == "status":
             return {"ok": True, "batches": [{"id": b["id"], "status": b["status"],
                                              "members": [m["task"] for m in b["members"]]} for b in state.data["batches"]]}
-        return {"add": add, "prove": prove, "merge": merge, "bisect": bisect}[args.verb](args, root, lane, state)
+        return {"add": add, "remove": remove, "prove": prove, "merge": merge, "bisect": bisect}[args.verb](args, root, lane, state)
     finally:
         if not state.handle.closed:
             state.close()

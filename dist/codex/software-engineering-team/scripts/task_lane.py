@@ -2554,7 +2554,7 @@ def main(argv: list[str] | None = None) -> int:
     proved.add_argument("--full", action="store_true", help="ignore local_proof_map and run every local_proof command")
     proved.add_argument("--deferred", action="store_true", help="the merge train proves this change; run nothing now")
     train = sub.add_parser("train", help="merge train: one integration proof for the ready pull requests")
-    train.add_argument("verb", choices=("add", "status", "prove", "merge", "bisect"))
+    train.add_argument("verb", choices=("add", "remove", "status", "prove", "merge", "bisect"))
     train.add_argument("--task")
     train.add_argument("--pr")
     train.add_argument("--batch", type=int)

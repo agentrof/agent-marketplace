@@ -82,6 +82,8 @@ def add(args, root, lane, state) -> dict:
         "merge": {"detail": args.detail, "delegated": args.delegated, "style": args.style,
                   "critical": args.critical, "non_critical": getattr(args, "non_critical", None),
                   "filed": args.filed}})
+    if getattr(args, "dry_run", False):  # every check above ran; the batch is only named, never saved
+        return {"ok": True, "dry_run": True, "batch": current["id"], "members": [m["task"] for m in current["members"]]}
     state.save()
     sealed = [b["id"] for b in state.data["batches"] if b["status"] == SEALED]
     note = f"batch {sealed[0]} is sealed and being proved; this pull request joined the next batch" if sealed else ""

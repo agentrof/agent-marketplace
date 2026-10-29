@@ -36,7 +36,8 @@ and merges pull requests whose tests nobody ran.
 branch and the first rule that matches each one. It runs the union of those
 rules' commands (`none` adds no command). One changed file no rule matches, no
 map, or no changed file selects the whole `local_proof`: an uncovered path never
-skips a test. The record holds `selection` (`impact`, `full`, `train` or
+skips a test. A task whose record declares a `risks` value, or cannot be read,
+selects the whole `local_proof` too. The record holds `selection` (`impact`, `full`, `train` or
 `deferred`) and why, and the `## Local proof` section repeats them. `prove
 --full` ignores the map. `proof_runner`, when set, is a command that runs each
 proof command as `<runner> sh -c '<command>'`, such as a machine queue.

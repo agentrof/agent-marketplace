@@ -2264,13 +2264,23 @@ def proof_path(root: Path, task: str) -> Path:
     return root / PROOFS / f"{task}.json"
 
 
+def task_declares_risk(root: Path, task: str) -> bool:
+    """Whether the task record names a risk. A record that cannot be read or parsed counts as risky (fail closed)."""
+    try:
+        props, _, error = parse_frontmatter(task_path(root, task).read_text(encoding="utf-8"))
+    except (Refused, OSError, UnicodeDecodeError):
+        return True
+    return bool(error or field_items(props, "risks"))
+
+
 def cmd_prove(args, root: Path) -> dict:
     """Run the local proof commands the change needs on HEAD and record each exit code and time.
     ``--deferred`` records no run: the change's proof is the merge train's integration proof."""
     path = proof_path(root, args.task)
     head, clean = head_state(root)
     plan = {"selection": "deferred", "commands": [], "why": ["proof runs once on the merge train's integration HEAD"]} \
-        if getattr(args, "deferred", False) else proof_plan(root, args.base, full=getattr(args, "full", False))
+        if getattr(args, "deferred", False) \
+        else proof_plan(root, args.base, full=getattr(args, "full", False) or task_declares_risk(root, args.task))
     results = []
     for command in plan["commands"]:
         started, clock = now(), datetime.now(timezone.utc)

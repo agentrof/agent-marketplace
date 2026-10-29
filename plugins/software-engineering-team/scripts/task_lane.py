@@ -196,6 +196,8 @@ TEST_ID_RES = (re.compile(r"\bFAILED ([\w./-]+::[\w:.\[\]/-]+)"), re.compile(r"^
                re.compile(r"--- FAIL: (\w+)"), re.compile(r"\bFAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\b"))
 ERROR_LINE_RE = re.compile(r"(?i)\b(error|failed|failure|exception|traceback|assert\w*)\b")
 EXIT_LINE_RE = re.compile(r"Process completed with exit code")
+# The header a multi-suite runner prints before each suite's output: ===== <name> ok|FAILED <secs>s
+SUITE_HEAD_RE = re.compile(r"^===== (\S+) (ok|FAILED)\b", re.M)
 # step -> (start, end); CI and review run side by side after the PR opens.
 STEPS = {"define": ("requested_at", "approved_at"), "write": ("approved_at", "pr_opened"),
          "ci": ("pr_opened", "ci_green"), "review": ("pr_opened", "review"),
@@ -770,6 +772,19 @@ def failed_test_ids(output: str, limit: int = 50) -> list[str]:
         if len(found) >= limit:
             break
     return found
+
+
+def suite_results(output: str) -> list[dict]:
+    """Each suite of a multi-suite run with its status, failing test count and first failing test id: the output
+    between two suite headers belongs to the first."""
+    heads = list(SUITE_HEAD_RE.finditer(output))
+    suites = []
+    for number, head in enumerate(heads):
+        end = heads[number + 1].start() if number + 1 < len(heads) else len(output)
+        found = failed_test_ids(output[head.end():end])
+        suites.append({"name": head.group(1), "status": head.group(2), "failures": len(found),
+                       "first_failure": found[0] if found else ""})
+    return suites
 
 
 def red_events(root: Path, runs: list[dict], merged: str | None, logs: dict) -> list[dict]:
@@ -2279,7 +2294,8 @@ def cmd_prove(args, root: Path) -> dict:
                         "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 1),
                         "started_at": started, "finished_at": now(),
                         "tail": "" if done.returncode == 0 else scrub((done.stdout + done.stderr)[-2000:], 400),
-                        "failed_tests": [] if done.returncode == 0 else failed_test_ids(done.stdout + done.stderr)})
+                        "failed_tests": [] if done.returncode == 0 else failed_test_ids(done.stdout + done.stderr),
+                        "suites": [] if done.returncode == 0 else suite_results(done.stdout + done.stderr)})
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
               "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
               "ok": clean and all(item["exit_code"] == 0 for item in results), "commands": results}

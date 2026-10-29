@@ -198,12 +198,27 @@ def merge(args, root, lane, state) -> dict:
                            " Merges are serial: the train state lock is held while a batch merges")
     merged = []
     for member in batch["members"]:
+        # a merge cut short earlier resumes after the members GitHub already shows merged
+        if json.loads(lane.run("gh", "pr", "view", str(member["pr"]), "--json", "state", cwd=root))["state"] == "MERGED":
+            merged.append(member["task"])
+            continue
         m = member["merge"]
+        where = Path(member["root"])
+        try:
+            lane.task_path(where, member["task"])
+        except lane.Refused:  # the member's worktree moved on to another task; the batch tree holds every member's task file
+            where = home(root, lane) / f"wt-{batch['id']}"
+        # a rigor-high member without delegation waits for its owner: nothing is merged or counted here
+        if lane.task_props(lane.task_path(where, member["task"])).get("rigor") == "high" and not m["delegated"]:
+            raise lane.Refused(f"PR {member['pr']} is rigor high without delegation: its owner merges it; batch {batch['id']} stays green")
         proof = (f"Proof: merge train batch {batch['id']}, integration HEAD {batch['head']}, "
                  f"members {', '.join(x['task'] for x in batch['members'])}.")
         lane.cmd_merge(Namespace(task=member["task"], pr=member["pr"], style=m["style"], detail=f"{m['detail']}\n\n{proof}" if m["detail"] else proof,
                                  delegated=m["delegated"], critical=m["critical"], non_critical=m["non_critical"],
-                                 filed=m["filed"]), Path(member["root"]))
+                                 filed=m["filed"]), where)
+        # cmd_merge can return without merging (owner merge, auto-merge only armed): count the member once GitHub shows it merged
+        if json.loads(lane.run("gh", "pr", "view", str(member["pr"]), "--json", "state", cwd=root))["state"] != "MERGED":
+            raise lane.Refused(f"PR {member['pr']} is not merged after the merge call; batch {batch['id']} stays green")
         merged.append(member["task"])
     batch["status"] = MERGED
     state.save()

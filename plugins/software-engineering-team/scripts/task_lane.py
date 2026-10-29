@@ -432,14 +432,16 @@ def missing_message(task: str, missing: list[str]) -> str:
 
 def role_minutes(task: dict) -> dict:
     """Role checks of one task and their minutes: each check from approval or the previous check."""
-    checks = sorted(task.get("role_checks") or [], key=lambda check: parse_time(check["at"]))
+    all_checks = task.get("role_checks") or []
+    # A date-only stamp has no time to measure from: it counts as a check and adds no minutes.
+    checks = sorted((check for check in all_checks if "T" in check["at"]), key=lambda check: parse_time(check["at"]))
     start = task.get("approved_at") or task.get("requested_at")
     minutes = 0.0
     for check in checks:
         if start:
             minutes += max(0.0, (parse_time(check["at"]) - parse_time(start)).total_seconds() / 60)
         start = check["at"]
-    return {"checks": len(checks), "minutes": round(minutes, 1)}
+    return {"checks": len(all_checks), "minutes": round(minutes, 1)}
 
 
 def task_text(task: str, title: str, request: str, requested_at: str,

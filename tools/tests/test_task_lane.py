@@ -131,6 +131,11 @@ def pr(opened, ci, review, merged, checks=None):
             "merged": merged, "checks": checks or {}}
 
 
+def tree_records(root, _snapshot):
+    """Stand-in for task_lane.task_records in a unit test: the working tree's records, no Git."""
+    return sorted((root / task_lane.TASKS).glob("tk-*.md"))
+
+
 class RetrospectiveTests(unittest.TestCase):
     task = {"id": "TK-004", "title": "Export", "size": "s", "rigor": "normal",
             "requested_at": "2026-10-16T10:00:00+00:00",
@@ -564,6 +569,46 @@ class TaskStartWorktreeTests(unittest.TestCase):
         self.assertEqual(result["worktree"], str(self.root))
 
 
+@integration
+class ReportRecordsTests(unittest.TestCase):
+    """The report reads the task records of origin/main, so a checkout that has not pulled still counts every merged task."""
+
+    def setUp(self):
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(base, ignore_errors=True))
+        self.origin, self.root = base / "origin.git", base / "checkout"
+        init_repository(self.origin, bare=True, initial_branch="main")
+        init_repository(self.root, initial_branch="main")
+        self.record = self.root / task_lane.TASKS / "tk-004-export-invoices.md"
+
+    def git(self, *args: str) -> str:
+        return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=self.root)
+
+    def titles(self) -> list[str]:
+        args = SimpleNamespace(delivery=None, since=None, recent=20, deep=False, no_sessions=True)
+        with mock.patch.object(task_lane, "pull_requests", return_value={}):
+            return [row["title"] for row in task_lane.gather(self.root, args)["per_task"]]
+
+    def test_a_task_merged_after_the_last_pull_is_counted(self):
+        self.git("remote", "add", "origin", str(self.origin))
+        (self.root / "app.txt").write_text("one", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "first")
+        self.record.parent.mkdir(parents=True)
+        self.record.write_text(TASK, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "merge a task")
+        self.git("push", "-q", "origin", "main")
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.assertFalse(self.record.exists())
+        self.assertEqual(self.titles(), ["Export invoices"])
+
+    def test_without_an_origin_main_the_records_of_the_working_tree_are_counted(self):
+        self.record.parent.mkdir(parents=True)
+        self.record.write_text(TASK, encoding="utf-8")
+        self.assertEqual(self.titles(), ["Export invoices"])
+
+
 STORY = """---
 type: story
 title: "Invoice export"
@@ -984,6 +1029,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         (tasks / "tk-001-a.md").write_text(TASK.replace("TK-004", "TK-001"), encoding="utf-8")
         args = SimpleNamespace(delivery=None, since=None, recent=20, deep=False, no_sessions=False)
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "task_records", tree_records), \
                 mock.patch.object(task_lane, "pr_times", return_value=pr(
                     "2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")), \
                 mock.patch.object(self.session_cost, "scan", side_effect=AssertionError("scanned")):
@@ -992,6 +1038,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         # A rescan prices from the transcripts again and appends a newer row; the old one stays.
         fixed = {**again["per_task"][0]["cost"], "usd": 1.5}
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "task_records", tree_records), \
                 mock.patch.object(task_lane, "pr_times", return_value=pr(
                     "2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")), \
                 mock.patch.object(task_lane, "attach_sessions",
@@ -1117,6 +1164,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
             seen.append(runs)
             return pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "task_records", tree_records), \
                 mock.patch.object(task_lane, "pr_times", side_effect=times):
             again = task_lane.gather(root, args)
             self.assertEqual(seen, [False])

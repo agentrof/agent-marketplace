@@ -199,10 +199,12 @@ def merge(args, root, lane, state) -> dict:
     merged = []
     for member in batch["members"]:
         m = member["merge"]
+        # the merge verb's own --delegated applies to every member, as on a single pull request merge
+        delegated = m["delegated"] or getattr(args, "delegated", False)
         proof = (f"Proof: merge train batch {batch['id']}, integration HEAD {batch['head']}, "
                  f"members {', '.join(x['task'] for x in batch['members'])}.")
         lane.cmd_merge(Namespace(task=member["task"], pr=member["pr"], style=m["style"], detail=f"{m['detail']}\n\n{proof}" if m["detail"] else proof,
-                                 delegated=m["delegated"], critical=m["critical"], non_critical=m["non_critical"],
+                                 delegated=delegated, critical=m["critical"], non_critical=m["non_critical"],
                                  filed=m["filed"]), Path(member["root"]))
         merged.append(member["task"])
     batch["status"] = MERGED

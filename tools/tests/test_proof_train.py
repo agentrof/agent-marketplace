@@ -144,6 +144,17 @@ class MergeTrainTests(unittest.TestCase):
         self.assertEqual(merge.call_count, 2)
         self.assertIn("merge train batch 1, integration HEAD", merge.call_args.args[0].detail)
 
+    def test_the_merge_verb_delegation_reaches_the_merge_of_a_member_added_without_it(self):
+        def delegated_by(number, **options):
+            self.member(number)
+            self.train("prove")
+            with mock.patch.object(task_lane, "cmd_merge") as merge:
+                self.train("merge", batch=number, **options)
+            return merge.call_args.args[0].delegated
+
+        self.assertTrue(delegated_by(1, delegated=True))
+        self.assertFalse(delegated_by(2))
+
     def test_a_pull_request_added_after_the_proof_started_waits_for_the_next_batch(self):
         self.member(1)
         self.train("prove")

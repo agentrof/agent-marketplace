@@ -1,0 +1,6 @@
+{
+  "summary": "A project can set the acceptance criteria range of a build task. The task lane hard-coded 3 to 8 numbered criteria, so a task whose criteria are each one verifiable property could not be approved past 8. The optional `task_criteria_range` field of `workspace/config.json` takes `[min, max]` positive integers, `lint`, `approve` and `open-pr` read it, and the default stays 3 to 8.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

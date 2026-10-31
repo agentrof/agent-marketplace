@@ -35,9 +35,10 @@ Every implementation request runs through this script:
   and a warning when the story changed after an open task was requested;
   ``board`` groups tasks by epic and story and marks a story delivered once
   merged tasks cover every criterion, derived on every run.
-- ``report`` is the retrospective: the tasks hold the request and approval
-  times, GitHub holds the PR, review, CI and merge times, read at report
-  time, and ``session_cost.py`` reads each task's cost and active minutes from
+- ``report`` is the retrospective: the tasks, read from ``origin/main`` (the
+  working tree when there is none), hold the request and approval times,
+  GitHub holds the PR, review, CI and merge times, read at report time, and
+  ``session_cost.py`` reads each task's cost and active minutes from
   the host session transcripts, so every wait gets an owner; ``--deep`` adds reading waste.
   Cost is tokens and dollars per task, its spawns and their startup context,
   priced by ``session_cost.load_prices``. Quality is read beside them: the
@@ -71,6 +72,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -191,9 +193,11 @@ SECRET_RE = re.compile(r"(?i)gh[pousr]_\w{16,}|github_pat_\w+|\bsk-[\w-]{16,}|xo
                        r"|-----BEGIN|\bbearer\s+\S+|\b(token|secret|password|passwd|api[_-]?key|authorization"
                        r"|credential)s?\b\s*[:=]")
 ENTROPY_RE = re.compile(r"\b(?=[\w+/=-]*[0-9])(?=[\w+/=-]*[A-Z])(?=[\w+/=-]*[a-z])[\w+/=-]{32,}")
-# pytest, unittest, go and jest or vitest failing test ids.
+# pytest failures and errors (collection included), unittest, go, jest or vitest, and node:test failing test ids.
 TEST_ID_RES = (re.compile(r"\bFAILED ([\w./-]+::[\w:.\[\]/-]+)"), re.compile(r"^(?:FAIL|ERROR): (\w+) \(([\w.]+)\)"),
-               re.compile(r"--- FAIL: (\w+)"), re.compile(r"\bFAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\b"))
+               re.compile(r"^ERROR ([\w./-]+\.py(?:::[\w:.\[\]/-]+)?)"),
+               re.compile(r"--- FAIL: (\w+)"), re.compile(r"\bFAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\b"),
+               re.compile(r"^\s*test at (?:file://)?(\S+\.(?:test|spec)\.[cm]?[jt]sx?):\d+:\d+"))
 ERROR_LINE_RE = re.compile(r"(?i)\b(error|failed|failure|exception|traceback|assert\w*)\b")
 EXIT_LINE_RE = re.compile(r"Process completed with exit code")
 # step -> (start, end); CI and review run side by side after the PR opens.
@@ -432,14 +436,16 @@ def missing_message(task: str, missing: list[str]) -> str:
 
 def role_minutes(task: dict) -> dict:
     """Role checks of one task and their minutes: each check from approval or the previous check."""
-    checks = sorted(task.get("role_checks") or [], key=lambda check: parse_time(check["at"]))
+    all_checks = task.get("role_checks") or []
+    # A date-only stamp has no time to measure from: it counts as a check and adds no minutes.
+    checks = sorted((check for check in all_checks if "T" in check["at"]), key=lambda check: parse_time(check["at"]))
     start = task.get("approved_at") or task.get("requested_at")
     minutes = 0.0
     for check in checks:
         if start:
             minutes += max(0.0, (parse_time(check["at"]) - parse_time(start)).total_seconds() / 60)
         start = check["at"]
-    return {"checks": len(checks), "minutes": round(minutes, 1)}
+    return {"checks": len(all_checks), "minutes": round(minutes, 1)}
 
 
 def task_text(task: str, title: str, request: str, requested_at: str,
@@ -731,6 +737,11 @@ def scrub(text: str, limit: int) -> str:
     """One line of at most ``limit`` characters, without any line that looks like a credential."""
     kept = [line for line in str(text or "").splitlines() if not SECRET_RE.search(line) and not ENTROPY_RE.search(line)]
     return " ".join(" ".join(kept).split())[:limit]
+
+
+def proof_tail(output: str, limit: int = 400) -> str:
+    """The END of a failed proof command's output, where test runners print their summary, as one scrubbed line."""
+    return scrub(output[-2000:], 2000)[-limit:]
 
 
 def failure(log: str, limit: int) -> dict:
@@ -1845,11 +1856,32 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
                                          "events": row["rework_auto"]}) + "\n")
 
 
+def task_records(root: Path, snapshot: Path) -> list[Path]:
+    """The task records of origin/main, copied under ``snapshot``, so a checkout that has not pulled still
+    counts every merged task; the working tree's records when there is no origin/main."""
+    # shortcut: origin/main is fixed; another default branch reads the working tree, add --base to report when needed
+    try:
+        names = run("git", "ls-tree", "--name-only", "origin/main", f"{TASKS.as_posix()}/", cwd=root).splitlines()
+    except Refused:
+        return sorted((root / TASKS).glob("tk-*.md"))
+    paths = []
+    for name in names:
+        if fnmatch.fnmatch(Path(name).name, "tk-*.md"):
+            shown = subprocess.run(["git", "show", f"origin/main:{name}"], cwd=root, capture_output=True)
+            if shown.returncode != 0:
+                raise Refused(f"git show origin/main:{name} failed: {shown.stderr.decode(errors='replace').strip()}")
+            record = snapshot / Path(name).name
+            record.write_bytes(shown.stdout)
+            paths.append(record)
+    return sorted(paths)
+
+
 def gather(root: Path, args) -> dict:
     tasks = []
-    for path in sorted((root / TASKS).glob("tk-*.md")):
-        tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path),
-                      "rework_notes": rework_notes(path)})
+    with tempfile.TemporaryDirectory() as snapshot:
+        for path in task_records(root, Path(snapshot)):
+            tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path),
+                          "rework_notes": rework_notes(path)})
     chosen = select(tasks, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
     causes = rework_causes(root)
@@ -2288,7 +2320,7 @@ def cmd_prove(args, root: Path) -> dict:
         results.append({"command": command, "exit_code": done.returncode,
                         "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 1),
                         "started_at": started, "finished_at": now(),
-                        "tail": "" if done.returncode == 0 else scrub((done.stdout + done.stderr)[-2000:], 400),
+                        "tail": "" if done.returncode == 0 else proof_tail(done.stdout + done.stderr),
                         "failed_tests": [] if done.returncode == 0 else failed_test_ids(done.stdout + done.stderr)})
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
               "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
@@ -2564,7 +2596,7 @@ def main(argv: list[str] | None = None) -> int:
     proved.add_argument("--full", action="store_true", help="ignore local_proof_map and run every local_proof command")
     proved.add_argument("--deferred", action="store_true", help="the merge train proves this change; run nothing now")
     train = sub.add_parser("train", help="merge train: one integration proof for the ready pull requests")
-    train.add_argument("verb", choices=("add", "status", "prove", "merge", "bisect"))
+    train.add_argument("verb", choices=("add", "remove", "status", "prove", "merge", "bisect"))
     train.add_argument("--task")
     train.add_argument("--pr")
     train.add_argument("--batch", type=int)

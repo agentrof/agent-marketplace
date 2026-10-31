@@ -404,6 +404,16 @@ class RoleRoutingTests(unittest.TestCase):
         data = task_lane.report([row], "latest 20")
         self.assertEqual(data["targets"]["build"]["role_checks"], {"tasks": 1, "checks": 2, "minutes": 3.5})
 
+    def test_a_date_only_role_check_counts_and_adds_no_minutes(self):
+        task = {"approved_at": "2026-10-27T10:00:00+00:00",
+                "role_checks": [{"at": "2026-10-27"}, {"at": "2026-10-27T11:30:00+00:00"}]}
+        self.assertEqual(task_lane.role_minutes(task), {"checks": 2, "minutes": 90.0})
+
+    def test_date_only_role_checks_alone_count_and_add_no_minutes(self):
+        task = {"approved_at": "2026-10-27T10:00:00+00:00",
+                "role_checks": [{"at": "2026-10-27"}, {"at": "2026-10-28"}]}
+        self.assertEqual(task_lane.role_minutes(task), {"checks": 2, "minutes": 0.0})
+
 
 class LocalProofTests(unittest.TestCase):
     """Config `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""

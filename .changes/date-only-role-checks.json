@@ -1,0 +1,6 @@
+{
+  "summary": "The retrospective report no longer aborts on a role check stamped with a date and no time. Such a check still counts in the task's role check total and adds no minutes; only checks with a time are ordered and measured.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

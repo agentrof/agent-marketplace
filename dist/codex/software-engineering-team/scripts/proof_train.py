@@ -216,6 +216,8 @@ def merge(args, root, lane, state) -> dict:
         # shortcut: any move of the base re-proves in full; refine to overlap checks when main moves often
         raise lane.Refused(f"{args.base} moved since the batch was proved (another batch merged); run train prove again."
                            " Merges are serial: the train state lock is held while a batch merges")
+    if args.dry_run:
+        return {"ok": True, "dry_run": True, "batch": batch["id"], "would_merge": [m["task"] for m in batch["members"]]}
     merged = []
     for member in batch["members"]:
         m = member["merge"]

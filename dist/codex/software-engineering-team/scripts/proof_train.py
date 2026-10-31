@@ -228,12 +228,29 @@ def prove(args, root, lane, state) -> dict:
     return {"ok": ok, "batch": number, "integration_head": head, "commands": results}
 
 
+def base_moved_only_by_batch(root: Path, lane, batch: dict, base: str) -> bool:
+    """True when the base is the proved head, or every first-parent commit since is the merge commit of a member of this batch."""
+    head = lane.run("git", "rev-parse", f"origin/{base}", cwd=root)
+    if head == batch["base_head"]:
+        return True
+    own = set()
+    for member in batch["members"]:
+        view = json.loads(lane.run("gh", "pr", "view", str(member["pr"]), "--json", "state,mergeCommit", cwd=root))
+        if view["state"] == "MERGED" and view.get("mergeCommit"):
+            own.add(view["mergeCommit"]["oid"])
+    try:
+        since = lane.run("git", "rev-list", "--first-parent", f"{batch['base_head']}..{head}", cwd=root).split()
+    except Exception:
+        return False
+    return bool(since) and all(c in own for c in since)
+
+
 def merge(args, root, lane, state) -> dict:
     batch = state.batch(args.batch, lane)
     if batch["status"] != GREEN:
         raise lane.Refused(f"batch {batch['id']} is {batch['status']}; only a green batch merges")
     lane.run("git", "fetch", "origin", args.base, cwd=root)
-    if lane.run("git", "rev-parse", f"origin/{args.base}", cwd=root) != batch["base_head"]:
+    if not base_moved_only_by_batch(root, lane, batch, args.base):
         # shortcut: any move of the base re-proves in full; refine to overlap checks when main moves often
         raise lane.Refused(f"{args.base} moved since the batch was proved (another batch merged); run train prove again."
                            " Merges are serial: the train state lock is held while a batch merges")

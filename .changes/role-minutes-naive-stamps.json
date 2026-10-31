@@ -1,0 +1,6 @@
+{
+  "summary": "The retrospective report no longer aborts on a role check, approval or request stamped without an offset or with a date and no time. A stamp without an offset reads as UTC, and a date alone has no start point, so it adds no minutes.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -437,17 +437,25 @@ def missing_message(task: str, missing: list[str]) -> str:
                      f" --role {role} --verdict go|changes --note \"<reason>\"" for role in missing)
 
 
+def role_stamp(value: str | None) -> datetime | None:
+    """A stamp with a time as an aware datetime (no offset reads as UTC); a date alone has no time to measure from."""
+    if not value or "T" not in str(value):
+        return None
+    stamp = parse_time(value)
+    return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+
+
 def role_minutes(task: dict) -> dict:
     """Role checks of one task and their minutes: each check from approval or the previous check."""
     all_checks = task.get("role_checks") or []
     # A date-only stamp has no time to measure from: it counts as a check and adds no minutes.
-    checks = sorted((check for check in all_checks if "T" in check["at"]), key=lambda check: parse_time(check["at"]))
-    start = task.get("approved_at") or task.get("requested_at")
+    checks = sorted((role_stamp(check["at"]) for check in all_checks if role_stamp(check["at"])))
+    start = role_stamp(task.get("approved_at") or task.get("requested_at"))
     minutes = 0.0
     for check in checks:
         if start:
-            minutes += max(0.0, (parse_time(check["at"]) - parse_time(start)).total_seconds() / 60)
-        start = check["at"]
+            minutes += max(0.0, (check - start).total_seconds() / 60)
+        start = check
     return {"checks": len(all_checks), "minutes": round(minutes, 1)}
 
 

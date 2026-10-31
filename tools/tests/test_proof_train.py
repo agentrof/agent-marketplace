@@ -254,9 +254,15 @@ class MergeTrainTests(unittest.TestCase):
 
     def add(self, task):
         """``train add`` run from the main checkout, which is on main and holds no proof record."""
-        return proof_train.cmd_train(SimpleNamespace(verb="add", task=task, pr="7", base="main", critical=0,
-                                                     non_critical=0, filed=0, detail=None, delegated=False,
-                                                     style="merge"), self.root, task_lane)
+        real_run = task_lane.run
+
+        def run(*args, cwd=None):
+            return '{"autoMergeRequest": null}' if args[:3] == ("gh", "pr", "view") else real_run(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run):
+            return proof_train.cmd_train(SimpleNamespace(verb="add", task=task, pr="7", base="main", critical=0,
+                                                         non_critical=0, filed=0, detail=None, delegated=False,
+                                                         style="merge"), self.root, task_lane)
 
     def test_add_finds_the_proof_of_the_pull_requests_own_worktree_from_any_directory(self):
         proved = task_lane.next_id([])

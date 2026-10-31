@@ -1,6 +1,7 @@
 """Merge train: ready pull requests share one integration branch and one full proof.
 
 ``train add`` puts a reviewed pull request, with a valid proof record of its own, into the open batch.
+``train remove`` takes a member that does not merge onto the others out of an open or red batch.
 ``train prove`` seals the batch, builds ``train/<n>`` (base plus every member) in its own worktree and runs
 the project's full ``local_proof`` there once, through the project's ``proof_runner`` queue. A green
 batch writes a ``train`` proof record for each member, which satisfies that member's ``open-pr`` rule, and
@@ -88,6 +89,23 @@ def add(args, root, lane, state) -> dict:
     return {"ok": True, "batch": current["id"], "members": [m["task"] for m in current["members"]], "note": note}
 
 
+def remove(args, root, lane, state) -> dict:
+    """A member that does not merge onto the batch leaves it, so the rest of the batch can be proved again."""
+    if not args.task:
+        raise lane.Refused("train remove needs --task")
+    batch = state.batch(args.batch, lane)
+    if batch["status"] not in (OPEN, RED):
+        raise lane.Refused(f"batch {batch['id']} is {batch['status']}; only an open or red batch gives up a member")
+    left = [m for m in batch["members"] if m["task"] != args.task]
+    if len(left) == len(batch["members"]):
+        raise lane.Refused(f"{args.task} is not in batch {batch['id']}")
+    batch.update(members=left, status=OPEN)
+    for key in ("head", "base_head", "commands"):
+        batch.pop(key, None)
+    state.save()
+    return {"ok": True, "batch": batch["id"], "members": [m["task"] for m in left]}
+
+
 def drop(root: Path, tree: Path, name: str) -> None:
     subprocess.run(["git", "worktree", "remove", "--force", str(tree)], cwd=root, capture_output=True)
     subprocess.run(["git", "worktree", "prune"], cwd=root, capture_output=True)
@@ -118,7 +136,7 @@ def run_commands(root: Path, lane, tree: Path, base: str) -> list[dict]:
         out = done.stdout + done.stderr
         results.append({"command": command, "exit_code": done.returncode, "started_at": clock.isoformat(),
                         "finished_at": lane.now(), "seconds": round((lane.datetime.now(lane.timezone.utc) - clock).total_seconds(), 1),
-                        "tail": "" if done.returncode == 0 else lane.scrub(out[-2000:], 400),
+                        "tail": "" if done.returncode == 0 else lane.proof_tail(out),
                         "failed_tests": [] if done.returncode == 0 else lane.failed_test_ids(out)})
     return results
 
@@ -232,7 +250,7 @@ def cmd_train(args, root: Path, lane) -> dict:
         if args.verb == "status":
             return {"ok": True, "batches": [{"id": b["id"], "status": b["status"],
                                              "members": [m["task"] for m in b["members"]]} for b in state.data["batches"]]}
-        return {"add": add, "prove": prove, "merge": merge, "bisect": bisect}[args.verb](args, root, lane, state)
+        return {"add": add, "remove": remove, "prove": prove, "merge": merge, "bisect": bisect}[args.verb](args, root, lane, state)
     finally:
         if not state.handle.closed:
             state.close()

@@ -1,0 +1,6 @@
+{
+  "summary": "train add finds the proof record of the pull request's own worktree whatever directory it runs from, so a batch script that runs it from another worktree no longer refuses a pull request whose passing proof exists.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

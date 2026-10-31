@@ -1,0 +1,6 @@
+{
+  "summary": "train add turns off a GitHub auto-merge that merge armed earlier on the pull request, so the pull request can no longer merge on its own, outside the batch proof, while its batch is being proved.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

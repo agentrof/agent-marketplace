@@ -50,6 +50,10 @@ proof command as `<runner> sh -c '<command>'`, such as a machine queue.
   joins the open batch; it needs a valid proof record of the change and no
   critical finding. A change that needs the full proof must have run it or
   deferred it. A pull request added after `train prove` started joins the next batch.
+- `train remove --task [--batch n]` takes a member out of an open or red batch,
+  such as a pull request that does not merge onto the others, and reopens the
+  batch so the rest can be proved again. It refuses a task that is not in the
+  batch and a batch that is sealed, green or merged.
 - `train prove [--batch n] [--dry-run]` seals the batch, merges every member
   into `train/<n>` in its own worktree and runs the full `local_proof` once,
   through `proof_runner`. One batch proof runs at a time. A green batch writes

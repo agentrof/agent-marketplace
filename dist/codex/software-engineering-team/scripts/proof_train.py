@@ -71,6 +71,9 @@ def add(args, root, lane, state) -> dict:
     plan = lane.proof_plan(root, args.base)
     if plan["selection"] == "full" and record.get("selection") not in ("full", "deferred"):
         raise lane.Refused("this change needs the full proof; run prove again")
+    # an auto-merge armed earlier would merge the pull request outside the batch proof
+    if json.loads(lane.run("gh", "pr", "view", str(args.pr), "--json", "autoMergeRequest", cwd=root)).get("autoMergeRequest"):
+        lane.run("gh", "pr", "merge", str(args.pr), "--disable-auto", cwd=root)
     current = state.data["batches"][-1] if state.data["batches"] else None
     if not current or current["status"] != OPEN:
         current = {"id": (current["id"] + 1) if current else 1, "status": OPEN, "members": []}

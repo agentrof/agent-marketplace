@@ -166,6 +166,25 @@ class MergeTrainTests(unittest.TestCase):
         args = SimpleNamespace(**{"verb": verb, "base": "main", "batch": None, "dry_run": False, **options})
         return proof_train.cmd_train(args, self.root, task_lane)
 
+    def task_files(self, *rigors):
+        directory = self.root / task_lane.TASKS
+        directory.mkdir(parents=True, exist_ok=True)
+        for number, rigor in enumerate(rigors, 1):
+            (directory / f"tk-00{number}-x.md").write_text(f"---\nrigor: {rigor}\n---\n")
+
+    def merge_with_github(self, *states, **options):
+        """Run train merge with cmd_merge stubbed and ``gh pr view`` answering each state in turn."""
+        real, answers = task_lane.run, iter(states)
+
+        def run(*args, **kwargs):
+            return json.dumps({"state": next(answers)}) if args[:3] == ("gh", "pr", "view") else real(*args, **kwargs)
+
+        with mock.patch.object(task_lane, "run", run), mock.patch.object(task_lane, "cmd_merge") as merge:
+            try:
+                return self.train("merge", batch=1), merge
+            finally:
+                self.merge_call = merge
+
     def test_prove_reads_the_head_of_a_member_recorded_from_a_detached_worktree(self):
         self.member(1)
         tree = self.root.parent / "detached"
@@ -192,10 +211,37 @@ class MergeTrainTests(unittest.TestCase):
         self.git("checkout", "-q", "t1")
         problems, record = task_lane.proof_problems(self.root, "TK-001")
         self.assertEqual((problems, record["selection"]), ([], "train"))
-        with mock.patch.object(task_lane, "cmd_merge") as merge:
-            self.assertEqual(self.train("merge", batch=1)["merged"], ["TK-001", "TK-002"])
+        self.task_files("normal", "normal")
+        result, merge = self.merge_with_github("OPEN", "MERGED", "OPEN", "MERGED")
+        self.assertEqual(result["merged"], ["TK-001", "TK-002"])
         self.assertEqual(merge.call_count, 2)
         self.assertIn("merge train batch 1, integration HEAD", merge.call_args.args[0].detail)
+
+    def test_a_rigor_high_member_without_delegation_waits_for_its_owner_and_the_batch_stays_green(self):
+        self.member(1)
+        self.train("prove")
+        self.task_files("high")
+        with self.assertRaisesRegex(task_lane.Refused, "rigor high without delegation"):
+            self.merge_with_github("OPEN")
+        self.merge_call.assert_not_called()
+        self.assertEqual(self.train("status")["batches"][0]["status"], proof_train.GREEN)
+
+    def test_a_merge_call_that_returns_while_the_pull_request_is_open_is_refused_and_the_batch_stays_green(self):
+        self.member(1)
+        self.train("prove")
+        self.task_files("normal")
+        with self.assertRaisesRegex(task_lane.Refused, "not merged after the merge call"):
+            self.merge_with_github("OPEN", "OPEN")
+        self.merge_call.assert_called_once()
+        self.assertEqual(self.train("status")["batches"][0]["status"], proof_train.GREEN)
+
+    def test_a_member_github_already_shows_merged_is_skipped_and_the_batch_merges(self):
+        self.member(1)
+        self.train("prove")
+        result, merge = self.merge_with_github("MERGED")
+        self.assertEqual(result["merged"], ["TK-001"])
+        merge.assert_not_called()
+        self.assertEqual(self.train("status")["batches"][0]["status"], proof_train.MERGED)
 
     def test_a_pull_request_added_after_the_proof_started_waits_for_the_next_batch(self):
         self.member(1)

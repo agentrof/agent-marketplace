@@ -230,7 +230,7 @@ class MergeTrainTests(unittest.TestCase):
 
         with mock.patch.object(task_lane, "run", run), mock.patch.object(task_lane, "cmd_merge") as merge:
             try:
-                return self.train("merge", batch=1), merge
+                return self.train("merge", batch=1, **options), merge
             finally:
                 self.merge_call = merge
 
@@ -266,18 +266,20 @@ class MergeTrainTests(unittest.TestCase):
         self.assertEqual(merge.call_count, 2)
         self.assertIn("merge train batch 1, integration HEAD", merge.call_args.args[0].detail)
 
-<<<<<<< HEAD
     def test_the_merge_verb_delegation_reaches_the_merge_of_a_member_added_without_it(self):
-        def delegated_by(number, **options):
-            self.member(number)
-            self.train("prove")
-            with mock.patch.object(task_lane, "cmd_merge") as merge:
-                self.train("merge", batch=number, **options)
-            return merge.call_args.args[0].delegated
+        self.member(1)
+        self.train("prove")
+        self.task_files("normal")
+        _, merge = self.merge_with_github("OPEN", "MERGED", delegated=True)
+        self.assertTrue(merge.call_args.args[0].delegated)
 
-        self.assertTrue(delegated_by(1, delegated=True))
-        self.assertFalse(delegated_by(2))
-=======
+    def test_the_merge_verb_delegation_lets_a_rigor_high_member_merge(self):
+        self.member(1)
+        self.train("prove")
+        self.task_files("high")
+        _, merge = self.merge_with_github("OPEN", "MERGED", delegated=True)
+        merge.assert_called_once()
+
     def test_a_rigor_high_member_without_delegation_waits_for_its_owner_and_the_batch_stays_green(self):
         self.member(1)
         self.train("prove")
@@ -303,7 +305,6 @@ class MergeTrainTests(unittest.TestCase):
         self.assertEqual(result["merged"], ["TK-001"])
         merge.assert_not_called()
         self.assertEqual(self.train("status")["batches"][0]["status"], proof_train.MERGED)
->>>>>>> origin/main
 
     def test_a_pull_request_added_after_the_proof_started_waits_for_the_next_batch(self):
         self.member(1)

@@ -424,6 +424,16 @@ class RoleRoutingTests(unittest.TestCase):
                 "role_checks": [{"at": "2026-10-27"}, {"at": "2026-10-28"}]}
         self.assertEqual(task_lane.role_minutes(task), {"checks": 2, "minutes": 0.0})
 
+    def test_a_stamp_with_no_time_or_no_offset_does_not_abort_the_minutes(self):
+        check = {"at": "2026-10-27T11:30:00+00:00"}
+        self.assertEqual(task_lane.role_minutes({"approved_at": "2026-10-27", "role_checks": [check]}),
+                         {"checks": 1, "minutes": 0.0})
+        self.assertEqual(task_lane.role_minutes({"requested_at": "2026-10-27", "role_checks": [check]}),
+                         {"checks": 1, "minutes": 0.0})
+        self.assertEqual(task_lane.role_minutes({"approved_at": "2026-10-27T10:00:00+00:00",
+                                                 "role_checks": [{"at": "2026-10-27T11:30:00"}]}),
+                         {"checks": 1, "minutes": 90.0})
+
 
 class LocalProofTests(unittest.TestCase):
     """Config `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""

@@ -131,6 +131,11 @@ def pr(opened, ci, review, merged, checks=None):
             "merged": merged, "checks": checks or {}}
 
 
+def tree_records(root, _snapshot):
+    """Stand-in for task_lane.task_records in a unit test: the working tree's records, no Git."""
+    return sorted((root / task_lane.TASKS).glob("tk-*.md"))
+
+
 class RetrospectiveTests(unittest.TestCase):
     task = {"id": "TK-004", "title": "Export", "size": "s", "rigor": "normal",
             "requested_at": "2026-10-16T10:00:00+00:00",
@@ -399,6 +404,16 @@ class RoleRoutingTests(unittest.TestCase):
         data = task_lane.report([row], "latest 20")
         self.assertEqual(data["targets"]["build"]["role_checks"], {"tasks": 1, "checks": 2, "minutes": 3.5})
 
+    def test_a_date_only_role_check_counts_and_adds_no_minutes(self):
+        task = {"approved_at": "2026-10-27T10:00:00+00:00",
+                "role_checks": [{"at": "2026-10-27"}, {"at": "2026-10-27T11:30:00+00:00"}]}
+        self.assertEqual(task_lane.role_minutes(task), {"checks": 2, "minutes": 90.0})
+
+    def test_date_only_role_checks_alone_count_and_add_no_minutes(self):
+        task = {"approved_at": "2026-10-27T10:00:00+00:00",
+                "role_checks": [{"at": "2026-10-27"}, {"at": "2026-10-28"}]}
+        self.assertEqual(task_lane.role_minutes(task), {"checks": 2, "minutes": 0.0})
+
 
 class LocalProofTests(unittest.TestCase):
     """Config `pr_proof`: at `local_record`, open-pr needs a green local proof of the clean HEAD."""
@@ -495,6 +510,16 @@ class LocalProofTests(unittest.TestCase):
                   "FAILED tests/test_a.py::test_one - again\n")
         self.assertEqual(task_lane.failed_test_ids(output), ["tests/test_a.py::test_one", "pkg.test_b.Case.test_two"])
 
+    def test_pytest_collection_errors_and_node_test_failures_are_read_too(self):
+        output = ("ERROR tests/test_c.py - ImportError: no module\n✖ failing tests:\n\n"
+                  "test at file:///work/web/tests/d.test.ts:4:1\n✖ d broken\n")
+        self.assertEqual(task_lane.failed_test_ids(output), ["tests/test_c.py", "/work/web/tests/d.test.ts"])
+
+    def test_a_failed_proof_keeps_the_end_of_its_output_where_the_summary_is(self):
+        output = "0.50s call tests/test_x.py::test_slow\n" * 60 + "1 failed in 3.0s"
+        self.assertEqual(task_lane.proof_tail(output)[-16:], "1 failed in 3.0s")
+        self.assertEqual(len(task_lane.proof_tail(output)), 400)
+
 
 @integration
 class LocalProofGitTests(unittest.TestCase):
@@ -521,6 +546,34 @@ class LocalProofGitTests(unittest.TestCase):
         git("add", "src.txt")
         git("commit", "-qm", "change")
         self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
+
+    def test_a_task_that_declares_a_risk_runs_the_full_local_proof(self):
+        def selection(task: str) -> tuple[str, list[str]]:
+            root = Path(tempfile.mkdtemp())
+            self.addCleanup(lambda: __import__("shutil").rmtree(root))
+            init_repository(root)
+            (root / task_lane.TASKS).mkdir(parents=True)
+            (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
+            (root / "workspace").mkdir(exist_ok=True)
+            (root / "workspace/config.json").write_text(json.dumps({
+                "local_proof": ["echo full"],
+                "local_proof_map": [{"paths": ["src/*"], "commands": ["echo narrow"], "reason": "src only"}]}),
+                encoding="utf-8")
+            (root / "src").mkdir()
+            (root / "src/app.py").write_text("x = 0\n", encoding="utf-8")
+
+            def git(*args: str) -> str:
+                return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=root)
+            git("add", "-A")
+            git("commit", "-qm", "start")
+            git("update-ref", "refs/remotes/origin/main", "HEAD")
+            (root / "src/app.py").write_text("x = 1\n", encoding="utf-8")
+            git("commit", "-qam", "change")
+            record = task_lane.cmd_prove(SimpleNamespace(task="TK-004", base="main"), root)
+            return record["selection"], [item["command"] for item in record["commands"]]
+
+        self.assertEqual(selection(TASK.replace("---\n", "---\nrisks: auth\n", 1)), ("full", ["echo full"]))
+        self.assertEqual(selection(TASK), ("impact", ["echo narrow"]))
 
 
 @integration
@@ -562,6 +615,46 @@ class TaskStartWorktreeTests(unittest.TestCase):
         result = self.start(switch=True)
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), result["branch"])
         self.assertEqual(result["worktree"], str(self.root))
+
+
+@integration
+class ReportRecordsTests(unittest.TestCase):
+    """The report reads the task records of origin/main, so a checkout that has not pulled still counts every merged task."""
+
+    def setUp(self):
+        base = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(base, ignore_errors=True))
+        self.origin, self.root = base / "origin.git", base / "checkout"
+        init_repository(self.origin, bare=True, initial_branch="main")
+        init_repository(self.root, initial_branch="main")
+        self.record = self.root / task_lane.TASKS / "tk-004-export-invoices.md"
+
+    def git(self, *args: str) -> str:
+        return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=self.root)
+
+    def titles(self) -> list[str]:
+        args = SimpleNamespace(delivery=None, since=None, recent=20, deep=False, no_sessions=True)
+        with mock.patch.object(task_lane, "pull_requests", return_value={}):
+            return [row["title"] for row in task_lane.gather(self.root, args)["per_task"]]
+
+    def test_a_task_merged_after_the_last_pull_is_counted(self):
+        self.git("remote", "add", "origin", str(self.origin))
+        (self.root / "app.txt").write_text("one", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "first")
+        self.record.parent.mkdir(parents=True)
+        self.record.write_text(TASK, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "merge a task")
+        self.git("push", "-q", "origin", "main")
+        self.git("reset", "-q", "--hard", "HEAD~1")
+        self.assertFalse(self.record.exists())
+        self.assertEqual(self.titles(), ["Export invoices"])
+
+    def test_without_an_origin_main_the_records_of_the_working_tree_are_counted(self):
+        self.record.parent.mkdir(parents=True)
+        self.record.write_text(TASK, encoding="utf-8")
+        self.assertEqual(self.titles(), ["Export invoices"])
 
 
 STORY = """---
@@ -984,6 +1077,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         (tasks / "tk-001-a.md").write_text(TASK.replace("TK-004", "TK-001"), encoding="utf-8")
         args = SimpleNamespace(delivery=None, since=None, recent=20, deep=False, no_sessions=False)
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "task_records", tree_records), \
                 mock.patch.object(task_lane, "pr_times", return_value=pr(
                     "2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")), \
                 mock.patch.object(self.session_cost, "scan", side_effect=AssertionError("scanned")):
@@ -992,6 +1086,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         # A rescan prices from the transcripts again and appends a newer row; the old one stays.
         fixed = {**again["per_task"][0]["cost"], "usd": 1.5}
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "task_records", tree_records), \
                 mock.patch.object(task_lane, "pr_times", return_value=pr(
                     "2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")), \
                 mock.patch.object(task_lane, "attach_sessions",
@@ -1117,6 +1212,7 @@ class RetrospectiveQualityTests(unittest.TestCase):
             seen.append(runs)
             return pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z")
         with mock.patch.object(task_lane, "pull_requests", return_value={"TK-001": {"number": 9}}), \
+                mock.patch.object(task_lane, "task_records", tree_records), \
                 mock.patch.object(task_lane, "pr_times", side_effect=times):
             again = task_lane.gather(root, args)
             self.assertEqual(seen, [False])

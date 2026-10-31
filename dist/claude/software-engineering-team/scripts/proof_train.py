@@ -157,7 +157,8 @@ def run_commands(root: Path, lane, tree: Path, base: str) -> list[dict]:
         results.append({"command": command, "exit_code": done.returncode, "started_at": clock.isoformat(),
                         "finished_at": lane.now(), "seconds": round((lane.datetime.now(lane.timezone.utc) - clock).total_seconds(), 1),
                         "tail": "" if done.returncode == 0 else lane.proof_tail(out),
-                        "failed_tests": [] if done.returncode == 0 else lane.failed_test_ids(out)})
+                        "failed_tests": [] if done.returncode == 0 else lane.failed_test_ids(out),
+                        "suites": [] if done.returncode == 0 else lane.suite_results(out)})
     return results
 
 

@@ -1,0 +1,6 @@
+{
+  "summary": "A red local proof record now lists each suite of a multi-suite test run with its status, failing test count and first failing test id. Before, the record kept only the end of the output and a flat list of failing test ids, so the name of a failed suite was lost.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

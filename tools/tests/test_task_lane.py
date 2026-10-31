@@ -520,6 +520,17 @@ class LocalProofTests(unittest.TestCase):
                   "FAILED tests/test_a.py::test_one - again\n")
         self.assertEqual(task_lane.failed_test_ids(output), ["tests/test_a.py::test_one", "pkg.test_b.Case.test_two"])
 
+    def test_multi_suite_output_names_each_suite_with_its_status_and_first_failure(self):
+        output = ("===== orders ok 3.1s\norders: ran 214\n"
+                  "===== billing FAILED 12.4s\n"
+                  "FAIL: test_refund_limit (billing.tests.test_refunds.RefundTest.test_refund_limit)\n"
+                  "ERROR: test_refund_fee (billing.tests.test_refunds.RefundTest.test_refund_fee)\n"
+                  "FAILED (failures=1, errors=1)\nbilling: ran 96\n")
+        self.assertEqual(task_lane.suite_results(output), [
+            {"name": "orders", "status": "ok", "failures": 0, "first_failure": ""},
+            {"name": "billing", "status": "FAILED", "failures": 2,
+             "first_failure": "billing.tests.test_refunds.RefundTest.test_refund_limit"}])
+
     def test_pytest_collection_errors_and_node_test_failures_are_read_too(self):
         output = ("ERROR tests/test_c.py - ImportError: no module\n✖ failing tests:\n\n"
                   "test at file:///work/web/tests/d.test.ts:4:1\n✖ d broken\n")

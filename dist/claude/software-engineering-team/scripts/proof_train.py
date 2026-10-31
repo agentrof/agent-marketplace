@@ -245,18 +245,20 @@ def merge(args, root, lane, state) -> dict:
             merged.append(member["task"])
             continue
         m = member["merge"]
+        # the merge verb's own --delegated applies to every member, as on a single pull request merge
+        delegated = m["delegated"] or getattr(args, "delegated", False)
         where = Path(member["root"])
         try:
             lane.task_path(where, member["task"])
         except lane.Refused:  # the member's worktree moved on to another task; the batch tree holds every member's task file
             where = home(root, lane) / f"wt-{batch['id']}"
         # a rigor-high member without delegation waits for its owner: nothing is merged or counted here
-        if lane.task_props(lane.task_path(where, member["task"])).get("rigor") == "high" and not m["delegated"]:
+        if lane.task_props(lane.task_path(where, member["task"])).get("rigor") == "high" and not delegated:
             raise lane.Refused(f"PR {member['pr']} is rigor high without delegation: its owner merges it; batch {batch['id']} stays green")
         proof = (f"Proof: merge train batch {batch['id']}, integration HEAD {batch['head']}, "
                  f"members {', '.join(x['task'] for x in batch['members'])}.")
         lane.cmd_merge(Namespace(task=member["task"], pr=member["pr"], style=m["style"], detail=f"{m['detail']}\n\n{proof}" if m["detail"] else proof,
-                                 delegated=m["delegated"], critical=m["critical"], non_critical=m["non_critical"],
+                                 delegated=delegated, critical=m["critical"], non_critical=m["non_critical"],
                                  filed=m["filed"]), where)
         # cmd_merge can return without merging (owner merge, auto-merge only armed): count the member once GitHub shows it merged
         if json.loads(lane.run("gh", "pr", "view", str(member["pr"]), "--json", "state", cwd=root))["state"] != "MERGED":

@@ -230,7 +230,7 @@ class MergeTrainTests(unittest.TestCase):
 
         with mock.patch.object(task_lane, "run", run), mock.patch.object(task_lane, "cmd_merge") as merge:
             try:
-                return self.train("merge", batch=1), merge
+                return self.train("merge", batch=1, **options), merge
             finally:
                 self.merge_call = merge
 
@@ -265,6 +265,20 @@ class MergeTrainTests(unittest.TestCase):
         self.assertEqual(result["merged"], ["TK-001", "TK-002"])
         self.assertEqual(merge.call_count, 2)
         self.assertIn("merge train batch 1, integration HEAD", merge.call_args.args[0].detail)
+
+    def test_the_merge_verb_delegation_reaches_the_merge_of_a_member_added_without_it(self):
+        self.member(1)
+        self.train("prove")
+        self.task_files("normal")
+        _, merge = self.merge_with_github("OPEN", "MERGED", delegated=True)
+        self.assertTrue(merge.call_args.args[0].delegated)
+
+    def test_the_merge_verb_delegation_lets_a_rigor_high_member_merge(self):
+        self.member(1)
+        self.train("prove")
+        self.task_files("high")
+        _, merge = self.merge_with_github("OPEN", "MERGED", delegated=True)
+        merge.assert_called_once()
 
     def test_a_rigor_high_member_without_delegation_waits_for_its_owner_and_the_batch_stays_green(self):
         self.member(1)

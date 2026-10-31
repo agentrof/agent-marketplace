@@ -36,7 +36,8 @@ and merges pull requests whose tests nobody ran.
 branch and the first rule that matches each one. It runs the union of those
 rules' commands (`none` adds no command). One changed file no rule matches, no
 map, or no changed file selects the whole `local_proof`: an uncovered path never
-skips a test. The record holds `selection` (`impact`, `full`, `train` or
+skips a test. A task whose record declares a `risks` value, or cannot be read,
+selects the whole `local_proof` too. The record holds `selection` (`impact`, `full`, `train` or
 `deferred`) and why, and the `## Local proof` section repeats them. `prove
 --full` ignores the map. `proof_runner`, when set, is a command that runs each
 proof command as `<runner> sh -c '<command>'`, such as a machine queue.
@@ -50,6 +51,10 @@ proof command as `<runner> sh -c '<command>'`, such as a machine queue.
   joins the open batch; it needs a valid proof record of the change and no
   critical finding. A change that needs the full proof must have run it or
   deferred it. A pull request added after `train prove` started joins the next batch.
+- `train remove --task [--batch n]` takes a member out of an open or red batch,
+  such as a pull request that does not merge onto the others, and reopens the
+  batch so the rest can be proved again. It refuses a task that is not in the
+  batch and a batch that is sealed, green or merged.
 - `train prove [--batch n] [--dry-run]` seals the batch, merges every member
   into `train/<n>` in its own worktree and runs the full `local_proof` once,
   through `proof_runner`. One batch proof runs at a time. A green batch writes

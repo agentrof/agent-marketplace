@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -32,6 +34,55 @@ MAP = [{"paths": ["docs/*"], "none": True, "reason": "documents"},
        {"paths": ["apps/a/*"], "commands": ["echo a"], "reason": "app a"}]
 BASE_CONFIG = {"schema_version": 2, "team_id": "software-engineering-team", "output_language": "English",
                "terminology_language": "English", "local_proof": ["echo full"]}
+
+
+class TrainAddDryRunTests(unittest.TestCase):
+    TASK = task_lane.next_id([])
+
+    def setUp(self):
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(self.directory))
+        self.calls = []
+
+    def add(self, **options):
+        """``train add`` for one pull request against the train state kept in the temporary directory."""
+
+        def run(*args, cwd=None):
+            self.calls.append(args)
+            armed = json.dumps({"autoMergeRequest": {"enabledAt": "2026-01-01T00:00:00Z"}})
+            return armed if args[:3] == ("gh", "pr", "view") else "task/sample"
+
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=run, head_state=lambda root: ("abc", True),
+                               proof_problems=lambda root, task: ([], {"selection": "full"}),
+                               proof_plan=lambda root, base: {"selection": "full"})
+        args = SimpleNamespace(task=self.TASK, pr="7", base="main", critical=0, non_critical=0, filed=0, detail=None,
+                               delegated=False, style="merge", **options)
+        state = proof_train.State(self.directory)
+        try:
+            return proof_train.add(args, Path("."), lane, state)
+        finally:
+            state.close()
+
+    def saved(self):
+        path = self.directory / "state.json"
+        batches = json.loads(path.read_text())["batches"] if path.is_file() else []
+        return [(batch["id"], batch["status"], [member["task"] for member in batch["members"]]) for batch in batches]
+
+    def test_a_dry_run_add_reports_the_batch_it_would_join_and_changes_nothing(self):
+        planned = self.add(dry_run=True)
+        self.assertEqual(self.saved(), [])
+        self.assertEqual((planned.get("dry_run"), planned["batch"], planned["members"]), (True, 1, [self.TASK]))
+        self.assertEqual([call for call in self.calls if call[:3] == ("gh", "pr", "merge")], [])
+        self.assertEqual(self.add()["members"], [self.TASK])
+
+    def test_a_dry_run_add_is_refused_where_the_real_add_is_refused(self):
+        self.add()
+        with self.assertRaisesRegex(task_lane.Refused, "already in a batch"):
+            self.add(dry_run=True)
+
+    def test_add_without_dry_run_still_joins_the_batch(self):
+        self.add()
+        self.assertEqual(self.saved(), [(1, proof_train.OPEN, [self.TASK])])
 
 
 class ProofPlanTests(unittest.TestCase):
@@ -70,6 +121,49 @@ class ProofPlanTests(unittest.TestCase):
         self.assertEqual(task_lane.proof_runner(root, "make test"), "/q/run.sh sh -c 'make test'")
 
 
+class TrainAddAutoMergeTests(unittest.TestCase):
+    def add(self, auto_merge):
+        calls = []
+
+        def run(*args, cwd=None):
+            calls.append(args)
+            return json.dumps({"autoMergeRequest": auto_merge}) if args[:3] == ("gh", "pr", "view") else "t7"
+
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=run, head_state=lambda root: ("abc", True),
+                               proof_problems=lambda root, task: ([], {"selection": "full"}),
+                               proof_plan=lambda root, base: {"selection": "full"})
+        state = SimpleNamespace(data={"batches": []}, save=lambda: None)
+        args = SimpleNamespace(task="TK-007", pr="7", base="main", critical=0, non_critical=0, filed=0, detail=None,
+                               delegated=False, style="merge")
+        self.assertTrue(proof_train.add(args, Path("."), lane, state)["ok"])
+        return calls
+
+    def test_joining_a_batch_turns_off_an_auto_merge_armed_earlier(self):
+        self.assertIn(("gh", "pr", "merge", "7", "--disable-auto"), self.add({"enabledAt": "2026-01-01T00:00:00Z"}))
+
+    def test_joining_a_batch_leaves_a_pull_request_without_auto_merge_alone(self):
+        self.assertFalse([call for call in self.add(None) if "--disable-auto" in call])
+
+
+class StaleGreenBatchTests(unittest.TestCase):
+    def prove(self, origin_head):
+        batch = {"id": 1, "status": proof_train.GREEN, "base_head": "proved-base",
+                 "members": [{"task": "a", "branch": "a", "root": "."}]}
+        state = SimpleNamespace(data={"batches": [batch]}, batch=lambda number, lane: batch,
+                                file=Path("state.json"), close=lambda: None)
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=lambda *args, **options: origin_head)
+        args = SimpleNamespace(batch=1, base="main", dry_run=True)
+        with mock.patch.object(proof_train, "integrate", side_effect=RuntimeError("integration reached")):
+            proof_train.prove(args, Path("."), lane, state)
+
+    def test_a_green_batch_is_proved_again_only_when_its_base_moved(self):
+        # merge refuses a green batch whose base moved, so prove must take it or the batch is stuck
+        with self.assertRaisesRegex(RuntimeError, "integration reached"):
+            self.prove("moved-base")
+        with self.assertRaisesRegex(task_lane.Refused, "green; nothing to prove"):
+            self.prove("proved-base")
+
+
 @integration
 class MergeTrainTests(unittest.TestCase):
     def setUp(self):
@@ -97,21 +191,48 @@ class MergeTrainTests(unittest.TestCase):
     def config(self, value):
         (self.root / "workspace/config.json").write_text(json.dumps(value))
 
-    def member(self, number, bad=False):
+    def member(self, number, bad=False, clash=False):
         self.git("checkout", "-q", "-b", f"t{number}", "main")
         (self.root / f"f{number}").write_text("x")
         if bad:
             (self.root / "bad").write_text("x")
+        if clash:
+            (self.root / "clash").write_text(str(number))
         self.git("add", "-A")
         self.git("commit", "-qm", f"t{number}")
         task_lane.cmd_prove(SimpleNamespace(task=f"TK-00{number}", base="main", deferred=True), self.root)
-        return proof_train.cmd_train(SimpleNamespace(verb="add", task=f"TK-00{number}", pr=str(number), base="main",
-                                                     critical=0, non_critical=0, filed=0, detail=None,
-                                                     delegated=False, style="merge"), self.root, task_lane)
+        real_run = task_lane.run
+
+        def run(*args, cwd=None):
+            return '{"autoMergeRequest": null}' if args[:3] == ("gh", "pr", "view") else real_run(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run):
+            return proof_train.cmd_train(SimpleNamespace(verb="add", task=f"TK-00{number}", pr=str(number), base="main",
+                                                         critical=0, non_critical=0, filed=0, detail=None,
+                                                         delegated=False, style="merge"), self.root, task_lane)
 
     def train(self, verb, **options):
         args = SimpleNamespace(**{"verb": verb, "base": "main", "batch": None, "dry_run": False, **options})
         return proof_train.cmd_train(args, self.root, task_lane)
+
+    def task_files(self, *rigors):
+        directory = self.root / task_lane.TASKS
+        directory.mkdir(parents=True, exist_ok=True)
+        for number, rigor in enumerate(rigors, 1):
+            (directory / f"tk-00{number}-x.md").write_text(f"---\nrigor: {rigor}\n---\n")
+
+    def merge_with_github(self, *states, **options):
+        """Run train merge with cmd_merge stubbed and ``gh pr view`` answering each state in turn."""
+        real, answers = task_lane.run, iter(states)
+
+        def run(*args, **kwargs):
+            return json.dumps({"state": next(answers)}) if args[:3] == ("gh", "pr", "view") else real(*args, **kwargs)
+
+        with mock.patch.object(task_lane, "run", run), mock.patch.object(task_lane, "cmd_merge") as merge:
+            try:
+                return self.train("merge", batch=1), merge
+            finally:
+                self.merge_call = merge
 
     def test_prove_reads_the_head_of_a_member_recorded_from_a_detached_worktree(self):
         self.member(1)
@@ -139,11 +260,13 @@ class MergeTrainTests(unittest.TestCase):
         self.git("checkout", "-q", "t1")
         problems, record = task_lane.proof_problems(self.root, "TK-001")
         self.assertEqual((problems, record["selection"]), ([], "train"))
-        with mock.patch.object(task_lane, "cmd_merge") as merge:
-            self.assertEqual(self.train("merge", batch=1)["merged"], ["TK-001", "TK-002"])
+        self.task_files("normal", "normal")
+        result, merge = self.merge_with_github("OPEN", "MERGED", "OPEN", "MERGED")
+        self.assertEqual(result["merged"], ["TK-001", "TK-002"])
         self.assertEqual(merge.call_count, 2)
         self.assertIn("merge train batch 1, integration HEAD", merge.call_args.args[0].detail)
 
+<<<<<<< HEAD
     def test_the_merge_verb_delegation_reaches_the_merge_of_a_member_added_without_it(self):
         def delegated_by(number, **options):
             self.member(number)
@@ -154,6 +277,33 @@ class MergeTrainTests(unittest.TestCase):
 
         self.assertTrue(delegated_by(1, delegated=True))
         self.assertFalse(delegated_by(2))
+=======
+    def test_a_rigor_high_member_without_delegation_waits_for_its_owner_and_the_batch_stays_green(self):
+        self.member(1)
+        self.train("prove")
+        self.task_files("high")
+        with self.assertRaisesRegex(task_lane.Refused, "rigor high without delegation"):
+            self.merge_with_github("OPEN")
+        self.merge_call.assert_not_called()
+        self.assertEqual(self.train("status")["batches"][0]["status"], proof_train.GREEN)
+
+    def test_a_merge_call_that_returns_while_the_pull_request_is_open_is_refused_and_the_batch_stays_green(self):
+        self.member(1)
+        self.train("prove")
+        self.task_files("normal")
+        with self.assertRaisesRegex(task_lane.Refused, "not merged after the merge call"):
+            self.merge_with_github("OPEN", "OPEN")
+        self.merge_call.assert_called_once()
+        self.assertEqual(self.train("status")["batches"][0]["status"], proof_train.GREEN)
+
+    def test_a_member_github_already_shows_merged_is_skipped_and_the_batch_merges(self):
+        self.member(1)
+        self.train("prove")
+        result, merge = self.merge_with_github("MERGED")
+        self.assertEqual(result["merged"], ["TK-001"])
+        merge.assert_not_called()
+        self.assertEqual(self.train("status")["batches"][0]["status"], proof_train.MERGED)
+>>>>>>> origin/main
 
     def test_a_pull_request_added_after_the_proof_started_waits_for_the_next_batch(self):
         self.member(1)
@@ -168,6 +318,18 @@ class MergeTrainTests(unittest.TestCase):
         with self.assertRaisesRegex(task_lane.Refused, "red"):
             self.train("merge", batch=1)
         self.assertEqual(self.train("bisect", batch=1)["culprit"], "TK-002")
+
+    def test_a_member_that_does_not_merge_onto_the_batch_leaves_it_and_the_rest_is_proved(self):
+        self.member(1, clash=True)
+        self.member(2, clash=True)
+        first, clashing, last = self.member(3)["members"]
+        with self.assertRaisesRegex(task_lane.Refused, f"{clashing} does not merge onto the batch"):
+            self.train("prove")
+        with mock.patch.object(task_lane, "project_root", return_value=self.root), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(task_lane.main(["train", "remove", "--task", clashing]), 0)
+        self.assertEqual(json.loads(out.getvalue())["members"], [first, last])
+        self.assertTrue(self.train("prove")["ok"])
 
     def test_one_batch_proof_runs_at_a_time(self):
         self.member(1)
@@ -186,6 +348,94 @@ class MergeTrainTests(unittest.TestCase):
                                detail=None, delegated=False, style="merge", batch=None, dry_run=False)
         with self.assertRaisesRegex(task_lane.Refused, "critical"):
             proof_train.cmd_train(args, self.root, task_lane)
+
+    def task_tree(self, task, proved):
+        """A worktree on the task's branch, a commit ahead of main; ``proved`` records the deferred proof in it."""
+        tree = self.root.parent / f"tree-{task.lower()}"
+        self.git("worktree", "add", "-q", "-b", f"task/{task.lower()}-fix", str(tree), "main")
+        (tree / "change").write_text("x")
+        self.git("-C", str(tree), "add", "-A")
+        self.git("-C", str(tree), "commit", "-qm", "change")
+        if proved:
+            task_lane.cmd_prove(SimpleNamespace(task=task, base="main", deferred=True), tree)
+        return tree
+
+    def add(self, task):
+        """``train add`` run from the main checkout, which is on main and holds no proof record."""
+        real_run = task_lane.run
+
+        def run(*args, cwd=None):
+            return '{"autoMergeRequest": null}' if args[:3] == ("gh", "pr", "view") else real_run(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run):
+            return proof_train.cmd_train(SimpleNamespace(verb="add", task=task, pr="7", base="main", critical=0,
+                                                         non_critical=0, filed=0, detail=None, delegated=False,
+                                                         style="merge"), self.root, task_lane)
+
+    def test_add_finds_the_proof_of_the_pull_requests_own_worktree_from_any_directory(self):
+        proved = task_lane.next_id([])
+        unproved = task_lane.next_id([f"task/{proved.lower()}-fix"])
+        tree = self.task_tree(proved, proved=True)
+        self.task_tree(unproved, proved=False)
+        with self.subTest("the proof record sits in the pull request's worktree"):
+            self.assertEqual(self.add(proved)["members"], [proved])
+            member = json.loads((self.root / proof_train.STATE / "state.json").read_text())["batches"][0]["members"][0]
+            self.assertEqual((Path(member["root"]).resolve(), member["branch"], member["head"]),
+                             (tree.resolve(), f"task/{proved.lower()}-fix", self.git("-C", str(tree), "rev-parse", "HEAD")))
+        with self.subTest("no proof record anywhere"):
+            with self.assertRaisesRegex(task_lane.Refused, "no local proof record"):
+                self.add(unproved)
+
+
+class MergeDryRunTests(unittest.TestCase):
+    def test_a_dry_run_merge_checks_the_batch_and_merges_nothing(self):
+        batch = {"id": 1, "status": proof_train.GREEN, "base_head": "proved-base", "head": "h",
+                 "members": [{"task": "a"}, {"task": "b"}]}
+        state = SimpleNamespace(batch=lambda number, lane: batch, save=mock.Mock())
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=lambda *args, **options: "proved-base", cmd_merge=mock.Mock())
+        result = proof_train.merge(SimpleNamespace(batch=1, base="main", dry_run=True), Path("."), lane, state)
+        self.assertEqual(result["would_merge"], ["a", "b"])
+        lane.cmd_merge.assert_not_called()
+        state.save.assert_not_called()
+        self.assertEqual(batch["status"], proof_train.GREEN)
+
+
+class TrainRemoveTests(unittest.TestCase):
+    def state(self, *batches):
+        directory = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(directory))
+        state = proof_train.State(directory)
+        self.addCleanup(state.close)
+        state.data["batches"] = [{"id": number, "status": status, "members": [{"task": task} for task in tasks], **proof}
+                                 for number, (status, tasks, proof) in enumerate(batches, 1)]
+        return state
+
+    def remove(self, state, task, batch=None):
+        return proof_train.remove(SimpleNamespace(task=task, batch=batch), None, task_lane, state)
+
+    def test_a_member_leaves_an_open_or_red_batch_and_the_batch_reopens_without_the_old_proof(self):
+        old_proof = {"head": "a1", "base_head": "b2", "commands": [{"command": "make test", "exit_code": 1}]}
+        for status, proof in ((proof_train.OPEN, {}), (proof_train.RED, old_proof)):
+            with self.subTest(status):
+                state = self.state((status, ["task-a", "task-b", "task-c"], proof), (proof_train.OPEN, ["task-d"], {}))
+                self.assertEqual(self.remove(state, "task-b", batch=1), {"ok": True, "batch": 1, "members": ["task-a", "task-c"]})
+                self.assertEqual(json.loads(state.file.read_text())["batches"], [
+                    {"id": 1, "status": proof_train.OPEN, "members": [{"task": "task-a"}, {"task": "task-c"}]},
+                    {"id": 2, "status": proof_train.OPEN, "members": [{"task": "task-d"}]}])
+
+    def test_a_task_outside_the_batch_and_a_sealed_green_or_merged_batch_refuse_to_give_up_a_member(self):
+        cases = ((proof_train.RED, "task-x", "task-x is not in batch 1"),
+                 (proof_train.SEALED, "task-a", "batch 1 is sealed; only an open or red batch gives up a member"),
+                 (proof_train.GREEN, "task-a", "batch 1 is green; only an open or red batch gives up a member"),
+                 (proof_train.MERGED, "task-a", "batch 1 is merged; only an open or red batch gives up a member"),
+                 (proof_train.OPEN, None, "train remove needs --task"))
+        for status, task, message in cases:
+            with self.subTest(status=status, task=task):
+                state = self.state((status, ["task-a", "task-b"], {}))
+                before = json.dumps(state.data)
+                with self.assertRaisesRegex(task_lane.Refused, message):
+                    self.remove(state, task)
+                self.assertEqual(json.dumps(state.data), before)
 
 
 if __name__ == "__main__":

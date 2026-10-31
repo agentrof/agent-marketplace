@@ -1,0 +1,6 @@
+{
+  "summary": "The merge train gains a remove verb: task_lane.py train remove takes a member that does not merge onto the others out of an open or red batch, so the rest of the batch can be proved and merged without editing the train state by hand.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

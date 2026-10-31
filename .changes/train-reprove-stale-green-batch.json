@@ -1,0 +1,6 @@
+{
+  "summary": "A green merge train batch whose base branch moved before it merged can be proved again. Merge refuses such a batch and asks for a new proof, but prove refused every green batch, so the batch could neither merge nor be proved and stayed stuck.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "summary": "The retrospective report reads task records from origin/main, not from the working tree, so a checkout that has not pulled the default branch still counts every merged task. A checkout with no origin/main reads its working tree as before.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

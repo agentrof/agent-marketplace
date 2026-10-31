@@ -547,6 +547,34 @@ class LocalProofGitTests(unittest.TestCase):
         git("commit", "-qm", "change")
         self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
 
+    def test_a_task_that_declares_a_risk_runs_the_full_local_proof(self):
+        def selection(task: str) -> tuple[str, list[str]]:
+            root = Path(tempfile.mkdtemp())
+            self.addCleanup(lambda: __import__("shutil").rmtree(root))
+            init_repository(root)
+            (root / task_lane.TASKS).mkdir(parents=True)
+            (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
+            (root / "workspace").mkdir(exist_ok=True)
+            (root / "workspace/config.json").write_text(json.dumps({
+                "local_proof": ["echo full"],
+                "local_proof_map": [{"paths": ["src/*"], "commands": ["echo narrow"], "reason": "src only"}]}),
+                encoding="utf-8")
+            (root / "src").mkdir()
+            (root / "src/app.py").write_text("x = 0\n", encoding="utf-8")
+
+            def git(*args: str) -> str:
+                return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=root)
+            git("add", "-A")
+            git("commit", "-qm", "start")
+            git("update-ref", "refs/remotes/origin/main", "HEAD")
+            (root / "src/app.py").write_text("x = 1\n", encoding="utf-8")
+            git("commit", "-qam", "change")
+            record = task_lane.cmd_prove(SimpleNamespace(task="TK-004", base="main"), root)
+            return record["selection"], [item["command"] for item in record["commands"]]
+
+        self.assertEqual(selection(TASK.replace("---\n", "---\nrisks: auth\n", 1)), ("full", ["echo full"]))
+        self.assertEqual(selection(TASK), ("impact", ["echo narrow"]))
+
 
 @integration
 class TaskStartWorktreeTests(unittest.TestCase):

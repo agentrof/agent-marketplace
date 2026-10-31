@@ -500,6 +500,16 @@ class LocalProofTests(unittest.TestCase):
                   "FAILED tests/test_a.py::test_one - again\n")
         self.assertEqual(task_lane.failed_test_ids(output), ["tests/test_a.py::test_one", "pkg.test_b.Case.test_two"])
 
+    def test_pytest_collection_errors_and_node_test_failures_are_read_too(self):
+        output = ("ERROR tests/test_c.py - ImportError: no module\n✖ failing tests:\n\n"
+                  "test at file:///work/web/tests/d.test.ts:4:1\n✖ d broken\n")
+        self.assertEqual(task_lane.failed_test_ids(output), ["tests/test_c.py", "/work/web/tests/d.test.ts"])
+
+    def test_a_failed_proof_keeps_the_end_of_its_output_where_the_summary_is(self):
+        output = "0.50s call tests/test_x.py::test_slow\n" * 60 + "1 failed in 3.0s"
+        self.assertEqual(task_lane.proof_tail(output)[-16:], "1 failed in 3.0s")
+        self.assertEqual(len(task_lane.proof_tail(output)), 400)
+
 
 @integration
 class LocalProofGitTests(unittest.TestCase):

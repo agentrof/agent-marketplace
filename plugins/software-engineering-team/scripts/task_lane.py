@@ -193,9 +193,11 @@ SECRET_RE = re.compile(r"(?i)gh[pousr]_\w{16,}|github_pat_\w+|\bsk-[\w-]{16,}|xo
                        r"|-----BEGIN|\bbearer\s+\S+|\b(token|secret|password|passwd|api[_-]?key|authorization"
                        r"|credential)s?\b\s*[:=]")
 ENTROPY_RE = re.compile(r"\b(?=[\w+/=-]*[0-9])(?=[\w+/=-]*[A-Z])(?=[\w+/=-]*[a-z])[\w+/=-]{32,}")
-# pytest, unittest, go and jest or vitest failing test ids.
+# pytest failures and errors (collection included), unittest, go, jest or vitest, and node:test failing test ids.
 TEST_ID_RES = (re.compile(r"\bFAILED ([\w./-]+::[\w:.\[\]/-]+)"), re.compile(r"^(?:FAIL|ERROR): (\w+) \(([\w.]+)\)"),
-               re.compile(r"--- FAIL: (\w+)"), re.compile(r"\bFAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\b"))
+               re.compile(r"^ERROR ([\w./-]+\.py(?:::[\w:.\[\]/-]+)?)"),
+               re.compile(r"--- FAIL: (\w+)"), re.compile(r"\bFAIL\s+(\S+\.(?:test|spec)\.[cm]?[jt]sx?)\b"),
+               re.compile(r"^\s*test at (?:file://)?(\S+\.(?:test|spec)\.[cm]?[jt]sx?):\d+:\d+"))
 ERROR_LINE_RE = re.compile(r"(?i)\b(error|failed|failure|exception|traceback|assert\w*)\b")
 EXIT_LINE_RE = re.compile(r"Process completed with exit code")
 # step -> (start, end); CI and review run side by side after the PR opens.
@@ -733,6 +735,11 @@ def scrub(text: str, limit: int) -> str:
     """One line of at most ``limit`` characters, without any line that looks like a credential."""
     kept = [line for line in str(text or "").splitlines() if not SECRET_RE.search(line) and not ENTROPY_RE.search(line)]
     return " ".join(" ".join(kept).split())[:limit]
+
+
+def proof_tail(output: str, limit: int = 400) -> str:
+    """The END of a failed proof command's output, where test runners print their summary, as one scrubbed line."""
+    return scrub(output[-2000:], 2000)[-limit:]
 
 
 def failure(log: str, limit: int) -> dict:
@@ -2301,7 +2308,7 @@ def cmd_prove(args, root: Path) -> dict:
         results.append({"command": command, "exit_code": done.returncode,
                         "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 1),
                         "started_at": started, "finished_at": now(),
-                        "tail": "" if done.returncode == 0 else scrub((done.stdout + done.stderr)[-2000:], 400),
+                        "tail": "" if done.returncode == 0 else proof_tail(done.stdout + done.stderr),
                         "failed_tests": [] if done.returncode == 0 else failed_test_ids(done.stdout + done.stderr)})
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
               "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
@@ -2577,7 +2584,7 @@ def main(argv: list[str] | None = None) -> int:
     proved.add_argument("--full", action="store_true", help="ignore local_proof_map and run every local_proof command")
     proved.add_argument("--deferred", action="store_true", help="the merge train proves this change; run nothing now")
     train = sub.add_parser("train", help="merge train: one integration proof for the ready pull requests")
-    train.add_argument("verb", choices=("add", "status", "prove", "merge", "bisect"))
+    train.add_argument("verb", choices=("add", "remove", "status", "prove", "merge", "bisect"))
     train.add_argument("--task")
     train.add_argument("--pr")
     train.add_argument("--batch", type=int)

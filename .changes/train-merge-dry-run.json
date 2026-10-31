@@ -1,0 +1,6 @@
+{
+  "summary": "train merge --dry-run no longer merges. It runs the merge checks (the batch is green and its base has not moved) and lists the members it would merge, without merging any pull request or changing the train state.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

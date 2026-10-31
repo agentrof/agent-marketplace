@@ -1,0 +1,6 @@
+{
+  "summary": "The merge train no longer records a batch as merged while one of its pull requests is still open. Before each member it asks GitHub for the pull request state and skips a member already merged, so a merge cut short earlier resumes. A rigor-high member without delegation waits for its owner and the batch stays green. After the merge call it asks GitHub again, and only a member shown as merged counts; otherwise the batch stays green.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -2,6 +2,7 @@
 
 ``train add`` puts a reviewed pull request, with a valid proof record of its own, into the open batch;
 it reads that record in the worktree of the task's branch, from whatever directory it runs in.
+``train remove`` takes a member that does not merge onto the others out of an open or red batch.
 ``train prove`` seals the batch, builds ``train/<n>`` (base plus every member) in its own worktree and runs
 the project's full ``local_proof`` there once, through the project's ``proof_runner`` queue. A green
 batch writes a ``train`` proof record for each member, which satisfies that member's ``open-pr`` rule, and
@@ -84,6 +85,9 @@ def add(args, root, lane, state) -> dict:
     plan = lane.proof_plan(root, args.base)
     if plan["selection"] == "full" and record.get("selection") not in ("full", "deferred"):
         raise lane.Refused("this change needs the full proof; run prove again")
+    # an auto-merge armed earlier would merge the pull request outside the batch proof
+    if json.loads(lane.run("gh", "pr", "view", str(args.pr), "--json", "autoMergeRequest", cwd=root)).get("autoMergeRequest"):
+        lane.run("gh", "pr", "merge", str(args.pr), "--disable-auto", cwd=root)
     current = state.data["batches"][-1] if state.data["batches"] else None
     if not current or current["status"] != OPEN:
         current = {"id": (current["id"] + 1) if current else 1, "status": OPEN, "members": []}
@@ -100,6 +104,23 @@ def add(args, root, lane, state) -> dict:
     sealed = [b["id"] for b in state.data["batches"] if b["status"] == SEALED]
     note = f"batch {sealed[0]} is sealed and being proved; this pull request joined the next batch" if sealed else ""
     return {"ok": True, "batch": current["id"], "members": [m["task"] for m in current["members"]], "note": note}
+
+
+def remove(args, root, lane, state) -> dict:
+    """A member that does not merge onto the batch leaves it, so the rest of the batch can be proved again."""
+    if not args.task:
+        raise lane.Refused("train remove needs --task")
+    batch = state.batch(args.batch, lane)
+    if batch["status"] not in (OPEN, RED):
+        raise lane.Refused(f"batch {batch['id']} is {batch['status']}; only an open or red batch gives up a member")
+    left = [m for m in batch["members"] if m["task"] != args.task]
+    if len(left) == len(batch["members"]):
+        raise lane.Refused(f"{args.task} is not in batch {batch['id']}")
+    batch.update(members=left, status=OPEN)
+    for key in ("head", "base_head", "commands"):
+        batch.pop(key, None)
+    state.save()
+    return {"ok": True, "batch": batch["id"], "members": [m["task"] for m in left]}
 
 
 def drop(root: Path, tree: Path, name: str) -> None:
@@ -132,7 +153,7 @@ def run_commands(root: Path, lane, tree: Path, base: str) -> list[dict]:
         out = done.stdout + done.stderr
         results.append({"command": command, "exit_code": done.returncode, "started_at": clock.isoformat(),
                         "finished_at": lane.now(), "seconds": round((lane.datetime.now(lane.timezone.utc) - clock).total_seconds(), 1),
-                        "tail": "" if done.returncode == 0 else lane.scrub(out[-2000:], 400),
+                        "tail": "" if done.returncode == 0 else lane.proof_tail(out),
                         "failed_tests": [] if done.returncode == 0 else lane.failed_test_ids(out)})
     return results
 
@@ -149,7 +170,9 @@ def prove(args, root, lane, state) -> dict:
     busy = [b["id"] for b in state.data["batches"] if b["status"] == SEALED and b is not batch and alive(b.get("pid"))]
     if busy:
         raise lane.Refused(f"batch {busy[0]} is being proved; one batch proof runs at a time")
-    if batch["status"] not in (OPEN, RED, SEALED) or not batch["members"]:
+    # a green batch whose base moved can no longer merge, so it must be provable again
+    stale = batch["status"] == GREEN and lane.run("git", "rev-parse", f"origin/{args.base}", cwd=root) != batch.get("base_head")
+    if (batch["status"] not in (OPEN, RED, SEALED) and not stale) or not batch["members"]:
         raise lane.Refused(f"batch {batch['id']} is {batch['status']}; nothing to prove")
     if batch["status"] == SEALED and alive(batch.get("pid")):
         raise lane.Refused(f"batch {batch['id']} is being proved")
@@ -210,6 +233,8 @@ def merge(args, root, lane, state) -> dict:
         # shortcut: any move of the base re-proves in full; refine to overlap checks when main moves often
         raise lane.Refused(f"{args.base} moved since the batch was proved (another batch merged); run train prove again."
                            " Merges are serial: the train state lock is held while a batch merges")
+    if args.dry_run:
+        return {"ok": True, "dry_run": True, "batch": batch["id"], "would_merge": [m["task"] for m in batch["members"]]}
     merged = []
     for member in batch["members"]:
         m = member["merge"]
@@ -244,7 +269,7 @@ def cmd_train(args, root: Path, lane) -> dict:
         if args.verb == "status":
             return {"ok": True, "batches": [{"id": b["id"], "status": b["status"],
                                              "members": [m["task"] for m in b["members"]]} for b in state.data["batches"]]}
-        return {"add": add, "prove": prove, "merge": merge, "bisect": bisect}[args.verb](args, root, lane, state)
+        return {"add": add, "remove": remove, "prove": prove, "merge": merge, "bisect": bisect}[args.verb](args, root, lane, state)
     finally:
         if not state.handle.closed:
             state.close()

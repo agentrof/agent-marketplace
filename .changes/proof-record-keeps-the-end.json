@@ -1,0 +1,6 @@
+{
+  "summary": "A failed local proof keeps the end of its output, where test runners print their summary, and names pytest collection errors and node:test failures among its failing tests.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

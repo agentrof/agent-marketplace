@@ -96,6 +96,7 @@ STORY_RE = re.compile(r"^ST-[0-9]{3,}$")
 STORIES = Path("workspace") / "docs" / "backlog" / "epics"
 BOARD = EXPORT / "board.md"
 AC_RANGE = (3, 8)
+# Optional project override: "task_criteria_range": [min, max] in workspace/config.json.
 # Every build task proves its change is wired into the running system and names its docs change.
 LIVE_WIRING = "Live wiring:"
 DOCS_DELTA = "Docs delta:"
@@ -483,7 +484,7 @@ def task_props(path: Path) -> dict:
     return parse_frontmatter(path.read_text(encoding="utf-8"))[0]
 
 
-def lint(path: Path) -> list[str]:
+def lint(path: Path, root: Path | None = None) -> list[str]:
     text = path.read_text(encoding="utf-8")
     props, start, error = parse_frontmatter(text)
     if error:
@@ -548,8 +549,9 @@ def lint(path: Path) -> list[str]:
         return errors
     criteria = [line for line in section(body, "Acceptance Criteria")
                 if re.match(r"^[0-9]+\.\s+\S", line)]
-    if not AC_RANGE[0] <= len(criteria) <= AC_RANGE[1]:
-        errors.append(f"Acceptance Criteria needs {AC_RANGE[0]} to {AC_RANGE[1]} numbered"
+    low, high = project_setting(root, "task_criteria_range", list(AC_RANGE))
+    if not low <= len(criteria) <= high:
+        errors.append(f"Acceptance Criteria needs {low} to {high} numbered"
                       f" criteria, found {len(criteria)}")
     numbers = {int(line.split(".", 1)[0]) for line in criteria}
     for label in (LIVE_WIRING, DOCS_DELTA):
@@ -2132,7 +2134,7 @@ def cmd_start(args, root: Path) -> dict:
 
 def cmd_lint(args, root: Path) -> dict:
     path = Path(args.file) if args.file else task_path(root, args.task)
-    errors = lint(path)
+    errors = lint(path, root)
     _, missing = ([], []) if errors else routed_roles(root, path)
     return {"ok": not errors, "task": str(path), "errors": errors,
             "warnings": [missing_message(task_props(path).get("id", args.task), missing)] if missing else []}
@@ -2140,7 +2142,7 @@ def cmd_lint(args, root: Path) -> dict:
 
 def cmd_approve(args, root: Path) -> dict:
     path = task_path(root, args.task)
-    errors = lint(path)
+    errors = lint(path, root)
     if errors:
         raise Refused("task lint failed: " + "; ".join(errors))
     if not task_props(path).get("approved_at"):
@@ -2340,7 +2342,7 @@ def only_task_changed(root: Path, task: str, proved: str | None, head: str) -> b
         own = task_path(root, task).relative_to(root).as_posix()
     except Refused:
         return False
-    return bool(changed) and all(path == own for path in changed) and not lint(root / own)
+    return bool(changed) and all(path == own for path in changed) and not lint(root / own, root)
 
 
 def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
@@ -2383,7 +2385,7 @@ def proof_waived(root: Path, path: Path, base: str) -> bool:
 
 def cmd_open_pr(args, root: Path) -> dict:
     path = task_path(root, args.task)
-    errors = lint(path)
+    errors = lint(path, root)
     if not task_props(path).get("approved_at"):
         errors.append("approved_at is missing; run approve first")
     if not errors:

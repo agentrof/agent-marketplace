@@ -93,6 +93,16 @@ class TaskTests(unittest.TestCase):
         self.assertTrue(any(error.startswith("rigor") for error in errors))
         self.assertIn("requested_at is required", errors)
 
+    def test_a_project_can_widen_the_criteria_range(self):
+        extra = "".join(f"{n}. Property {n} holds.\n" for n in range(6, 15))
+        path = self.write(TASK.replace("5. Docs delta: none.\n", "5. Docs delta: none.\n" + extra))
+        self.assertTrue(any("3 to 8 numbered" in error for error in task_lane.lint(path)))
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        (root / "workspace").mkdir()
+        (root / "workspace" / "config.json").write_text('{"task_criteria_range": [3, 20]}', encoding="utf-8")
+        self.assertFalse(any("numbered" in error for error in task_lane.lint(path, root)))
+
     def test_the_skeleton_is_valid_once_filled(self):
         text = task_lane.task_text("TK-007", "Rotate keys", "Rotate the signing keys.",
                                     "2026-10-16T10:00:00+00:00", "high")

@@ -46,6 +46,14 @@ class ProjectConfigTests(unittest.TestCase):
         self.assertIn("pr_proof must be one of remote_ci, local_record",
                       project_config.base_errors({"pr_proof": "ghost"}))
 
+    def test_criteria_range_takes_two_ordered_positive_integers(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import project_config
+        message = "task_criteria_range must be [min, max] positive integers with min <= max"
+        self.assertNotIn(message, project_config.base_errors({"task_criteria_range": [3, 20]}))
+        for bad in ([3], [8, 3], [0, 5], ["3", 8], 8):
+            self.assertIn(message, project_config.base_errors({"task_criteria_range": bad}))
+
     def test_only_declared_fields_have_a_config_writer(self):
         with tempfile.TemporaryDirectory() as temporary:
             config = self.unit_config(Path(temporary))

@@ -26,6 +26,7 @@ CONFIG_FIELDS = {
     "pr_proof",
     "local_proof",
     "local_proof_map",
+    "task_criteria_range",
     "proof_runner",
     "role_routing",
     "task_triggers",
@@ -33,9 +34,9 @@ CONFIG_FIELDS = {
     role_settings.ROLE_CLASSES,
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout",
-                   "pr_proof", "local_proof", "local_proof_map", "proof_runner", "role_routing", "task_triggers"}
+                   "pr_proof", "local_proof", "local_proof_map", "task_criteria_range", "proof_runner", "role_routing", "task_triggers"}
 # Deliver settings the project owns; setup writes none of them and keeps the project's.
-PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "proof_runner", "role_routing", "task_triggers")
+PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "task_criteria_range", "proof_runner", "role_routing", "task_triggers")
 # Who proves a task before its pull request; unset means remote_ci.
 PR_PROOF_VALUES = ("remote_ci", "local_record")
 # Setup writes these into a config that lacks them; the project owns them after.
@@ -146,6 +147,10 @@ def base_errors(config: dict) -> list[str]:
             and (r.get("none") is True) != bool(r.get("commands"))
             and all(isinstance(c, str) and c.strip() for c in r.get("commands", [])) for r in rules):
         errors.append("local_proof_map must list rules with paths and either commands or none: true")
+    span = config.get("task_criteria_range", [3, 8])
+    if not (isinstance(span, list) and len(span) == 2 and all(type(n) is int and n > 0 for n in span)
+            and span[0] <= span[1]):
+        errors.append("task_criteria_range must be [min, max] positive integers with min <= max")
     if not isinstance(config.get("proof_runner", ""), str):
         errors.append("proof_runner must be a string")
     for field in ("role_routing", "task_triggers"):

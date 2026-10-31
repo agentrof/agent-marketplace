@@ -1,0 +1,6 @@
+{
+  "summary": "A task whose record declares a risk, or whose record cannot be read, now runs the whole local proof even when every changed file matches a local_proof_map rule. Before, the map alone chose the commands, so a risky task could pass with only its narrow commands run.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

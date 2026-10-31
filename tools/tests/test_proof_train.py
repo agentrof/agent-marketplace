@@ -36,6 +36,55 @@ BASE_CONFIG = {"schema_version": 2, "team_id": "software-engineering-team", "out
                "terminology_language": "English", "local_proof": ["echo full"]}
 
 
+class TrainAddDryRunTests(unittest.TestCase):
+    TASK = task_lane.next_id([])
+
+    def setUp(self):
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: shutil.rmtree(self.directory))
+        self.calls = []
+
+    def add(self, **options):
+        """``train add`` for one pull request against the train state kept in the temporary directory."""
+
+        def run(*args, cwd=None):
+            self.calls.append(args)
+            armed = json.dumps({"autoMergeRequest": {"enabledAt": "2026-01-01T00:00:00Z"}})
+            return armed if args[:3] == ("gh", "pr", "view") else "task/sample"
+
+        lane = SimpleNamespace(Refused=task_lane.Refused, run=run, head_state=lambda root: ("abc", True),
+                               proof_problems=lambda root, task: ([], {"selection": "full"}),
+                               proof_plan=lambda root, base: {"selection": "full"})
+        args = SimpleNamespace(task=self.TASK, pr="7", base="main", critical=0, non_critical=0, filed=0, detail=None,
+                               delegated=False, style="merge", **options)
+        state = proof_train.State(self.directory)
+        try:
+            return proof_train.add(args, Path("."), lane, state)
+        finally:
+            state.close()
+
+    def saved(self):
+        path = self.directory / "state.json"
+        batches = json.loads(path.read_text())["batches"] if path.is_file() else []
+        return [(batch["id"], batch["status"], [member["task"] for member in batch["members"]]) for batch in batches]
+
+    def test_a_dry_run_add_reports_the_batch_it_would_join_and_changes_nothing(self):
+        planned = self.add(dry_run=True)
+        self.assertEqual(self.saved(), [])
+        self.assertEqual((planned.get("dry_run"), planned["batch"], planned["members"]), (True, 1, [self.TASK]))
+        self.assertEqual([call for call in self.calls if call[:3] == ("gh", "pr", "merge")], [])
+        self.assertEqual(self.add()["members"], [self.TASK])
+
+    def test_a_dry_run_add_is_refused_where_the_real_add_is_refused(self):
+        self.add()
+        with self.assertRaisesRegex(task_lane.Refused, "already in a batch"):
+            self.add(dry_run=True)
+
+    def test_add_without_dry_run_still_joins_the_batch(self):
+        self.add()
+        self.assertEqual(self.saved(), [(1, proof_train.OPEN, [self.TASK])])
+
+
 class ProofPlanTests(unittest.TestCase):
     def plan(self, files, rules=MAP):
         root = Path(tempfile.mkdtemp())

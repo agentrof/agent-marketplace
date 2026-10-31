@@ -86,7 +86,8 @@ def add(args, root, lane, state) -> dict:
     if plan["selection"] == "full" and record.get("selection") not in ("full", "deferred"):
         raise lane.Refused("this change needs the full proof; run prove again")
     # an auto-merge armed earlier would merge the pull request outside the batch proof
-    if json.loads(lane.run("gh", "pr", "view", str(args.pr), "--json", "autoMergeRequest", cwd=root)).get("autoMergeRequest"):
+    if not getattr(args, "dry_run", False) and json.loads(
+            lane.run("gh", "pr", "view", str(args.pr), "--json", "autoMergeRequest", cwd=root)).get("autoMergeRequest"):
         lane.run("gh", "pr", "merge", str(args.pr), "--disable-auto", cwd=root)
     current = state.data["batches"][-1] if state.data["batches"] else None
     if not current or current["status"] != OPEN:
@@ -100,6 +101,8 @@ def add(args, root, lane, state) -> dict:
         "merge": {"detail": args.detail, "delegated": args.delegated, "style": args.style,
                   "critical": args.critical, "non_critical": getattr(args, "non_critical", None),
                   "filed": args.filed}})
+    if getattr(args, "dry_run", False):  # every check above ran; the batch is only named, never saved
+        return {"ok": True, "dry_run": True, "batch": current["id"], "members": [m["task"] for m in current["members"]]}
     state.save()
     sealed = [b["id"] for b in state.data["batches"] if b["status"] == SEALED]
     note = f"batch {sealed[0]} is sealed and being proved; this pull request joined the next batch" if sealed else ""

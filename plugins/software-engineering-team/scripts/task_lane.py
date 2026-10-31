@@ -35,9 +35,10 @@ Every implementation request runs through this script:
   and a warning when the story changed after an open task was requested;
   ``board`` groups tasks by epic and story and marks a story delivered once
   merged tasks cover every criterion, derived on every run.
-- ``report`` is the retrospective: the tasks hold the request and approval
-  times, GitHub holds the PR, review, CI and merge times, read at report
-  time, and ``session_cost.py`` reads each task's cost and active minutes from
+- ``report`` is the retrospective: the tasks, read from ``origin/main`` (the
+  working tree when there is none), hold the request and approval times,
+  GitHub holds the PR, review, CI and merge times, read at report time, and
+  ``session_cost.py`` reads each task's cost and active minutes from
   the host session transcripts, so every wait gets an owner; ``--deep`` adds reading waste.
   Cost is tokens and dollars per task, its spawns and their startup context,
   priced by ``session_cost.load_prices``. Quality is read beside them: the
@@ -71,6 +72,7 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -1852,11 +1854,32 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
                                          "events": row["rework_auto"]}) + "\n")
 
 
+def task_records(root: Path, snapshot: Path) -> list[Path]:
+    """The task records of origin/main, copied under ``snapshot``, so a checkout that has not pulled still
+    counts every merged task; the working tree's records when there is no origin/main."""
+    # shortcut: origin/main is fixed; another default branch reads the working tree, add --base to report when needed
+    try:
+        names = run("git", "ls-tree", "--name-only", "origin/main", f"{TASKS.as_posix()}/", cwd=root).splitlines()
+    except Refused:
+        return sorted((root / TASKS).glob("tk-*.md"))
+    paths = []
+    for name in names:
+        if fnmatch.fnmatch(Path(name).name, "tk-*.md"):
+            shown = subprocess.run(["git", "show", f"origin/main:{name}"], cwd=root, capture_output=True)
+            if shown.returncode != 0:
+                raise Refused(f"git show origin/main:{name} failed: {shown.stderr.decode(errors='replace').strip()}")
+            record = snapshot / Path(name).name
+            record.write_bytes(shown.stdout)
+            paths.append(record)
+    return sorted(paths)
+
+
 def gather(root: Path, args) -> dict:
     tasks = []
-    for path in sorted((root / TASKS).glob("tk-*.md")):
-        tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path),
-                      "rework_notes": rework_notes(path)})
+    with tempfile.TemporaryDirectory() as snapshot:
+        for path in task_records(root, Path(snapshot)):
+            tasks.append({**task_props(path), "file": path.name, "role_checks": role_checks(path),
+                          "rework_notes": rework_notes(path)})
     chosen = select(tasks, args.since, args.recent)
     prs = pull_requests(root) if chosen else {}
     causes = rework_causes(root)

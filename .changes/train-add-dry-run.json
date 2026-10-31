@@ -1,0 +1,6 @@
+{
+  "summary": "train add --dry-run no longer joins a batch. It runs every check of the add and reports the batch the pull request would join, and the train state stays as it was, so the real add that follows is no longer refused as already in a batch.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

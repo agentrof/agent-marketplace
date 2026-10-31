@@ -1,0 +1,6 @@
+{
+  "summary": "train merge now honors its own --delegated flag. Before, the batch merge read only the flag stored when each member was added, so a rigor-high member added without --delegated was left for a person to merge even when the merge verb was given --delegated. The merge now delegates a member when the stored flag or the verb's flag is set, as the single pull request merge does.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -6,14 +6,14 @@
   },
   "metadata": {
     "description": "A catalog of curated agent teams for Claude Code and Codex.",
-    "version": "2026.10.8"
+    "version": "2026.11.1"
   },
   "plugins": [
     {
       "name": "software-engineering-team",
       "source": "./dist/claude/software-engineering-team",
       "description": "Software Engineering Team for approved analysis, solution and experience design, and a delivery-ready backlog.",
-      "version": "2026.10.8",
+      "version": "2026.11.1",
       "license": "Apache-2.0"
     }
   ]

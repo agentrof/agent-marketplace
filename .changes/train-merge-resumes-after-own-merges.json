@@ -1,6 +1,0 @@
-{
-  "summary": "train merge now resumes a batch that merged some of its members before stopping. Before, the members already merged moved the base branch, so the retry was refused with \"moved since the batch was proved\" and the whole batch had to be proved again. The base now counts as unmoved when every first-parent commit since the proved head is the merge commit of a member of the same batch; any other commit still requires a new proof.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

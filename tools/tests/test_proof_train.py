@@ -164,6 +164,28 @@ class StaleGreenBatchTests(unittest.TestCase):
             self.prove("proved-base")
 
 
+class BaseMovedByOwnMergesTests(unittest.TestCase):
+    """A batch that merged some members itself may resume; a commit from anywhere else still forces a new proof."""
+
+    def moved(self, head, since, merged_oids):
+        batch = {"base_head": "proved", "members": [{"pr": n} for n in range(1, len(merged_oids) + 1)]}
+
+        def run(*args, **options):
+            if args[:3] == ("gh", "pr", "view"):
+                oid = merged_oids[int(args[3]) - 1]
+                return json.dumps({"state": "MERGED", "mergeCommit": {"oid": oid}} if oid else {"state": "OPEN", "mergeCommit": None})
+            return head if args[:2] == ("git", "rev-parse") else " ".join(since)
+
+        lane = SimpleNamespace(run=run)
+        return proof_train.base_moved_only_by_batch(Path("."), lane, batch, "main")
+
+    def test_the_base_may_move_only_through_merge_commits_of_the_batch_members(self):
+        self.assertTrue(self.moved("proved", [], ["m1"]))
+        self.assertTrue(self.moved("m2", ["m2", "m1"], ["m1", "m2", None]))
+        self.assertFalse(self.moved("x", ["x", "m1"], ["m1", "m2"]))
+        self.assertFalse(self.moved("m1", [], ["m1"]))
+
+
 @integration
 class MergeTrainTests(unittest.TestCase):
     def setUp(self):

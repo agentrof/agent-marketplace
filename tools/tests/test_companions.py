@@ -275,6 +275,16 @@ class GraphifyNoteTests(unittest.TestCase):
         self.assertIn(".agentrof/graphify/docs/graph.json", note)
         self.assertIn("only after its first build", note)
 
+    def test_constitution_sources_rule_queries_the_graph_first(self):
+        text = (TEAM / "constitution.md").read_text(encoding="utf-8")
+        rule = text.split("## 5. Sources first", 1)[1].split("\n## ", 1)[0]
+        self.assertLess(rule.index("graphify query|path|explain"), rule.index("sources the task file lists"))
+        self.assertIn(".agentrof/graphify/docs/graph.json", rule)
+        self.assertIn("without a shell", rule)
+        flow = (TEAM / "flows" / "fast-lane.md").read_text(encoding="utf-8")
+        self.assertIn("constitution section 5", flow)
+        self.assertNotIn("greps `workspace/docs/`", flow)
+
 
 @integration
 class GraphifyRefreshTests(unittest.TestCase):

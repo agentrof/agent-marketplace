@@ -2,8 +2,8 @@
 
 Spawn template: paste `{{constitution}}` into every role prompt.
 
-Sources first, per constitution section 5: every role reads the sources the
-task file lists and greps `workspace/docs/` for anything missing.
+Sources first: every role finds context by constitution section 5, the
+graph query first when a graph exists.
 
 Tasks, links and parallel lanes follow
 `skill-content/deliver/references/fast-lane.md`.

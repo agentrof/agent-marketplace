@@ -24,7 +24,7 @@ Behavioral law for every role and the orchestrating session. Pasted into every s
 
 ## 5. Sources first
 
-- Start from the sources the task file lists, then grep `workspace/docs/` for anything missing. Read only what the change needs; context lists are advice, and a read cost out of proportion to the change is a defect to report. Hard reading obligations are only those a rule names, such as the diff under review and the task's acceptance criteria.
+- When `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph through `--graph .agentrof/graphify/docs/graph.json` once built, else the default graph), then read the sources the task file lists and grep `workspace/docs/` for anything missing; without a graph, start from those sources. A role without a shell gets the graph answer for its question in its spawn brief from the spawning session. Read only what the change needs; context lists are advice, and a read cost out of proportion to the change is a defect to report. Hard reading obligations are only those a rule names, such as the diff under review and the task's acceptance criteria.
 - If context is insufficient or wrong, search and read on your initiative or the parent agent's direction. Record the extra sources and reasons.
 
 ## 6. Safe by default

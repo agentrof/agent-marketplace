@@ -39,6 +39,16 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "(^|[._])(Agent|Task|spawn_agent)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/worker_context.py claude",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "SendMessage",
         "hooks": [
           {

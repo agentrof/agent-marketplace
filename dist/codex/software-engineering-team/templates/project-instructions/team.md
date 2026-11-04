@@ -13,7 +13,9 @@
   affected documentation with the delivered code.
 - Owner rules in `{{workspace}}/memory/me.md`, `profile.md` and the user companion
   remain binding. Every worker brief carries applicable authority, data safety,
-  environment constraints, write ownership and its stopping condition.
+  environment constraints, write ownership and its stopping condition. Native
+  launches use the delivery flow's `SWE_WORKER_BRIEF` format. The launch hook
+  supplies current rule sources and rejects missing or oversized context.
 - Application files follow the project's accepted layout. `tests_root` locates
   shared tests. `workspace_layout` declares permitted workspace folders.
   Feature design records live under `{{workspace}}/experience-design/`.

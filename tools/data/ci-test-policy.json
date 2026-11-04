@@ -25,6 +25,7 @@
         "tools.tests.test_ci_tests.CITestPlannerTests.test_selected_shard_runs_only_its_tests_and_writes_durable_report",
         "tools.tests.test_ci_tests.CITestPlannerTests.test_subtest_failure_and_class_setup_failure_do_not_pass",
         "tools.tests.test_graph_evidence.GraphEvidenceTests.test_native_query_bounds_failures_and_current_evidence",
+        "tools.tests.test_worker_context.WorkerContextTests.test_both_hosts_inject_rules_and_reject_incomplete_or_stale_inputs",
         "tools.tests.test_proof_cache.ProofCacheTests.test_snapshot_binds_source_dependencies_runtime_scope_and_private_environment",
         "tools.tests.test_proof_cache.ProofCacheTests.test_bounded_probe_failures_and_restored_source_changes_disable_reuse",
         "tools.tests.test_proof_cache.ProofCacheTests.test_unconfirmed_probe_cleanup_blocks_further_proof",

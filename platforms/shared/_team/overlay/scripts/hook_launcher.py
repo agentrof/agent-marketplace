@@ -32,6 +32,11 @@ def run(script, arguments):
     try:
         runpy.run_path(script, run_name="__main__")
     except Exception:
+        if os.path.basename(script) == "worker_context.py":
+            import json
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                "permissionDecision": "deny", "permissionDecisionReason": "Worker context failed to load."}}))
+            return 0
         # A crash reads as it would without the launcher: from the script's frame on.
         kind, error, trace = sys.exc_info()
         while trace is not None and trace.tb_frame.f_code.co_filename != script:
@@ -84,6 +89,10 @@ def below_floor(name, arguments, payload):
     autopilot entry's prompt is blocked with the hosts' documented decision.
     """
     import json
+    if name == "worker_context.py":
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+            "permissionDecision": "deny", "permissionDecisionReason": runtime_floor.message()}}))
+        return 0
     if name == "team_guard.py" and arguments[:1] == ["register"]:
         context = "\n".join((
             "AGENT_MARKETPLACE_HOOKS_ACTIVE: none",

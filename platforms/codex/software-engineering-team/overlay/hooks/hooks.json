@@ -32,6 +32,16 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "(^|[._])(Agent|Task|spawn_agent)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/worker_context.py codex",
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|apply_patch|Bash",
         "hooks": [
           {

@@ -35,13 +35,13 @@
       "0bb3fe6438a0f38e2d72099671bed6b08d77277d0b41fa8b59abf56954dcffdc"
     ,
     "flows/fast-lane.md":
-      "efc73a11f7dc277008a21ff529bd1fe649f24d8f2beefaf5431abbd4739dd142"
+      "6a794f726e92585883d58b5a62f4f8994198c91aa5f5db0838edafacacd826b3"
     ,
     "hooks/hooks.json":
-      "c77ad16579701cd126e5ed986f4cea187f351ba689b90e15ff0daadc52eec051"
+      "6b8f870b819d51aefffa29e0f648b9560b1b3a7d3284378d905eb869b13efa55"
     ,
     "host-contract.md":
-      "5b9d00c28ecf186d0f7f127be71519b9c80f749b64e68fae44e843b96da2665f"
+      "468aa8135cc91b07e422541394390edcb33b380c41e1f39c49d2095a772c74df"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -77,7 +77,7 @@
       "f5fcab070a80cb4bee1a3d07c039cf3249eb7eb364e3b128f40276b7cd36458f"
     ,
     "scripts/hook_launcher.py":
-      "f5dfa03e324467e05754048c0edac9751f1f8e76844b026fce151668cbf761fc"
+      "4502ef8c0188ac9fd87b589f139c2f6a962355b3d957c23652efae4195f4ccb9"
     ,
     "scripts/host_listing.py":
       "2c07d38e28fb7bc3762d96ac99b0b333bf452add10c537e2deeca604066fa526"
@@ -151,6 +151,12 @@
     "scripts/work_queue.py":
       "fc3677777b68251c11023ca54b3898981e00000fc441cd9b377eaf9812a79ac9"
     ,
+    "scripts/worker_context.py":
+      "5363cf455006aee750b4b817cde2854419cc23452c1f2cf8744ddef9ff1d7c54"
+    ,
+    "scripts/worker_context_host.py":
+      "d39f8bf3579bd9ab8cff3878b17fd2e112943b0a5cb967f98a60a8884ae04c7b"
+    ,
     "scripts/workspace_guard.py":
       "87dd2bfe35db542f3ffc37ec7519d6ddeff01d6008fce5c60858108899779969"
     ,
@@ -209,7 +215,7 @@
       "5df40512595c3cda5f55ed61307d3eed44a146f6e65bd75d3a5b210bd46e02b1"
     ,
     "skill-content/deliver/SKILL.md":
-      "e0e47077d207d799b3c67e51182f151ba42248650676c2a0aae6638ab0ebd853"
+      "baa77cd4cfa36278f371e4694c762990427d974f5f04aa22a4caca0d2560449a"
     ,
     "skill-content/deliver/data/companion-policy.json":
       "0182c29fb4627376785b5037373a2c49ab34b3d9a3977a34523b3018bf6ebff5"
@@ -338,10 +344,10 @@
       "7c533d07a527237a4ac3e25af85734213f458daa1c3f9eda901d5b37846ad62f"
     ,
     "templates/AGENTS.override.md":
-      "c845f8976e6177980adaadba48f121da0dabf243c468cd24e0b91bb190bee6f5"
+      "a042c0061ac34ccc13a14d73589c2fe230ae537a43a248e2ec16b6e0624b43ba"
     ,
     "templates/CLAUDE.md":
-      "12c7762914c124745b21d9db88b3bcae407c99a90347763178744b4f12d33a4e"
+      "d5b0aa9a3464054e91207b68bf24b09ca8113215f2e68080dd83149efd725d97"
     ,
     "templates/ci-tests.yml":
       "1e6c663045ba2a1fdd79cbc1e3efa47bba670a42bcb527cd2d57f2078465bfaf"
@@ -365,13 +371,13 @@
       "bd1e6c658d7b28717b0916220231b362a244ea5469a23a7c12d1533c692c68ea"
     ,
     "templates/memory/me.md":
-      "c1b1e79b6ced071bab76cde3a98f557e4c08c15969136f14b3fbadc726905125"
+      "02e734f2356d5c956fb0ba76afc1c92c4eba20a75cb6adb59c3b5b8d342e0d40"
     ,
     "templates/memory/product-decisions.md":
-      "0d24323007ad51a8ac4a3a03b166da4d79980d2f9380c92d10a2ffbbd7d548fe"
+      "0b39aebfbfd331e949ee861856016089238be5f3fc1ac012111582101d1e06e9"
     ,
     "templates/memory/profile.md":
-      "b830be1df67cf93730e457cd3bf683923ed60aa2e78a098fa8de0d94cd334bd0"
+      "9695c63bb6c9fa7ebed3cb3125c4d7ce1d7620b630c515d6227fbab0c9cc94ad"
     ,
     "templates/model-classes.json":
       "8c0eb0f986dd7a9032610f90544ac4e361cb9e34c8475296749aa92882d6336a"
@@ -386,7 +392,7 @@
       "d55ce54edd57f3d01df2dd9c130a19bd40cc21846c8e07e3a7c6235dc740a170"
     ,
     "templates/project-instructions/team.md":
-      "c69dd1e7b2a0b80c2cb6efa64a7cd13932457a0d39654f85b0c8e02c3e150dbc"
+      "3a2209f56f027252e4af75b6fc67d48e23f71c23ddda3555a907df18ccf83e9e"
     ,
     "templates/project-instructions/user-context.json":
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"

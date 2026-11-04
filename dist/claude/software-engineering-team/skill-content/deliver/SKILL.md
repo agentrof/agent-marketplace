@@ -40,8 +40,8 @@ connected throughout delivery.
 3. Implement directly when work is clear and local. Delegate independent work
    when it reduces elapsed time or improves evidence. Each brief carries the
    outcome, write scope, critical invariants, authorization limits, sources,
-   evidence requirement and stopping condition. Share findings instead of full
-   parent history. Sequence conflicting writes and heavy resource use.
+   evidence requirement and stopping condition. Use the flow's `SWE_WORKER_BRIEF` launch format so the hook supplies current rules.
+   Share findings instead of full parent history. Sequence conflicting writes and heavy resource use.
    Load applicable companions with `task_lane.py companion --task <id>
    --name <companion-id> --host <host> --source <local-SKILL.md>`. Apply the
    returned scoped procedure. Graphify resolves its installed source automatically.

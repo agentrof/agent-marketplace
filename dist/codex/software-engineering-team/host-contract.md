@@ -9,7 +9,10 @@
 - Resolve each native worker through `model_class.py resolve --profile
   <light|work|review|critical> --access <read|write> --host codex`. Select its
   generated identity from `.codex/agents/`. Allocate isolated write workspaces
-  before launch. The parent owns orchestration and waits for required work.
+  before launch. Use the flow's `SWE_WORKER_BRIEF` format. The launch hook
+  supplies current project rules and applicable methods. Include current user
+  restrictions not yet recorded in project files. The parent owns orchestration
+  and waits for required work.
 - A launch file's model and effort override spawn-time settings. Pass no model
   override. The package pins need Codex 0.159.1 or later. Record requested and
   host-observed model/effort separately, leaving absent observations unverified.

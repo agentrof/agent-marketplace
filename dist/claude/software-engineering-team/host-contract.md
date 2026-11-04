@@ -21,8 +21,9 @@
 - Read profiles allow only `Read`, `Grep` and `Glob`. Confirm the host loaded
   that definition before accepting independent review. Worker profiles retain
   task-scoped authoring and preview-browser capability. `omitClaudeMd: true`
-  means the parent must supply authority, relevant project constraints and
-  method paths in the bounded brief.
+  keeps the inherited instruction load bounded. The worker launch hook supplies
+  current project rules and applicable methods from `SWE_WORKER_BRIEF`. The
+  parent includes current user restrictions that are not yet in project files.
 - The main-session default is `claude-sonnet-5-5` at `medium`. This is a launch
   recommendation and changes no global configuration. `/configure models`
   manages project `class_models` overrides for the four compute profiles.

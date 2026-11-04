@@ -86,6 +86,19 @@ invariants, authorization limits, relevant procedures, proof and stopping
 condition. The review launcher supplies a bounded procedure packet directly to
 its child. Each required procedure needs a concrete candidate-specific assessment
 with source citations. A parent's earlier receipt cannot satisfy this review.
+Before a native worker launch, use `SWE_WORKER_BRIEF` followed by a newline
+and one JSON object in the tool's prompt/message. Required fields are `task`,
+`worktree` (absolute assigned checkout), `outcome`, `write_scope` (relative paths,
+empty for read-only work), `authority`, `evidence`, `stop` and `sources` (additional
+relative contract paths). The launch hook validates the fields and linked checkout,
+then supplies current constitution, companion policy, memory, user instructions,
+task and applicable methods automatically. Missing sources or oversized packets
+block launch. Supply every current user restriction in `authority`, including
+restrictions not yet recorded in project files. No field grants new authority.
+The local worker-context receipt records preparation for host delivery, not
+semantic compliance. Hook trust/loading is required. External CLI wrappers and
+unregistered delegation tools remain outside this native launch guard.
+
 Do not copy the whole parent conversation. Reuse a worker for its scoped repair.
 Never allocate more active workers than independent ready work or host capacity.
 

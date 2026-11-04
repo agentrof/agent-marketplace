@@ -76,7 +76,11 @@ are optional where they improve isolation, independence or useful parallelism.
     closed sessions requires an explicitly configured native scheduler or recovery
     mechanism. Later startup recovers interrupted local observations.
 12. Hooks enforce only covered operations when enabled and loaded. Prompts
-    express intent. Native permissions and verified sandbox boundaries provide
+    express intent. The native worker launch guard validates bounded briefs and
+   injects current rule sources before covered spawn calls. Its receipt records
+   prepared source delivery, while semantic compliance remains unproven. Hook
+   failures outside the launcher and external delegation paths require host
+   controls. Native permissions and verified sandbox boundaries provide
     their documented controls. Missing enforcement stays visible.
 13. Package builds are generated from canonical sources for every registered
     host. `dist/` is never hand-edited. New components use `tools/scaffold.py`.

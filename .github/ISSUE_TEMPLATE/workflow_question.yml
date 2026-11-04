@@ -1,5 +1,5 @@
 name: Workflow question
-description: Ask for help using an existing Requirement, Delivery or host workflow.
+description: Ask for help using an team setup, delivery or host integration workflow.
 title: "question: "
 body:
   - type: dropdown
@@ -8,9 +8,12 @@ body:
       label: Workflow area
       options:
         - Setup
-        - Requirement Flow
-        - Backlog planning
-        - Delivery Flow
+        - Project configuration
+        - Task planning and delivery
+        - Design methods
+        - Proof and review
+        - Autopilot and retrospective
+        - Companions
         - Package upgrade
         - Claude Code host
         - Codex host

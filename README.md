@@ -281,11 +281,11 @@ Security review lens with a tenant data isolation reference. Security-sensitive 
 | `workspace/config.json` | Validated workflow settings and model overrides. |
 | `workspace/docs/` | Project documentation, tasks and their evidence references. |
 | `workspace/experience-design/` | Design rules and feature design artifacts. |
-| `memory/me.md` | Explicit user rules and authority boundaries. |
-| `memory/profile.md` | Learned preferences, separated from binding rules. |
-| `memory/current-plan.md` | Active outcomes, work and open decisions. |
-| `memory/product-decisions.md` | Accepted decisions with their sources and rationale. |
-| `memory/agent-marketplace.md` | Managed team integration instructions. |
+| `workspace/memory/me.md` | Explicit user rules and authority boundaries. |
+| `workspace/memory/profile.md` | Learned preferences, separated from binding rules. |
+| `workspace/memory/current-plan.md` | Active outcomes, work and open decisions. |
+| `workspace/memory/product-decisions.md` | Accepted decisions with their sources and rationale. |
+| `workspace/memory/agent-marketplace.md` | Managed team integration instructions. |
 | `.agentrof/agent-marketplace/.runtime/` | Ignored local runtime records, proof caches and observations. |
 
 Project instructions and host-local worker definitions are generated during

@@ -9,7 +9,13 @@ Read `memory/me.md` and follow it before editing this repository.
 - Generate all registered host distributions with `python3 tools/build_distributions.py`.
 - Never edit `dist/` by hand.
 - Create components with `tools/scaffold.py`; do not hand-copy them.
-- Derived README counts are maintained by `make counts`, never by hand.
+- Derived README inventories are maintained by `make counts`, never by hand.
+- Keep root user guides and linked procedures aligned with behavior changes.
+  Distinguish stable-release behavior from unpublished changes on this branch.
+- Skills own portable methods. Technical launch definitions and model mappings
+  belong to platform registries. Preserve both hosts' supported behavior.
+- Keep source loading, reported application and verified outcomes separate in
+  evidence. Report unavailable host observations and enforcement boundaries.
 - Stage the complete candidate, run `make check-local`, then `make verify-local` before committing. Pull request CI runs the full suite; one validation error fails CI.
 - Text and files committed here never identify a consumer project or its data; follow the Confidentiality section of `docs/maintainer-operations-protocol.md` for every commit, changeset and PR.
 
@@ -23,8 +29,8 @@ that failure and the reproduction command in the review evidence. Pull
 request CI owns the full suite and required platform and host checks.
 
 Fix agents stage the complete candidate before the local targets. Reviewers
-stay read-only: use the owner's exact staged candidate and its local evidence;
-if that candidate is unavailable, report the missing evidence without staging
+stay read-only and use the owner's exact staged candidate and its local evidence.
+If that candidate is unavailable, report the missing evidence without staging
 or changing files. Verify remote checks against the exact PR head before
 claiming readiness.
 

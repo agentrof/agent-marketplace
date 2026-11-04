@@ -44,7 +44,7 @@ class WorkerContextTests(unittest.TestCase):
                 packet = json.loads(updated[key][len(context.PACKET):])
                 self.assertIn('No external publication.', updated[key])
                 self.assertTrue(any(row['path'].endswith('constitution.md') for row in packet['sources']))
-                self.assertTrue(any(row['path'].endswith('/profile.md') for row in packet['sources']))
+                self.assertTrue(any(Path(row['path']).name == 'profile.md' for row in packet['sources']))
                 self.assertEqual(context.transform({**payload, 'tool_input': updated}, host), {'hookSpecificOutput': result})
                 (root / 'workspace/memory/me.md').write_text('New binding rule.\n')
                 refreshed = context.transform({**payload, 'tool_input': updated}, host)

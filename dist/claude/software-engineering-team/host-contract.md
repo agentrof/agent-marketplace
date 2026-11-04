@@ -46,6 +46,18 @@
   Use full setup for missing bootstrap or a reviewed config migration. Confirm
   host reload before relying on a refreshed launch identity.
 
+## Initial setup and project migration
+
+After the setup entry's core apply/check, run `generate_claude_project.py`
+with `inspect`, `apply` and `check`, each using `--project-root <root>
+--scope all --seed-user-files`. Resolve any reported ownership choices before
+apply. The full scope refreshes portable instruction roots and this host's local
+launch files. Seeding creates missing user files and preserves existing content.
+A local-only refresh does not update tracked instructions or seed memory.
+Use the other host's generator when its local launch definitions also need refresh.
+Reload the host and complete its required hook trust flow before relying on the
+new launch guard.
+
 ## Local candidate loading
 
 Build every host distribution from canonical source, then start the test

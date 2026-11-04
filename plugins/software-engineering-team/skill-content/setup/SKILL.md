@@ -28,7 +28,11 @@ Authored files and unrelated host settings remain owned by the user.
    unambiguously need a decision before migration.
 2. Run `setup_project.py apply --project-root <root> --json`, then `check` with the
    same arguments. The planner owns locking, atomic writes, rollback and convergence.
-3. Inspect, apply and check the host projection as the host contract describes.
+3. Use the host contract's project generator for `inspect`, `apply` and `check`,
+   each with `--project-root <root> --scope all --seed-user-files`.
+   This creates missing user memory and refreshes both portable instruction
+   roots plus the active host's local launch definitions. Existing authored
+   memory stays intact. Resolve reported ownership choices before applying.
    Read the actual model/capability table and retained-file warnings. An available
    model is not evidence of a successful invocation.
 4. Use existing project test and environment commands. Complete the declared CI
@@ -51,6 +55,11 @@ a fresh host session.
 
 Return the exact diff, empty remaining setup plan, projection status and any host
 reload requirement. Keep ordinary package updates separate from project migration.
+Confirm the worker-required memory files and user instruction companions exist
+before claiming setup complete. Complete the host reload and required hook trust
+step before claiming the new hooks are active. Package installation alone does
+not refresh project files. For compatible projects with only launch-definition
+drift, the host's `--scope local` apply/check path is sufficient.
 
 ## Conditional references
 

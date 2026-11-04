@@ -30,13 +30,16 @@ CONFIG_FIELDS = {
     "local_proof",
     "local_proof_map",
     "proof_runner",
+    "proof_reuse",
     "task_triggers",
     role_settings.CLASS_MODELS,
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout",
-                   "pr_proof", "local_proof", "local_proof_map", "proof_runner", "task_triggers"}
+                   "pr_proof", "local_proof", "local_proof_map", "proof_runner", "proof_reuse",
+                   "task_triggers"}
 # Deliver settings the project owns; setup writes none of them and keeps the project's.
-PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "proof_runner", "task_triggers")
+PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "proof_runner", "proof_reuse",
+                  "task_triggers")
 RETIRED_DEFAULTS = {"role_routing": {}, "task_criteria_range": [3, 8]}
 REVIEWER_ALIASES = {
     "code-reviewer": "reviewer", "analysis-challenger": "reviewer",
@@ -293,6 +296,20 @@ def base_errors(config: dict) -> list[str]:
         errors.append("local_proof_map must list rules with paths and either commands or none: true")
     if not isinstance(config.get("proof_runner", ""), str):
         errors.append("proof_runner must be a string")
+    if "proof_reuse" in config:
+        reuse = config["proof_reuse"]
+        if not isinstance(reuse, dict):
+            errors.append("proof_reuse must be an object")
+        else:
+            if set(reuse) - {"identity_command", "max_age_seconds"}:
+                errors.append("proof_reuse accepts only identity_command and max_age_seconds")
+            command = reuse.get("identity_command")
+            if not isinstance(command, list) or not command or not all(
+                    isinstance(arg, str) and arg.strip() for arg in command):
+                errors.append("proof_reuse.identity_command must be a non-empty argv list of non-blank strings")
+            age = reuse.get("max_age_seconds", 86400)
+            if type(age) is not int or not 1 <= age <= 86400:
+                errors.append("proof_reuse.max_age_seconds must be an integer from 1 to 86400")
     errors.extend(trigger_errors(config.get("task_triggers", {})))
     errors.extend(layout_errors(config))
     return errors

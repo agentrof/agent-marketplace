@@ -95,7 +95,7 @@
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/project_config.py":
-      "811972278d6c325e73c56065d35c8c4eb5b7033442d8c55b771bfe5caf6e95c4"
+      "ed9e7480c6b1b628262bf080dce9f4e18cc9f5995dec65da81eef0c50c441c51"
     ,
     "scripts/project_instructions.py":
       "9d47c7f43701efbf02710852b459e7cbf8680372afa58d10b88c460960ad8bd7"
@@ -103,8 +103,11 @@
     "scripts/project_paths.py":
       "40891b6797eb8c6437e4be9173571d451512d9af85fc47aba19db60e09c1f0b8"
     ,
+    "scripts/proof_cache.py":
+      "86f11fa7ecb95bc8a6f4972a0210adc2f30db60d5ed96800baad94b4b1833882"
+    ,
     "scripts/proof_train.py":
-      "5923115dd45f09ef8b34fedf4c7663d4e4873dde6e6ffdcaa49b05d6c734ac30"
+      "f5e2185ac2d802ccdde83b78aaa08b7f1fbd51adf5d8cbaac30d0923396cf61d"
     ,
     "scripts/retrospective.py":
       "7d0afdf5fd5eff4bd4dc8124f4d61fb5bbe07ff012d39745ccab5e94fd38e8b4"
@@ -137,7 +140,7 @@
       "d5cf071e13078c7ba7c24eb1a3b16ed044fcb96acddefc7ea40a7e84969e6c9a"
     ,
     "scripts/task_lane.py":
-      "674019d7e341c046f1b500edf729b1386f33d1a2fbced7328fcdce93500d36f0"
+      "5857ede9967fe3fd7fd443b459c9b7618e2443677f5f200495a4a877354c4f34"
     ,
     "scripts/team_guard.py":
       "e01524c3b89612457b06033d69fc3e881385dc707a42d5aece7f501de46e9868"
@@ -188,7 +191,7 @@
       "d39d94a0071024c42463e83e5e2b2b5b8ddc5cf59a45dd5791e66315d52efb77"
     ,
     "skill-content/configure/references/config-contract.md":
-      "3ec2d2bbeb11b0adab217e0f684d94cd0b654639386ac8f45b1d601dac2e2edd"
+      "63774ce74c64f18d66382e7546917fd412f377eefaffc1b230f0817f42f2a976"
     ,
     "skill-content/configure/references/role-models.md":
       "301fc8e3345f4ded1ded841991d0239de54f329a5c8eaf41aa7015985437f9e7"
@@ -221,7 +224,7 @@
       "1db850034de2beb719e8111c85f3e192bcddcbbcb24db38460c2c2b46e19b1c3"
     ,
     "skill-content/deliver/references/local-proof.md":
-      "0b4d4338f5cecb571ce078e2f1396da048699f72aebcb560abc44a40954293d5"
+      "fa9e04ba021e4b5c50cc9659859c2061f45ad8458b623739ce4ed0e00cd18d3b"
     ,
     "skill-content/experience-design/SKILL.md":
       "06c0d75650c30dcb02dabcf23b54feb5ba12c0143abb473fbb2e6b5858fdc42d"
@@ -290,7 +293,7 @@
       "2e31e8ac2b65fac7c4029e412fd6fb5a7d69e0c157f9576cab6d8e7d15e6b0ea"
     ,
     "skill-content/verify/references/test-selection.md":
-      "3bde5b631511e2b3621816b88c8d71dba7e4fbc88527acc4c94d24fb69fc6ce0"
+      "831786292742e6411e1df7150fa4007fa080f4ca7f07a2a568bbee88a97f90b7"
     ,
     "skills/analyze/SKILL.md":
       "7c38107cd24c423cacd4d760bef4dfb4b71e25f6f55cd70b8fea55b5836cb4e5"

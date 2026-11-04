@@ -458,7 +458,12 @@ class CITestPlannerUnitTests(unittest.TestCase):
             "tools.tests.test_retrospective.AutomaticRetrospectiveTests.test_durable_emit_does_not_wait_for_contended_queue",
             "tools.tests.test_retrospective.AutomaticRetrospectiveTests.test_inbox_duplicate_consumed_during_publish_remains_queued",
             "tools.tests.test_graph_evidence.GraphEvidenceTests.test_native_query_bounds_failures_and_current_evidence",
+            "tools.tests.test_proof_cache.ProofCacheTests.test_snapshot_binds_source_dependencies_runtime_scope_and_private_environment",
+            "tools.tests.test_proof_cache.ProofCacheTests.test_bounded_probe_failures_and_restored_source_changes_disable_reuse",
+            "tools.tests.test_proof_cache.ProofCacheTests.test_unconfirmed_probe_cleanup_blocks_further_proof",
             "tools.tests.test_proof_execution.ProofExecutionTests.test_proof_is_bounded_serial_and_preserves_the_first_failure",
+            "tools.tests.test_proof_execution.ProofExecutionTests.test_prove_reuses_only_unchanged_success_and_serializes_duplicate_requests",
+            "tools.tests.test_proof_train.MergeTrainTests.test_unchanged_train_reuses_proof_and_failed_retries_remain_invalid",
             "tools.tests.test_retrospective_hook.RetrospectiveHookTests.test_subprocess_hook_drains_detached_report_on_both_host_payloads",
             "tools.tests.test_work_queue.WorkQueueTests.test_shared_dedup_fencing_reconciliation_and_budgets",
         }

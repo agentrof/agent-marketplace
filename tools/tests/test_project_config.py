@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import hashlib
 import json
@@ -48,6 +49,50 @@ class ProjectConfigTests(unittest.TestCase):
                          project_config.base_errors({"pr_proof": "local_record"}))
         self.assertIn("pr_proof must be one of remote_ci, local_record",
                       project_config.base_errors({"pr_proof": "ghost"}))
+
+    def test_proof_reuse_is_optional_validated_and_preserved_by_setup(self):
+        sys.path.insert(0, str(SCRIPTS))
+        import project_config
+        import setup_project
+
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = self.unit_config(Path(temporary))
+            base = json.loads(config_path.read_bytes())
+            self.assertEqual(project_config.check(base), [])
+            args = argparse.Namespace(output_language="English", terminology_language="English")
+            fresh, _ = setup_project.desired_config(args, config_path)
+            self.assertNotIn("proof_reuse", fresh)
+            self.assertNotIn("proof_reuse", project_config.DEFAULTS)
+            for fields in (project_config.CONFIG_FIELDS, project_config.ORDINARY_FIELDS,
+                           project_config.PROJECT_FIELDS):
+                self.assertIn("proof_reuse", fields)
+            reuse = {"identity_command": ["python3", "tools/proof_identity.py"]}
+            for age in (None, 1, 86400):
+                value = dict(reuse)
+                if age is not None:
+                    value["max_age_seconds"] = age
+                self.assertEqual(project_config.check({**base, "proof_reuse": value}), [])
+            invalid = [None, False, [], {}, {"identity_command": "echo identity"},
+                       {"identity_command": []}, {"identity_command": [" "]},
+                       {"identity_command": [True]}, {**reuse, "unknown": True}]
+            invalid.extend({**reuse, "max_age_seconds": age}
+                           for age in (True, False, 0, 86401, 1.5, "60", None))
+            for value in invalid:
+                with self.subTest(value=value):
+                    self.assertTrue(any("proof_reuse" in error for error in
+                                        project_config.check({**base, "proof_reuse": value})))
+            written = self.run_script(CONFIG, "set", "--config", str(config_path),
+                                      "--field", "proof_reuse", "--value", json.dumps(reuse))
+            self.assertEqual(written.returncode, 0, written.stderr)
+            before = config_path.read_bytes()
+            preserved, changed = setup_project.desired_config(args, config_path)
+            self.assertEqual(preserved["proof_reuse"], reuse)
+            self.assertNotIn("proof_reuse", changed)
+            self.assertEqual(config_path.read_bytes(), before)
+            rejected = self.run_script(CONFIG, "set", "--config", str(config_path),
+                                       "--field", "proof_reuse", "--value", '{"identity_command":[]}')
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertEqual(config_path.read_bytes(), before)
 
     def test_retired_routing_and_criteria_fields_require_migration(self):
         sys.path.insert(0, str(SCRIPTS))

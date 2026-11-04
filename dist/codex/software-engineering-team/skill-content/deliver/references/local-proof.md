@@ -20,9 +20,6 @@ Read this when a task uses local proof or shares proof with a batch.
    review of the same candidate. Resolve blocking findings and merge with its
    full `--head` and `--critical 0`. Merge requires the fresh native review record.
 
-The task-record-only change allowed by the compiler does not authorize reuse
-across code changes. Before reuse, verify dependencies, command selection and
-environment inputs still match. Re-run affected proof when they change.
 A recorded exit code is evidence of that run, with its stated coverage.
 On POSIX, a command that leaves background processes in its process group
 fails proof and the runner stops that group. Timeout and cancellation also
@@ -31,6 +28,39 @@ Detached sessions and external services require the project's own cleanup
 contract. Windows uses process-tree termination on timeout or cancellation,
 which cannot establish cleanup of children whose parent has already exited.
 Use a project runner with verified lifecycle isolation for that workload.
+
+## Optional reuse of successful proof
+
+Without `proof_reuse` in `workspace/config.json`, each proof invocation runs its
+selected commands fresh. To opt in, provide `identity_command` as a non-empty
+argv list, for example `["project-proof-identity"]`. It executes
+directly without an implicit shell. Optional `max_age_seconds` accepts integers
+from 1 to 86400, with 86400 as the default.
+
+The project-owned probe must be cheap and metadata-only. Return stable opaque
+stdout covering actual installed dependencies, untracked fixtures, toolchain
+state and relevant external service generations. A lockfile alone cannot
+establish what is installed. The probe has a five-second timeout and a 64 KiB
+output limit. Raw probe output and raw environment values are never persisted
+in proof records.
+
+The runtime automatically binds the exact candidate and proof root, tracked
+code and tests, selected commands and runner, scope, proof runtime and
+environment identity. A successful, complete record can be reused only while
+these inputs and the probe identity still match and its age remains valid.
+Reused results retain their original execution timestamps. Changed inputs,
+missing or unreadable evidence, expiry, probe failure, or a failed or
+interrupted proof cause a fresh run. Legacy records receive one fresh run
+before becoming eligible. Task-record edits cannot establish a cache hit for
+a different candidate.
+
+Unconfirmed probe cleanup blocks shared proof until reconciled, just as
+unconfirmed test-process cleanup does.
+
+The project owns identification and isolation of mutable external state.
+Reuse validates the recorded input contract. Test coverage and the probe's
+completeness still require engineering judgment. Keep volatile live checks
+fresh when their environment cannot provide a reliable generation identity.
 
 ## Selection by impact
 
@@ -61,8 +91,9 @@ full proof and one independent native review.
   with ordinary proof require their own fresh review record. New members after
   sealing join the next batch.
 - `train prove --batch <n> --base <branch>` integrates the recorded members
-  into `train/<n>` and runs full proof. The candidate and base are fixed for
-  that result. Changed members or base require renewed proof and review.
+  into `train/<n>` and selects full proof, using the same optional reuse
+  contract. The candidate and base are fixed for that result. Changed members
+  or base require renewed proof and review.
 - `review --batch <n> --host <host> --base <branch>` reviews the combined
   candidate. Shared procedure text is supplied once, with assessment coverage
   required for each applicable member.

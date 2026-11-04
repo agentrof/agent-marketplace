@@ -30,8 +30,24 @@ configuration, fixtures and runtime inputs match the proof contract.
 Freeze the tested snapshot. Keep implementation workers off that snapshot while
 they continue in owned workspaces. Start with cheap checks, run heavy groups
 within measured capacity and investigate a failing batch by narrowing its
-changes. Full reruns require a changed relevant input, invalid evidence or a
-diagnostic reason.
+changes. Select reruns from changed inputs, invalid evidence and the diagnostic
+question. Required proof still runs fresh when reuse is not configured.
+
+Optional project-owned `proof_reuse` uses a direct argv `identity_command` and
+an optional `max_age_seconds` from 1 to 86400, defaulting to 86400. The probe
+must cheaply identify actual installed dependencies, untracked fixtures,
+toolchains and relevant service generations with stable opaque stdout. It is
+limited to five seconds and 64 KiB. Raw output and raw environment values are
+not persisted. The runtime additionally binds tracked code and tests, the
+candidate, proof root, selected commands, runtime and environment identity.
+
+Reuse requires matching inputs and complete successful evidence within its
+age limit. Changes, missing or unreadable records, expiry, probe failure and
+failed or interrupted runs require fresh proof. Legacy records run fresh once.
+Cached evidence retains its original execution timestamps. The project owns
+external-state identity and isolation, including any mutable fixtures or
+services beyond tracked files. A matching identity establishes eligibility
+under that contract, while coverage and semantic correctness still need review.
 
 ## Failure handling
 

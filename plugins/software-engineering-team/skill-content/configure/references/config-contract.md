@@ -3,7 +3,7 @@
 `workspace/config.json` is the closed project bootstrap contract. Accepted
 keys are `schema_version`, `team_id`, `output_language`, `terminology_language`,
 `tests_root`, `workspace_layout`, `pr_proof`, `local_proof`, `local_proof_map`,
-`proof_runner`, `task_triggers` and `class_models`. The current schema is 2.
+`proof_runner`, `proof_reuse`, `task_triggers` and `class_models`. The current schema is 2.
 Setup supplies missing layout defaults and preserves valid project overrides.
 
 Use `project_config.py set --config workspace/config.json --field <field>
@@ -20,6 +20,12 @@ Model settings use `set-class`, described in `role-models.md`.
 - `pr_proof` selects `remote_ci` or `local_record`. Local proof commands,
   impact rules and an optional runner follow the delivery entry's
   `references/local-proof.md`. An uncovered path requires full proof.
+- `proof_reuse` optionally enables reuse of matching successful local proof.
+  Its required `identity_command` is a non-empty list of non-blank argv strings,
+  executed directly without an implicit shell. Optional `max_age_seconds` is
+  an integer from 1 to 86400 and defaults to 86400. Other keys and boolean ages
+  are invalid. Setup preserves this project-owned object and leaves it absent
+  on fresh projects. Without it, proof commands run fresh.
 - `task_triggers` overrides named method, risk and reviewer trigger rules.
   Rule predicates may use `path_globs`, `keywords` and `exclude_globs`.
   Reviewers may additionally use `rigors` and `on_any_risk`. Available reviewer
@@ -33,6 +39,16 @@ Technology choices, data invariants, capacities and service boundaries belong
 in accepted design records. Environment and verification commands belong in
 operation documents, with executable proof commands referenced by config.
 Keep those records aligned with code when their contract changes.
+
+An example reuse setting is
+`{"identity_command":["project-proof-identity"],"max_age_seconds":3600}`.
+The project supplies that cheap, metadata-only probe. Its stable opaque stdout
+must identify actual installed dependencies, untracked fixtures, toolchains and
+relevant service generations. The runtime limits it to five seconds and 64 KiB,
+and persists neither its raw stdout nor raw environment values. The runtime
+also binds the candidate, tracked files, proof commands and runtime inputs.
+External-state completeness and isolation remain the project's responsibility.
+See the delivery entry's `references/local-proof.md` for invalidation rules.
 
 ## Legacy migration
 

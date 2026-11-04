@@ -136,7 +136,7 @@ def remove(args, root, lane, state) -> dict:
     if getattr(args, "dry_run", False):
         return {"ok": True, "dry_run": True, "batch": batch["id"], "members": [m["task"] for m in left]}
     batch.update(members=left, status=OPEN)
-    for key in ("head", "base_head", "base", "commands"):
+    for key in ("head", "base_head", "base", "commands", "proof_scope", "finished_at"):
         batch.pop(key, None)
     state.save()
     return {"ok": True, "batch": batch["id"], "members": [m["task"] for m in left]}
@@ -190,6 +190,11 @@ def check_reviewed_heads(batch: dict, lane) -> None:
             raise lane.Refused(f"{member['task']} changed after review; remove and add it after reviewing the new head")
 
 
+def proof_scope(batch: dict, base_head: str) -> dict:
+    return {"batch": batch["id"], "base_head": base_head,
+            "members": [{"task": member["task"], "head": member["head"]} for member in batch["members"]]}
+
+
 def prove(args, root, lane, state) -> dict:
     batch = state.batch(args.batch, lane)
     busy = [b["id"] for b in state.data["batches"] if b["status"] == SEALED and b is not batch and alive(b.get("pid"))]
@@ -212,33 +217,52 @@ def prove(args, root, lane, state) -> dict:
     state.save()
     number, directory = batch["id"], state.file.parent
     state.close()
+    path = directory / f"batch-{number}.proof.json"
+    candidate_state = {}
     try:
-        tree, base_head = integrate(root, lane, batch, batch["members"], args.base)
+        if before != GREEN:
+            path.unlink(missing_ok=True)
+        lane.run("git", "fetch", "origin", args.base, cwd=root)
+        base_head = lane.run("git", "rev-parse", f"origin/{args.base}", cwd=root)
+        scope = proof_scope(batch, base_head)
+        tree = directory / f"wt-{number}"
+        unchanged = (tree.is_dir() and batch.get("base") == args.base and batch.get("proof_scope") == scope
+                     and lane.head_state(tree) == (batch.get("head"), True)
+                     and lane.run("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=tree) == f"train/{number}")
+        if not unchanged:
+            path.unlink(missing_ok=True)
+            tree, base_head = integrate(root, lane, batch, batch["members"], args.base, base_head=base_head)
         head = lane.run("git", "rev-parse", "HEAD", cwd=tree)
-        results = run_commands(root, lane, tree, args.base)
-        final_head, clean = lane.head_state(tree)
-        if final_head != head or not clean:
+        candidate_state = {"head": head, "base_head": base_head, "base": args.base, "proof_scope": scope}
+        record = lane.cached_proof(tree, lane.proof_commands(tree, args.base), base=args.base, scope=scope,
+                                   path=path, metadata={"selection": "full", "why": ["one combined candidate"]},
+                                   expected_head=head)
+        if record["head"] != head or not record["tree_clean"]:
             raise lane.Refused("the integration candidate changed while proof ran; restore it and prove again")
     except BaseException:
         reopened = State(directory)
         try:
             failed = reopened.batch(number, lane)
-            failed.update(status=OPEN if before == SEALED else before)
+            failed.update(candidate_state, status=RED)
             failed.pop("pid", None)
+            failed.pop("commands", None)
+            failed.pop("finished_at", None)
             reopened.save()
         finally:
             reopened.close()
         raise
-    ok = all(r["exit_code"] == 0 for r in results)
+    ok = record["ok"]
     done = State(directory)
     try:
         batch = done.batch(number, lane)
-        batch.update(status=GREEN if ok else RED, head=head, base_head=base_head, base=args.base, commands=results)
+        batch.update(candidate_state, status=GREEN if ok else RED,
+                     commands=record["commands"], finished_at=record["finished_at"])
         batch.pop("pid", None)
         done.save()
     finally:
         done.close()
-    return {"ok": ok, "batch": number, "integration_head": head, "commands": results}
+    return {"ok": ok, "batch": number, "integration_head": head, "commands": record["commands"],
+            "finished_at": record["finished_at"], "reused": record["reused"]}
 
 
 def candidate(batch: dict, root: Path, lane, base: str) -> Path:
@@ -258,6 +282,21 @@ def candidate(batch: dict, root: Path, lane, base: str) -> Path:
     remote = lane.run("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{base}", cwd=root).split()
     if not remote or remote[0] != batch["base_head"]:
         raise lane.Refused(f"{base} moved since the batch was proved; run train prove again")
+    path = home(root, lane) / f"batch-{batch['id']}.proof.json"
+    if "proof_scope" in batch:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise lane.Refused("the batch proof record is missing or invalid; run train prove again") from exc
+        if (not isinstance(record, dict) or record.get("ok") is not True or record.get("tree_clean") is not True
+                or record.get("head") != head or record.get("base") != base or record.get("selection") != "full"
+                or record.get("proof_scope") != proof_scope(batch, batch["base_head"])
+                or record.get("commands") != results):
+            raise lane.Refused("the batch proof record does not match its candidate; run train prove again")
+        problems = lane.cached_proof_problems(tree, record, lane.proof_commands(tree, base),
+                                             base=base, scope=proof_scope(batch, batch["base_head"]), path=path)
+        if problems:
+            raise lane.Refused("; ".join(problems))
     for member in batch["members"]:
         path = lane.task_path(tree, member["task"])
         props = lane.task_props(path)

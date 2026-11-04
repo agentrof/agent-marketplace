@@ -775,6 +775,7 @@ class LocalProofTests(unittest.TestCase):
                 return "https://github.com/acme/shop/pull/9"
             return ""
         with mock.patch.object(task_lane, "run", side_effect=run), \
+                mock.patch.object(task_lane, "proof_admission", return_value=contextlib.nullcontext()), \
                 mock.patch.object(task_lane, "head_state", return_value=(self.HEAD, clean)):
             result = task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
         create = next(call for call in calls if call[:3] == ("gh", "pr", "create"))
@@ -827,6 +828,7 @@ class LocalProofTests(unittest.TestCase):
         own = task_lane.task_path(root, "TK-004").relative_to(root).as_posix()
         for changed, stale in ((own, False), (own + "\nsrc/other.txt", True)):
             with mock.patch.object(task_lane, "run", return_value=changed), \
+                    mock.patch.object(task_lane, "proof_admission", return_value=contextlib.nullcontext()), \
                     mock.patch.object(task_lane, "head_state", return_value=(self.HEAD, True)):
                 problems = task_lane.proof_problems(root, "TK-004")[0]
             self.assertEqual(any("run prove again" in item for item in problems), stale, changed)
@@ -864,6 +866,7 @@ class LocalProofGitTests(unittest.TestCase):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         init_repository(root)
+        (root / ".gitignore").write_text(".agentrof/\n", encoding="utf-8")
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
         (root / "workspace").mkdir(exist_ok=True)
@@ -889,6 +892,7 @@ class LocalProofGitTests(unittest.TestCase):
             root = Path(tempfile.mkdtemp())
             self.addCleanup(lambda: __import__("shutil").rmtree(root))
             init_repository(root)
+            (root / ".gitignore").write_text(".agentrof/\n", encoding="utf-8")
             (root / task_lane.TASKS).mkdir(parents=True)
             (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
             (root / "workspace").mkdir(exist_ok=True)

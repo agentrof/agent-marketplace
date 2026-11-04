@@ -372,6 +372,72 @@ class MergeTrainTests(unittest.TestCase):
             self.assertEqual(review.call_count, 1)
             self.assertEqual(review.call_args.args[1][0]["task"], "TK-001")
 
+    def test_unchanged_train_reuses_proof_and_failed_retries_remain_invalid(self):
+        identity = self.root.parent / "environment.txt"
+        counter = self.root.parent / "proof-runs.txt"
+        identity.write_text("one", encoding="utf-8")
+        (self.root / "proof.py").write_text(
+            "import pathlib, sys\n"
+            "with pathlib.Path(sys.argv[1]).open('a') as stream:\n"
+            "    stream.write('run\\n')\n"
+            "sys.exit(1 if pathlib.Path(sys.argv[2]).read_text() == 'fail' else 0)\n",
+            encoding="utf-8")
+        command = f'"{sys.executable}" proof.py "{counter}" "{identity}"'
+        self.config({"local_proof": [command], "proof_reuse": {"identity_command": [
+            sys.executable, "-c", "import pathlib,sys; print(pathlib.Path(sys.argv[1]).read_text())", str(identity)]}})
+        self.git("add", "proof.py", "workspace/config.json")
+        self.git("commit", "-qm", "configure proof identity")
+        self.git("push", "-q", "origin", "main")
+        self.member(1)
+        first = self.train("prove")
+        self.assertTrue(first["ok"])
+        self.assertFalse(first["reused"])
+        directory = self.root / proof_train.STATE
+        receipt = directory / "batch-1.proof.json"
+        original = receipt.read_bytes()
+        self.assertIsNotNone(json.loads(original)["proof_inputs"])
+
+        # Environment-only changes must preserve the already reviewed Git candidate.
+        with mock.patch.object(proof_train, "integrate", side_effect=AssertionError("candidate rebuilt")):
+            hit = self.train("prove")
+            self.assertTrue(hit["reused"])
+            self.assertEqual(hit["integration_head"], first["integration_head"])
+            self.assertEqual(hit["finished_at"], first["finished_at"])
+            self.assertEqual(receipt.read_bytes(), original)
+            self.assertEqual(counter.read_text().splitlines(), ["run"])
+
+            identity.write_text("two", encoding="utf-8")
+            with self.assertRaisesRegex(task_lane.Refused, "proof inputs changed"):
+                self.train("publish")
+            fresh = self.train("prove")
+            self.assertFalse(fresh["reused"])
+            self.assertEqual(fresh["integration_head"], first["integration_head"])
+            self.assertEqual(len(counter.read_text().splitlines()), 2)
+
+            identity.write_text("three", encoding="utf-8")
+            with mock.patch.object(task_lane, "run_proof_commands", side_effect=KeyboardInterrupt), \
+                    self.assertRaises(KeyboardInterrupt):
+                self.train("prove")
+            batch = json.loads((directory / "state.json").read_text())["batches"][0]
+            self.assertEqual(batch["status"], proof_train.RED)
+            self.assertEqual(json.loads(receipt.read_text())["proof_state"], "failed")
+            identity.write_text("two", encoding="utf-8")
+            self.assertFalse(self.train("prove")["reused"])
+            self.assertEqual(len(counter.read_text().splitlines()), 3)
+
+            identity.write_text("fail", encoding="utf-8")
+            self.assertFalse(self.train("prove")["ok"])
+            self.assertEqual(json.loads((directory / "state.json").read_text())["batches"][0]["status"], proof_train.RED)
+            identity.write_text("two", encoding="utf-8")
+            self.assertFalse(self.train("prove")["reused"])
+            self.assertEqual(len(counter.read_text().splitlines()), 5)
+
+            legacy = json.loads(receipt.read_text())
+            legacy.pop("proof_inputs")
+            receipt.write_text(json.dumps(legacy), encoding="utf-8")
+            self.assertFalse(self.train("prove")["reused"])
+            self.assertEqual(len(counter.read_text().splitlines()), 6)
+
     def test_prove_rejects_a_new_commit_in_a_detached_member_worktree(self):
         self.member(1)
         tree = self.root.parent / "detached"
@@ -718,7 +784,8 @@ class TrainRemoveTests(unittest.TestCase):
         return proof_train.remove(SimpleNamespace(task=task, batch=batch), None, task_lane, state)
 
     def test_a_member_leaves_an_open_or_red_batch_and_the_batch_reopens_without_the_old_proof(self):
-        old_proof = {"head": "a1", "base_head": "b2", "commands": [{"command": "make test", "exit_code": 1}]}
+        old_proof = {"head": "a1", "base_head": "b2", "commands": [{"command": "make test", "exit_code": 1}],
+                     "proof_scope": {"batch": 1}, "finished_at": "2026-01-01T00:00:00Z"}
         for status, proof in ((proof_train.OPEN, {}), (proof_train.RED, old_proof), (proof_train.GREEN, old_proof)):
             with self.subTest(status):
                 state = self.state((status, ["task-a", "task-b", "task-c"], proof), (proof_train.OPEN, ["task-d"], {}))

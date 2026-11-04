@@ -19,6 +19,7 @@ observed cause. file-issues publishes explicitly authorized proposals.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import fnmatch
 import hashlib
@@ -41,6 +42,7 @@ from urllib.parse import quote
 import atomic_file
 import file_lock
 import project_paths
+import proof_cache
 
 from vault_markdown import parse_frontmatter
 
@@ -2669,13 +2671,12 @@ def stop_proof(process: subprocess.Popen) -> None:
     process.wait(timeout=10)
 
 
-def run_proof_commands(root: Path, commands: list[str]) -> list[dict]:
-    """Serialize shared-environment proof and bound each owned process tree."""
+@contextlib.contextmanager
+def proof_admission(root: Path):
+    """Hold the shared proof resource through identity checks and execution."""
     common = Path(run("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=root))
     lock_path = common / "agentrof" / "runtime" / "proof.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    timeout = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["proof_timeout_seconds"]
-    results = []
     with lock_path.open("a+", newline="\n") as handle:
         queued = datetime.now(timezone.utc)
         if not file_lock.acquire(handle.fileno(), timeout=1):
@@ -2683,58 +2684,144 @@ def run_proof_commands(root: Path, commands: list[str]) -> list[dict]:
         blocked = lock_path.with_suffix(".blocked.json")
         if blocked.exists():
             raise Refused(f"proof cleanup needs reconciliation; inspect {blocked} before clearing it")
-        wait_seconds = (datetime.now(timezone.utc) - queued).total_seconds()
-        deadline = time.monotonic() + timeout
-        for command in commands:
-            clock = datetime.now(timezone.utc)
-            timed_out = False
-            leftover_children = False
-            with tempfile.TemporaryFile() as output_file:
-                process = subprocess.Popen(proof_runner(root, command), shell=True, cwd=root,
-                                           stdout=output_file, stderr=subprocess.STDOUT,
-                                           start_new_session=os.name == "posix")
-                try:
-                    process.wait(timeout=max(0.001, deadline - time.monotonic()))
-                    if os.name == "posix":
-                        try:
-                            os.killpg(process.pid, 0)
-                            leftover_children = True
-                        except ProcessLookupError:
-                            pass
-                        if leftover_children:
-                            stop_proof(process)
-                except BaseException as error:
+        yield blocked, (datetime.now(timezone.utc) - queued).total_seconds()
+
+
+def run_proof_commands(root: Path, commands: list[str], *, admission=None) -> list[dict]:
+    """Serialize shared-environment proof and bound each owned process tree."""
+    if admission is None:
+        with proof_admission(root) as admitted:
+            return run_proof_commands(root, commands, admission=admitted)
+    blocked, wait_seconds = admission
+    timeout = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["proof_timeout_seconds"]
+    results = []
+    deadline = time.monotonic() + timeout
+    for command in commands:
+        clock = datetime.now(timezone.utc)
+        timed_out = False
+        leftover_children = False
+        with tempfile.TemporaryFile() as output_file:
+            process = subprocess.Popen(proof_runner(root, command), shell=True, cwd=root,
+                                       stdout=output_file, stderr=subprocess.STDOUT,
+                                       start_new_session=os.name == "posix")
+            try:
+                process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                if os.name == "posix":
                     try:
+                        os.killpg(process.pid, 0)
+                        leftover_children = True
+                    except ProcessLookupError:
+                        pass
+                    if leftover_children:
                         stop_proof(process)
-                    except BaseException:
-                        atomic_file.replace_text(blocked, json.dumps({"pid": process.pid, "at": now(), "reason": "cleanup_unconfirmed"}) + "\n")
-                        raise
-                    if isinstance(error, subprocess.TimeoutExpired):
-                        timed_out = True
-                    else:
-                        raise
-                output_file.seek(0, os.SEEK_END)
-                output_file.seek(max(0, output_file.tell() - 200000))
-                output = output_file.read().decode("utf-8", errors="replace")
-            if leftover_children:
-                output += "\nProof left background processes running. Their process group was stopped."
-            code = process.returncode
-            if timed_out:
-                code = 124
-            elif leftover_children:
-                code = 125
-            results.append({"command": command, "exit_code": code,
-                            "started_at": clock.isoformat(), "finished_at": now(),
-                            "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 3),
-                            "queue_seconds": round(wait_seconds, 3), "timed_out": timed_out,
-                            "leftover_children": leftover_children,
-                            "tail": "" if code == 0 else proof_tail(output),
-                            "failed_tests": [] if code == 0 else failed_test_ids(output),
-                            "suites": [] if code == 0 else suite_results(output)})
-            wait_seconds = 0
-            if code:
-                break
+            except BaseException as error:
+                try:
+                    stop_proof(process)
+                except BaseException:
+                    atomic_file.replace_text(blocked, json.dumps({"pid": process.pid, "at": now(), "reason": "cleanup_unconfirmed"}) + "\n")
+                    raise
+                if isinstance(error, subprocess.TimeoutExpired):
+                    timed_out = True
+                else:
+                    raise
+            output_file.seek(0, os.SEEK_END)
+            output_file.seek(max(0, output_file.tell() - 200000))
+            output = output_file.read().decode("utf-8", errors="replace")
+        if leftover_children:
+            output += "\nProof left background processes running. Their process group was stopped."
+        code = process.returncode
+        if timed_out:
+            code = 124
+        elif leftover_children:
+            code = 125
+        results.append({"command": command, "exit_code": code,
+                        "started_at": clock.isoformat(), "finished_at": now(),
+                        "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 3),
+                        "queue_seconds": round(wait_seconds, 3), "timed_out": timed_out,
+                        "leftover_children": leftover_children,
+                        "tail": "" if code == 0 else proof_tail(output),
+                        "failed_tests": [] if code == 0 else failed_test_ids(output),
+                        "suites": [] if code == 0 else suite_results(output)})
+        wait_seconds = 0
+        if code:
+            break
     return results
+
+
+def proof_inputs(root: Path, commands: list[str], base: str, scope: dict):
+    try:
+        config = json.loads((root / "workspace/config.json").read_text(encoding="utf-8"))
+        if not isinstance(config, dict) or not isinstance(config.get("proof_reuse"), dict):
+            return None
+        base_heads = run("git", "for-each-ref", "--format=%(refname) %(objectname)",
+                         f"refs/remotes/origin/{base}", f"refs/heads/{base}", cwd=root)
+    except (OSError, ValueError, Refused):
+        return None
+    runtime = [Path(__file__), Path(proof_cache.__file__), Path(atomic_file.__file__),
+               Path(file_lock.__file__), Path(__file__).with_name("proof_train.py"), TARGETS_FILE]
+    return proof_cache.snapshot(root, commands, config.get("proof_runner", ""),
+                                {"base": base, "base_refs": base_heads, **scope}, config, runtime)
+
+
+def cached_proof_problems(root: Path, record: dict, commands: list[str], *, base: str,
+                          scope: dict, path: Path | None = None) -> list[str]:
+    with proof_admission(root):
+        if path is not None:
+            try:
+                if json.loads(path.read_text(encoding="utf-8")) != record:
+                    return ["the proof record changed during validation; retry the gate"]
+            except (OSError, ValueError):
+                return ["the proof record is missing or invalid; run prove again"]
+        if record.get("proof_state") in ("running", "failed") or record.get("ok") is False:
+            return ["the latest proof attempt did not complete successfully; run prove again"]
+        if record.get("proof_inputs") is None:
+            return []
+        current = proof_inputs(root, commands, base, scope)
+        policy = project_setting(root, "proof_reuse", {})
+        age = policy.get("max_age_seconds", 86400) if isinstance(policy, dict) else 0
+        if not proof_cache.reusable(record, current, commands, age):
+            return ["proof inputs changed, expired or cannot be verified; run prove again"]
+    return []
+
+
+def cached_proof(root: Path, commands: list[str], *, base: str, scope: dict,
+                 path: Path, metadata: dict, expected_head: str | None = None) -> dict:
+    """Reuse a complete matching proof while holding the same admission as execution."""
+    with proof_admission(root) as admission:
+        head, clean = head_state(root)
+        if not clean or expected_head is not None and head != expected_head:
+            raise Refused("proof needs a clean committed candidate")
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (ValueError, OSError):
+            previous = {}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {**metadata, "head": head, "tree_clean": True, "base": base,
+                  "proof_scope": scope, "proof_state": "running", "ok": False, "commands": []}
+        atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+        try:
+            inputs = proof_inputs(root, commands, base, scope)
+            policy = project_setting(root, "proof_reuse", {})
+            age = policy.get("max_age_seconds", 86400) if isinstance(policy, dict) else 0
+            if proof_cache.reusable(previous, inputs, commands, age):
+                atomic_file.replace_text(path, json.dumps(previous, indent=2) + "\n")
+                return {**previous, "reused": True}
+            results = run_proof_commands(root, commands, admission=admission) if commands else []
+            final_inputs = proof_inputs(root, commands, base, scope) if inputs is not None else None
+            final_head, final_clean = head_state(root)
+            stable = inputs is None or inputs == final_inputs
+            record.update(tree_clean=final_clean and final_head == head,
+                          proof_state="observed", commands=results, finished_at=now(),
+                          proof_inputs=inputs, inputs_stable=stable,
+                          ok=final_clean and final_head == head and stable
+                          and all(item["exit_code"] == 0 for item in results))
+            record = proof_cache.seal(record)
+            atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+            return {**record, "reused": False}
+        except BaseException:
+            record.update(proof_state="failed", ok=False, finished_at=now())
+            atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+            raise
 
 
 def cmd_prove(args, root: Path) -> dict:
@@ -2747,17 +2834,17 @@ def cmd_prove(args, root: Path) -> dict:
         else proof_plan(root, args.base, full=getattr(args, "full", False))
     if not clean:
         raise Refused("proof needs a clean committed candidate")
-    results = run_proof_commands(root, plan["commands"]) if plan["commands"] else []
-    final_head, final_clean = head_state(root)
-    clean = clean and final_clean and final_head == head
+    if plan["selection"] != "deferred":
+        record = cached_proof(root, plan["commands"], base=args.base,
+                              scope={"task": args.task, "selection": plan["selection"]}, path=path,
+                              metadata={"task": args.task, "selection": plan["selection"], "why": plan["why"]},
+                              expected_head=head)
+        return {**record, "record": str(path.relative_to(root))}
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
               "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
-              "ok": None if plan["selection"] == "deferred" else clean and all(item["exit_code"] == 0 for item in results),
-              "proof_state": "pending" if plan["selection"] == "deferred" else "observed",
-              "commands": results}
+              "ok": None, "proof_state": "pending", "commands": []}
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(record, indent=2) + "\n")
+    atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
     return {**record, "record": str(path.relative_to(root))}
 
 
@@ -2792,6 +2879,11 @@ def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
                  for item in record.get("commands", []) if item.get("exit_code") != 0]
     if not record.get("commands") and record.get("selection") not in ("impact", "deferred", "train"):
         problems.append("the proof record holds no command")
+    if record.get("selection") not in ("deferred", "train"):
+        base = record.get("base", "main")
+        plan = proof_plan(root, base, full=record.get("selection") == "full")
+        problems += cached_proof_problems(root, record, plan["commands"], base=base,
+                                         scope={"task": task, "selection": plan["selection"]}, path=path)
     return problems, record
 
 

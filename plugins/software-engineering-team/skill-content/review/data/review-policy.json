@@ -1,5 +1,5 @@
 {
-  "packet_max_bytes": 32768,
+  "packet_max_bytes": 65536,
   "source_max_bytes": 8192,
   "procedure_min_output_tokens": 8192,
   "timeout_seconds": 300,

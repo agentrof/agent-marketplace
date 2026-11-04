@@ -116,7 +116,7 @@
       "e6107bdb6971bcb507827fa62443177785d516c284786cf6bd2d7efc60a8dce9"
     ,
     "scripts/review_execution.py":
-      "d70ecfd255d54ebecb95d5b79aadd252f2b45d0d794012126323f08bfb448956"
+      "75eb82969905646c6384f09b69fe36a098abdb2c2a2ab4a309e41180f491dd12"
     ,
     "scripts/review_host.py":
       "285585d82257e1430cd7f5ce5314355fdd0b18ef9d73995c1946bc3077d92e9f"
@@ -140,7 +140,7 @@
       "d5cf071e13078c7ba7c24eb1a3b16ed044fcb96acddefc7ea40a7e84969e6c9a"
     ,
     "scripts/task_lane.py":
-      "5857ede9967fe3fd7fd443b459c9b7618e2443677f5f200495a4a877354c4f34"
+      "77087edb6cb576ce4777c33aa541c34324e2ce165f93d785f6758f1df742d8ec"
     ,
     "scripts/team_guard.py":
       "e01524c3b89612457b06033d69fc3e881385dc707a42d5aece7f501de46e9868"
@@ -263,7 +263,7 @@
       "1159458cce381ecdcae0b15bc1f83f6047cef7b8423f8378eae7a51160445bf5"
     ,
     "skill-content/review/data/review-policy.json":
-      "82a7d486cacb07505ee29c2ccb9be457042a6dedeb6971dbb409fe5c9f701806"
+      "20f4ddc07d2f43c40d2c806e9f81d88fe74b871a484f5da198066e332d952c2a"
     ,
     "skill-content/review/references/findings.md":
       "93980558fded97dba9dae55355e45306c04597351d7e6cd311abb30948293ff2"

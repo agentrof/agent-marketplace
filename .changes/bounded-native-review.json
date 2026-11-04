@@ -1,0 +1,6 @@
+{
+  "summary": "Allow bounded aggregate review packets and observe process-group cleanup before accepting native review completion.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

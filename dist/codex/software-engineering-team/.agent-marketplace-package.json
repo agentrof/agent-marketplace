@@ -14,7 +14,7 @@
       "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474"
     ,
     ".codex-plugin/plugin.json":
-      "1fdafa05437c0565dfbbcce425c17f17ee428537bed4d5b2bf20723047f6d2e0"
+      "88209e7ea264f1b8e1a148f0b3d45e86e9a2782f0e46d5fe9571b03ffb05bd54"
     ,
     "agents/critical-reviewer.md":
       "7e0f238aa6d8478ec68f974190a22178cc6914fa67247b41bfe1188ca97f657e"
@@ -398,8 +398,8 @@
       "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
   },
   "host": "codex",
-  "marketplace_release": "2026.11.1",
+  "marketplace_release": "2026.11.2",
   "runtime_contracts": [],
   "schema_version": 4,
-  "version": "2026.11.1"
+  "version": "2026.11.2"
 }

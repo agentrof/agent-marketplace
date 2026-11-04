@@ -229,3 +229,8 @@
 - train merge now resumes a batch that merged some of its members before stopping. Before, the members already merged moved the base branch, so the retry was refused with "moved since the batch was proved" and the whole batch had to be proved again. The base now counts as unmoved when every first-parent commit since the proved head is the merge commit of a member of the same batch; any other commit still requires a new proof.
 - The merge train gains a remove verb: task_lane.py train remove takes a member that does not merge onto the others out of an open or red batch, so the rest of the batch can be proved and merged without editing the train state by hand.
 - A green merge train batch whose base branch moved before it merged can be proved again. Merge refuses such a batch and asks for a new proof, but prove refused every green batch, so the batch could neither merge nor be proved and stayed stuck.
+
+## 2026.11.2
+
+- The constitution's sources rule tells every role to query the graphify graph first when one exists, and says how a role without a shell gets the graph answer.
+- Replace persona-driven delivery with thirteen scoped methods, explicit execution profiles, four context-required companions, bounded background work and exact-candidate delivery gates. Inject bounded rule context before native worker launches and clarify project memory ownership. Preserve existing settings through reviewed one-time migration. Reuse complete proof only for unchanged, identifiable inputs in standalone and batch delivery. Align platform CI coverage and native installation checks, share validation setup and track exact release dispatches.

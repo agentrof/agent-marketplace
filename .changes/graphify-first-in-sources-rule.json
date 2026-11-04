@@ -1,6 +1,0 @@
-{
-  "summary": "The constitution's sources rule tells every role to query the graphify graph first when one exists, and says how a role without a shell gets the graph answer.",
-  "components": {
-    "software-engineering-team": "patch"
-  }
-}

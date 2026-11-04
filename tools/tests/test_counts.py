@@ -76,6 +76,16 @@ class CountsTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             counts.inject(root / "README.md", block)
 
+    def test_only_active_workflow_companions_have_install_instructions(self):
+        root = Path(__file__).resolve().parents[2]
+        rendered = counts.render_companions(root)
+        headings = {line.removeprefix("### ") for line in rendered.splitlines()
+                    if line.startswith("### ")}
+        self.assertEqual(headings, {"ponytail", "graphify", "impeccable", "security-audit"})
+        for retired in ("humanizer", "diagram-design", "superpowers"):
+            self.assertNotIn(retired, rendered)
+        self.assertIn("when installed and enabled", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -145,23 +145,21 @@ def class_words(slots: list) -> str:
     return f"the {named} class" + ("es" if len(slots) > 1 else "")
 
 
-def check_notes(prefix: str, check: dict, pins: Mapping[str, dict], fallen, conflicts: list,
-                session: str) -> list:
+def check_notes(prefix: str, check: dict, pins: Mapping[str, dict], unavailable, conflicts: list) -> list:
     """The warnings and notes a project generator prints for its model check.
 
-    ``fallen`` holds the models whose roles run on ``session``, the session's
-    model, because a check judged them unavailable, now or at the last setup.
+    An unavailable model keeps its configured pin. The caller must select an
+    authorized fallback for the affected attempt or leave that attempt pending.
     """
     notes = []
-    for model in sorted(fallen):
+    for model in sorted(unavailable):
         entry = pins[model]
         why = (f"this host's own model list ({check.get('view')} view,"
                f" {check.get('binary')} {check.get('version')}) does not hold it"
                if check.get("status") == "ok" else "the last setup judged it unavailable")
-        whose = "Its" if len(entry["classes"]) == 1 else "Their"
         notes.append(f"{prefix}: warning: {model} is unavailable for {class_words(entry['classes'])}:"
-                     f" {why}. {whose} roles {', '.join(entry['roles'])} run on {session} at their"
-                     " own effort; every setup or refresh judges it again.")
+                     f" {why}. Launches {', '.join(entry['roles'])} keep their requested pins."
+                     " Select an authorized fallback profile for this attempt or leave it pending.")
     kept = sorted(model for model, value in check.get("verdicts", {}).items()
                   if value == "unverified")
     if kept:

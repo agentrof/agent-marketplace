@@ -1208,3 +1208,153 @@ class NativeRecoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoopDispatchTests(unittest.TestCase):
+    def test_loops_require_bounded_repository_scope_and_fenced_dispatch(self):
+        from types import SimpleNamespace
+        import work_queue
+        import task_lane
+        args = autopilot.option_parser().parse_args(["--loop", "resolve"])
+        with self.assertRaisesRegex(autopilot.Refusal, "issue-filter"):
+            autopilot.loop_terms(POLICY, args)
+        for selector in ("repo:other/repository", "label:ready org:other"):
+            args = autopilot.option_parser().parse_args(["--loop", "resolve", "--issue-filter", selector])
+            with self.assertRaisesRegex(autopilot.Refusal, "granted repository"):
+                autopilot.loop_terms(POLICY, args)
+        args = autopilot.option_parser().parse_args(["--loop", "resolve", "--loop", "retro",
+                                                    "--issue-filter", "label:ready", "--max-active", "2"])
+        terms = autopilot.loop_terms(POLICY, args)
+        self.assertFalse(terms["loops"]["publish_issues"])
+        self.assertEqual(terms["loops"]["max_active"], 2)
+        grant = {"id": "AP-fixture", "expires_at": "2099-01-01T00:00:00Z",
+                 **terms}
+        grant["loops"]["repository"] = "owner/project"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with mock.patch.object(autopilot, "state_dir", return_value=root), \
+                    mock.patch.object(autopilot, "locked", side_effect=lambda path: contextlib.nullcontext()), \
+                    mock.patch.object(autopilot, "active_grant", return_value=grant), \
+                    mock.patch.object(autopilot, "loop_repository", return_value="owner/project"), \
+                    mock.patch.object(task_lane, "run", return_value='[{"number": 12, "updatedAt": "2026-11-04T01:00:00Z"}]'), \
+                    mock.patch.object(work_queue, "enqueue") as enqueue, \
+                    mock.patch.object(work_queue, "claim", return_value=None) as claim, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(autopilot.cmd_tick(SimpleNamespace(project_root=str(root)), NOW), 0)
+            self.assertEqual(enqueue.call_args.args[3]["grant"], "AP-fixture")
+            self.assertEqual(claim.call_args.kwargs["scope"], "AP-fixture")
+            self.assertEqual(claim.call_args.kwargs["shared_kinds"], ("retro",))
+
+
+class FileFindingTests(unittest.TestCase):
+    def setUp(self):
+        from types import SimpleNamespace
+        import task_lane
+        import work_queue
+        self.task_lane = task_lane
+        self.work_queue = work_queue
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.grant = {"id": "AP-fixture", "expires_at": "2099-01-01T00:00:00Z", "loops": {
+            "repository": "owner/project", "publish_issues": True, "kinds": ["detect", "retro"]}}
+        self.job = {"id": "job-1", "owner": "AP-fixture", "lease_token": "lease-1", "state": "claimed",
+                    "kind": "detect", "payload": {"grant": "AP-fixture", "repository": "owner/project"}}
+        self.args = SimpleNamespace(project_root=str(self.root), job="job-1", lease="lease-1",
+                                    fingerprint="repeatable-defect", title="Reproducible defect")
+        self.found = []
+        self.creates = []
+        self.create_error = None
+        self.after_search = lambda: None
+        patches = [
+            mock.patch.object(autopilot, "state_dir", return_value=self.root / "autopilot"),
+            mock.patch.object(autopilot, "locked", side_effect=lambda path: contextlib.nullcontext()),
+            mock.patch.object(autopilot, "loop_repository", return_value="owner/project"),
+            mock.patch.object(work_queue, "status", side_effect=lambda root: {"jobs": [self.job]}),
+            mock.patch.object(task_lane, "run", side_effect=self.run_command),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
+        grant_patch = mock.patch.object(autopilot, "active_grant", return_value=self.grant)
+        self.active_grant = grant_patch.start()
+        self.addCleanup(grant_patch.stop)
+        finish_patch = mock.patch.object(work_queue, "finish", side_effect=self.finish)
+        self.finish_call = finish_patch.start()
+        self.addCleanup(finish_patch.stop)
+
+    def finish(self, root, job, lease, outcome, evidence):
+        self.job["state"] = "needs_reconciliation" if outcome == "unknown" else outcome
+        return self.job
+
+    def run_command(self, *args, **kwargs):
+        if args[:2] == ("git", "rev-parse"):
+            return str(self.root / ".git")
+        if args[:3] == ("gh", "issue", "list"):
+            self.after_search()
+            return json.dumps(self.found)
+        if args[:3] == ("gh", "issue", "create"):
+            self.creates.append(args)
+            if self.create_error:
+                raise self.task_lane.Refused(self.create_error)
+            return "https://example.invalid/owner/project/issues/12"
+        self.fail(f"unexpected command {args[:3]}")
+
+    def file(self):
+        output = io.StringIO()
+        with mock.patch.object(sys, "stdin", io.StringIO("Observed failure and reproduction.")), \
+                contextlib.redirect_stdout(output):
+            code = autopilot.cmd_file_finding(self.args, NOW)
+        return code, json.loads(output.getvalue())
+
+    def test_file_finding_requires_publication_scope_and_current_job_lease(self):
+        self.grant["loops"]["publish_issues"] = False
+        with self.assertRaisesRegex(autopilot.Refusal, "does not authorize"):
+            self.file()
+        self.grant["loops"]["publish_issues"] = True
+        for field, value in (("owner", "AP-other"), ("lease_token", "old-lease"),
+                             ("state", "needs_reconciliation"), ("kind", "resolve")):
+            old = self.job[field]
+            with self.subTest(field=field):
+                self.job[field] = value
+                with self.assertRaises(autopilot.Refusal):
+                    self.file()
+                self.job[field] = old
+        self.active_grant.side_effect = autopilot.Refusal("grant expired")
+        with self.assertRaisesRegex(autopilot.Refusal, "expired"):
+            self.file()
+        self.assertEqual(self.creates, [])
+        self.finish_call.assert_not_called()
+
+    def test_unknown_finding_creation_is_held_and_deduplicated(self):
+        self.create_error = "response lost after issue creation"
+        with self.assertRaisesRegex(autopilot.Refusal, "outcome unknown"):
+            self.file()
+        self.assertEqual(len(self.creates), 1)
+        self.assertEqual(self.job["state"], "needs_reconciliation")
+        self.assertEqual(self.finish_call.call_args.args[3], "unknown")
+        with self.assertRaisesRegex(autopilot.Refusal, "active job lease"):
+            self.file()
+        self.job["state"] = "claimed"
+        with self.assertRaisesRegex(autopilot.Refusal, "prior publication"):
+            self.file()
+        self.found = [{"number": 12, "url": "https://example.invalid/owner/project/issues/12",
+                       "body": "Observed failure.\n<!-- agentrof-finding:repeatable-defect -->"}]
+        code, result = self.file()
+        self.assertEqual((code, result["created"]), (0, False))
+        self.assertEqual(result["url"], self.found[0]["url"])
+        self.assertEqual(len(self.creates), 1)
+        self.finish_call.assert_called_once()
+
+    def test_file_finding_rechecks_authority_after_remote_search(self):
+        def revoke():
+            self.active_grant.side_effect = autopilot.Refusal("grant revoked during search")
+        self.after_search = revoke
+        with self.assertRaisesRegex(autopilot.Refusal, "revoked during search"):
+            self.file()
+        self.active_grant.side_effect = None
+        self.after_search = lambda: self.job.update(state="needs_reconciliation")
+        with self.assertRaisesRegex(autopilot.Refusal, "lease expired"):
+            self.file()
+        self.assertEqual(self.creates, [])
+        self.finish_call.assert_not_called()

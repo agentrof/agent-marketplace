@@ -41,39 +41,16 @@ MODEL_CONFIG_RELPATH = "tools/data/models.json"
 LIMITS_CONFIG_RELPATH = "tools/data/limits.json"
 PRODUCT_CONFIG_RELPATH = "product.json"
 
-AGENT_REQUIRED_KEYS = {"name", "description", "model_class", "output_contract"}
-# How the role hands results back. prose: findings/artifacts in the reply
-# text (every current persona). structured: a forced tool call. Declared so
-# a composer can refuse pairing a prose persona with schema forcing; the
-# repo's own flows spawn via the Agent tool and never force schema.
-AGENT_OUTPUT_CONTRACT_ENUM = {"prose", "structured"}
-# Optional capability restriction: an agent MAY carry tools: as a whitelist,
-# and only the read-only set is legal. Read-only roles (challengers, expert
-# panels) are denied write capability at spawn time, not by instruction.
-AGENT_OPTIONAL_KEYS = {"tools"}
-AGENT_READONLY_TOOLS = {"Read", "Grep", "Glob"}
 SKILL_REQUIRED_KEYS = {"name", "description", "exposure"}
 SKILL_OPTIONAL_KEYS = {"project_scope", "model_invocable", "user_invocable"}
 SKILL_EXPOSURE_ENUM = {"entry", "internal"}
 SKILL_PROJECT_SCOPE_ENUM = {"project", "external"}
 
-AGENT_REQUIRED_SECTIONS = ["Principles", "Boundaries", "Approach", "Output Contract"]
-SKILL_REQUIRED_SECTIONS = ["When to Use"]
-
-# Skills that must ship the reserved stack checklists.
-TECH_SKILLS = {
-    "python-fastapi",
-    "react-typescript",
-    "sql-database-design",
-    "nosql-database-design",
-    "container-environment",
-}
-RESERVED_CHECKLISTS = ["review-checklist.md", "qa-checklist.md"]
+SKILL_REQUIRED_SECTIONS = ["Outcome", "When to use", "Inputs and authority", "Method", "Evidence and completion", "Conditional references"]
 
 # Authoring size caps. tools/data/limits.json (authoring_caps) is
 # authoritative; these constants are the fallbacks when that file is
 # unloadable, and a cap bump edits both in one commit.
-AGENT_BODY_MAX_LINES = 80
 SKILL_MAX_LINES = 150
 SKILL_WARN_LINES = 120
 SKILL_MAX_BYTES = 8192
@@ -84,16 +61,11 @@ PROJECT_INSTRUCTION_MAX_BYTES = 24576
 PROJECT_INSTRUCTION_MAX_LINES = 180
 
 AUTHORING_CAP_KEYS = {
-    "agent_body_max_lines", "skill_max_lines", "skill_warn_lines",
+    "skill_max_lines", "skill_warn_lines",
     "skill_max_bytes", "constitution_max_lines", "flow_max_lines",
     "reference_warn_lines", "project_instruction_max_bytes",
     "project_instruction_max_lines",
 }
-
-AUTO_TRIGGER_RE = re.compile(
-    r"use\s+proactively|use\s+when|use\s+this\s+skill\s+when|trigger\s+when|auto-?loads?\s+when|must\s+be\s+used",
-    re.IGNORECASE,
-)
 
 VERSION_PIN_RE = re.compile(
     r"\b(python|node|react|next\.?js|vue|svelte|angular|fastapi|django|flask|"
@@ -149,15 +121,6 @@ HOME_PATH_FIXTURES = {
 
 HANDWRITTEN_COUNT_RE = re.compile(
     r"\b\d+\s+(?:agents?|skills?|plugins?|commands?)\b", re.IGNORECASE
-)
-
-# Stack/framework/vendor nouns banned in agent BODIES (tech lives in skills).
-TECH_NOUN_RE = re.compile(
-    r"\b(python|fastapi|django|flask|react|typescript|javascript|node|nextjs|"
-    r"vue|svelte|angular|tailwind|postgres(?:ql)?|mysql|mongodb|redis|sql|"
-    r"nosql|docker|kubernetes|aws|azure|gcp|pytest|vitest|playwright|npm|pip|"
-    r"obsidian)\b",
-    re.IGNORECASE,
 )
 
 MD_LINK_RE = re.compile(r"(?<!\!)\[[^\]]*\]\(([^)\s]+?)(?:\s+\"[^\"]*\")?\)")
@@ -296,11 +259,6 @@ def plugin_dirs(tree: Tree) -> list[Path]:
     return sorted(p for p in tree.plugins_dir.iterdir() if p.is_dir())
 
 
-def agent_files(plugin: Path) -> list[Path]:
-    agents = plugin / "agents"
-    return sorted(agents.glob("*.md")) if agents.is_dir() else []
-
-
 def skill_dirs(plugin: Path) -> list[Path]:
     skills = plugin / "skill-content"
     if not skills.is_dir():
@@ -327,57 +285,20 @@ def readme_marker_span(text: str) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 
+def check_canonical_agents(tree: Tree, findings: list[Finding]) -> None:
+    """Canonical methods cannot carry a second, ignored launch definition."""
+    for plugin in plugin_dirs(tree):
+        path = plugin / "agents"
+        if path.exists() or path.is_symlink():
+            findings.append(Finding(
+                "error", rel(tree, path), 1, "canonical_agents",
+                "canonical agents are retired",
+                "keep methods in skill-content and technical launches in the shared platform registry",
+            ))
+
+
 def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
     for plugin in plugin_dirs(tree):
-        for path in agent_files(plugin):
-            fm, _, _ = parse_frontmatter(read_text(path))
-            keys = set(fm)
-            missing = AGENT_REQUIRED_KEYS - keys
-            extra = keys - AGENT_REQUIRED_KEYS - AGENT_OPTIONAL_KEYS
-            if missing:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "frontmatter_shape",
-                    f"agent frontmatter missing keys: {sorted(missing)}",
-                    "add the missing keys; agents require name, description,"
-                    " model_class, output_contract",
-                ))
-            if extra:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "frontmatter_shape",
-                    f"agent frontmatter has unsupported keys: {sorted(extra)}",
-                    "remove them; agents carry name, description, model_class,"
-                    " output_contract and optionally a read-only tools whitelist",
-                ))
-            if "tools" in fm:
-                tools = {t.strip() for t in fm["tools"].split(",") if t.strip()}
-                illegal = tools - AGENT_READONLY_TOOLS
-                if illegal:
-                    findings.append(Finding(
-                        "error", rel(tree, path), 1, "frontmatter_shape",
-                        f"agent tools whitelist holds non-read-only tools: {sorted(illegal)}",
-                        f"tools: exists only to make a role read-only; allowed:"
-                        f" {sorted(AGENT_READONLY_TOOLS)}. Full-capability agents"
-                        " omit the key",
-                    ))
-            model_class = fm.get("model_class", "")
-            classes = declared_classes(tree)
-            if model_class and classes and model_class not in classes:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "frontmatter_shape",
-                    f"agent model_class '{model_class}' is not in"
-                    f" {sorted(classes)}",
-                    "use a purpose class of tools/data/models.json"
-                    " model_classes",
-                ))
-            contract = fm.get("output_contract", "")
-            if contract and contract not in AGENT_OUTPUT_CONTRACT_ENUM:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "frontmatter_shape",
-                    f"agent output_contract '{contract}' is not in"
-                    f" {sorted(AGENT_OUTPUT_CONTRACT_ENUM)}",
-                    "declare how the role returns results: prose (findings in"
-                    " the reply) or structured (a forced tool call)",
-                ))
         for sdir in skill_dirs(plugin):
             skill_md = sdir / "SKILL.md"
             if not skill_md.is_file():
@@ -422,43 +343,6 @@ def check_frontmatter_shape(tree: Tree, findings: list[Finding]) -> None:
                 ))
 
 
-def check_agent_name(tree: Tree, findings: list[Finding]) -> None:
-    for plugin in plugin_dirs(tree):
-        seen: dict[str, str] = {}
-        for path in agent_files(plugin):
-            fm, _, body = parse_frontmatter(read_text(path))
-            name = fm.get("name", "")
-            expected = path.stem
-            if name != expected:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "agent_name",
-                    f"agent frontmatter name '{name}' must equal '{expected}'",
-                    f"set name: {expected}; the host adds the plugin namespace",
-                ))
-            if name:
-                if name in seen:
-                    findings.append(Finding(
-                        "error", rel(tree, path), 1, "agent_name",
-                        f"agent name '{name}' already used by {seen[name]}",
-                        "agent names must be unique within their plugin",
-                    ))
-                else:
-                    seen[name] = rel(tree, path)
-            h1 = next(
-                (line[2:].strip() for line in body.splitlines()
-                 if line.startswith("# ")),
-                "",
-            )
-            expected_h1 = display_title(path.stem)
-            if h1 != expected_h1:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "agent_name",
-                    f"agent title '{h1}' must equal '{expected_h1}'",
-                    "keep the human label aligned with the canonical id and"
-                    " the acronym casing registry",
-                ))
-
-
 def check_skill_name(tree: Tree, findings: list[Finding]) -> None:
     for plugin in plugin_dirs(tree):
         seen: dict[str, str] = {}
@@ -474,13 +358,6 @@ def check_skill_name(tree: Tree, findings: list[Finding]) -> None:
                 "double underscore is reserved and banned in names",
                 "rename without '__'",
             ))
-        for path in agent_files(plugin):
-            if not KEBAB_RE.match(path.stem):
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "skill_name",
-                    f"agent file '{path.name}' is not kebab-case",
-                    "rename to kebab-case",
-                ))
         for sdir in skill_dirs(plugin):
             if not KEBAB_RE.match(sdir.name):
                 findings.append(Finding(
@@ -512,21 +389,6 @@ def check_skill_name(tree: Tree, findings: list[Finding]) -> None:
 
 def check_trigger_policy(tree: Tree, findings: list[Finding]) -> None:
     for plugin in plugin_dirs(tree):
-        for path in agent_files(plugin):
-            fm, _, _ = parse_frontmatter(read_text(path))
-            desc = fm.get("description", "")
-            if AUTO_TRIGGER_RE.search(desc):
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "trigger_policy",
-                    "agent description contains an auto-trigger phrase",
-                    "agents are passive; describe the role and say it is invoked by the plugin's flows",
-                ))
-            if not desc:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "trigger_policy",
-                    "agent description is empty",
-                    "add a one-sentence passive description",
-                ))
         for sdir in skill_dirs(plugin):
             skill_md = sdir / "SKILL.md"
             if not skill_md.is_file():
@@ -561,7 +423,6 @@ def check_size_caps(tree: Tree, findings: list[Finding]) -> None:
     caps = (tree.limits or {}).get("authoring_caps") or {}
     if not isinstance(caps, dict):
         caps = {}
-    agent_body_max = _cap(caps, "agent_body_max_lines", AGENT_BODY_MAX_LINES)
     skill_max = _cap(caps, "skill_max_lines", SKILL_MAX_LINES)
     skill_warn = _cap(caps, "skill_warn_lines", SKILL_WARN_LINES)
     skill_bytes = _cap(caps, "skill_max_bytes", SKILL_MAX_BYTES)
@@ -570,15 +431,6 @@ def check_size_caps(tree: Tree, findings: list[Finding]) -> None:
     flow_max = _cap(caps, "flow_max_lines", FLOW_MAX_LINES)
     reference_warn = _cap(caps, "reference_warn_lines", REFERENCE_WARN_LINES)
     for plugin in plugin_dirs(tree):
-        for path in agent_files(plugin):
-            _, body_start, body = parse_frontmatter(read_text(path))
-            body_lines = len([l for l in body.splitlines()])
-            if body_lines > agent_body_max:
-                findings.append(Finding(
-                    "error", rel(tree, path), body_start, "size_caps",
-                    f"agent body is {body_lines} lines (cap {agent_body_max})",
-                    "cut to constitution altitude; move any depth into skills",
-                ))
         for sdir in skill_dirs(plugin):
             skill_md = sdir / "SKILL.md"
             if skill_md.is_file():
@@ -635,22 +487,6 @@ def check_size_caps(tree: Tree, findings: list[Finding]) -> None:
 
 def check_section_contract(tree: Tree, findings: list[Finding]) -> None:
     for plugin in plugin_dirs(tree):
-        for path in agent_files(plugin):
-            _, _, body = parse_frontmatter(read_text(path))
-            h1_count = len(re.findall(r"^# ", body, flags=re.MULTILINE))
-            if h1_count != 1:
-                findings.append(Finding(
-                    "error", rel(tree, path), 1, "section_contract",
-                    f"agent body must have exactly one H1 (found {h1_count})",
-                    "one H1 role title, then the fixed H2 sections",
-                ))
-            for section in AGENT_REQUIRED_SECTIONS:
-                if not re.search(rf"^## {re.escape(section)}\s*$", body, flags=re.MULTILINE):
-                    findings.append(Finding(
-                        "error", rel(tree, path), 1, "section_contract",
-                        f"agent body missing required section '## {section}'",
-                        "agents carry Principles, Boundaries, Approach, Output Contract",
-                    ))
         for sdir in skill_dirs(plugin):
             skill_md = sdir / "SKILL.md"
             if not skill_md.is_file():
@@ -661,26 +497,14 @@ def check_section_contract(tree: Tree, findings: list[Finding]) -> None:
                     findings.append(Finding(
                         "error", rel(tree, skill_md), 1, "section_contract",
                         f"SKILL.md missing required section '## {section}'",
-                        "add a When to Use section with concrete scenarios",
+                        "restore the required skill section",
                     ))
-            if sdir.name in TECH_SKILLS:
-                for checklist in RESERVED_CHECKLISTS:
-                    if not (sdir / "references" / checklist).is_file():
-                        findings.append(Finding(
-                            "error", rel(tree, sdir), 1, "section_contract",
-                            f"tech skill missing references/{checklist}",
-                            "every tech skill ships both reserved checklists",
-                        ))
 
 
 def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
     for path in iter_scope_files(tree, ".md"):
         text = read_text(path)
         under_plugins = tree.plugins_dir in path.parents
-        is_agent = under_plugins and path.parent.name == "agents"
-        fm_end = 1
-        if is_agent:
-            _, fm_end, _ = parse_frontmatter(text)
         for lineno, line in enumerate(text.splitlines(), start=1):
             if EM_DASH in line:
                 findings.append(Finding(
@@ -701,13 +525,12 @@ def check_content_bans(tree: Tree, findings: list[Finding]) -> None:
                     "state capabilities, not versions; pins rot",
                 ))
             if under_plugins and MODEL_NAME_RE.search(line):
-                if not (is_agent and lineno < fm_end):
-                    findings.append(Finding(
-                        "error", rel(tree, path), lineno, "content_bans",
-                        "model name outside agent frontmatter",
-                        "host model names belong only in platforms/<host>/"
-                        "model-catalog.json and generated distributions",
-                    ))
+                findings.append(Finding(
+                    "error", rel(tree, path), lineno, "content_bans",
+                    "model name in canonical content",
+                    "host model names belong only in platforms/<host>/"
+                    "model-catalog.json and generated distributions",
+                ))
             if ABSOLUTE_PATH_RE.search(line):
                 findings.append(Finding(
                     "error", rel(tree, path), lineno, "content_bans",
@@ -791,19 +614,6 @@ def check_home_paths(tree: Tree, findings: list[Finding]) -> None:
                 ))
 
 
-def check_agent_tech_nouns(tree: Tree, findings: list[Finding]) -> None:
-    for plugin in plugin_dirs(tree):
-        for path in agent_files(plugin):
-            _, body_start, body = parse_frontmatter(read_text(path))
-            for offset, line in enumerate(body.splitlines()):
-                if TECH_NOUN_RE.search(line):
-                    findings.append(Finding(
-                        "error", rel(tree, path), body_start + offset, "agent_tech_nouns",
-                        "technology noun in agent body",
-                        "agents carry judgment, not technology; move stack facts into the bound skill",
-                    ))
-
-
 def check_handwritten_counts(tree: Tree, findings: list[Finding]) -> None:
     for path in iter_scope_files(tree, ".md"):
         text = read_text(path)
@@ -882,7 +692,7 @@ def check_reference_triggers(tree: Tree, findings: list[Finding]) -> None:
                     continue
                 if in_fence:
                     continue
-                if "](references/" in line and "Read when" not in line:
+                if "](references/" in line and "Read when" not in line and not re.match(r"^\s*- For .+, (?:read|load) ", line):
                     findings.append(Finding(
                         "error", rel(tree, skill_md), lineno,
                         "reference_triggers",
@@ -1206,6 +1016,8 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
                 continue  # Native host command-hook field.
             if (is_model_catalog or path.name == "pricing.json") and where == "$.models":
                 continue  # keyed by the providers' exact model ids
+            if path.name == "launch-profiles.json" and where == "$.profiles":
+                continue  # host launch identifiers are checked with the model policy
             if not SNAKE_KEY_RE.match(key):
                 findings.append(Finding(
                     "error", rel(tree, path), 1, "json_hygiene",
@@ -1216,16 +1028,19 @@ def check_json_hygiene(tree: Tree, findings: list[Finding]) -> None:
 
 def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
     for plugin in plugin_dirs(tree):
-        agent_stems = {p.stem for p in agent_files(plugin)}
+        try:
+            agent_stems = set(build_distributions.package_roles(plugin))
+        except ValueError:
+            agent_stems = set()  # execution_profiles reports the malformed registry
         flows = plugin / "flows"
         if flows.is_dir():
             for flow in sorted(flows.glob("*.md")):
                 text = read_text(flow)
-                if CONSTITUTION_PLACEHOLDER not in text:
+                if CONSTITUTION_PLACEHOLDER not in text and "../constitution.md" not in text:
                     findings.append(Finding(
                         "error", rel(tree, flow), 1, "orchestrator_integrity",
-                        f"flow lacks the {CONSTITUTION_PLACEHOLDER} spawn placeholder",
-                        "the spawn template must paste the constitution body",
+                        "flow does not link its working contract",
+                        "link ../constitution.md and preserve critical boundaries in child briefs",
                     ))
         pattern = re.compile(AGENT_ROLE_SUFFIX_RE_TPL.format(plugin=re.escape(plugin.name)))
         for path in sorted(plugin.rglob("*.md")):
@@ -1237,7 +1052,7 @@ def check_orchestrator_integrity(tree: Tree, findings: list[Finding]) -> None:
                         findings.append(Finding(
                             "error", rel(tree, path), lineno, "orchestrator_integrity",
                             f"spawn reference '{plugin.name}-{stem}' resolves to no agent file",
-                            f"create agents/{stem}.md or fix the reference",
+                            f"declare the technical launch in the shared platform registry or fix the reference",
                         ))
 
 
@@ -1672,10 +1487,7 @@ def check_version_sync(tree: Tree, findings: list[Finding]) -> None:
 
 
 def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
-    """tools/data/models.json is the purpose class declaration the canonical
-    agent frontmatter, the execution profiles and the class map read from; a
-    malformed one would let those checks silently pass, so its shape is
-    validated like any other policy artifact."""
+    """Validate the compute profiles read by host execution and launch maps."""
     if tree.config is None:
         findings.append(Finding(
             "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape",
@@ -1686,17 +1498,8 @@ def check_model_config_shape(tree: Tree, findings: list[Finding]) -> None:
     for problem in build_distributions.model_classes_problems(tree.config):
         findings.append(Finding(
             "error", MODEL_CONFIG_RELPATH, 1, "model_config_shape", problem,
-            "fix the declaration; it feeds the frontmatter_shape model_class check"
-            " and every execution profile",
+            "fix the declaration; it feeds every execution profile and launch map",
         ))
-
-
-def declared_classes(tree: Tree) -> set[str]:
-    """Return the purpose classes tools/data/models.json declares, or none
-    when it is malformed (model_config_shape reports that)."""
-    if build_distributions.model_classes_problems(tree.config):
-        return set()
-    return set(tree.config["model_classes"])
 
 
 def declared_slots(tree: Tree) -> set[str]:
@@ -1710,6 +1513,14 @@ def check_execution_profiles(tree: Tree, findings: list[Finding]) -> None:
     """Every host pins its catalog models by documented exact IDs and maps
     exactly the class slots to a catalog model and a supported
     effort; model names stay under platforms/."""
+    for plugin in plugin_dirs(tree):
+        try:
+            build_distributions.launch_registry(plugin)
+        except (ValueError, OSError) as exc:
+            findings.append(Finding(
+                "error", f"platforms/shared/{plugin.name}/launch-profiles.json", 1,
+                "execution_profiles", str(exc), "restore unique profile/access launch definitions",
+            ))
     try:
         adapters = build_distributions.load_adapters(tree.root)
     except ValueError:
@@ -1826,7 +1637,7 @@ AUTOPILOT_POLICY_RELPATH = "skill-content/autopilot/data/autopilot-policy.json"
 AUTOPILOT_NUMBERS = ("default_duration_hours", "default_goal_cap_hours", "max_duration_hours",
                      "arming_ttl_minutes", "transport_interval_seconds", "transport_max_attempts",
                      "native_arming_wait_seconds", "native_watch_seconds", "native_poll_seconds", "native_retry_delay_seconds", "native_permit_ttl_seconds")
-AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "transport_error_codes",
+AUTOPILOT_KEYS = {"schema_version", "classes", "goal_kinds", "transport_error_codes", "loops",
                   *AUTOPILOT_NUMBERS}
 AUTOPILOT_DEFAULTS = ("allowed", "excluded", "never")
 
@@ -1857,6 +1668,18 @@ def autopilot_policy_problems(data: object, plugin: Path) -> list[str]:
     problems += [f"{key} {numbers[key]} is above max_duration_hours {maximum}"
                  for key in ("default_duration_hours", "default_goal_cap_hours")
                  if maximum and key in numbers and numbers[key] > maximum]
+    loops = data.get("loops", {})
+    loop_fields = {"kinds", "default_max_active", "maximum_active", "interval_seconds", "lease_seconds", "max_attempts", "issue_limit"}
+    if not isinstance(loops, dict) or set(loops) != loop_fields:
+        problems.append("loops must define kinds, capacity, interval, lease, attempt and issue limits")
+    else:
+        if loops["kinds"] != ["detect", "resolve", "retro", "plugin_repair"]:
+            problems.append("loops kinds must match the work queue contract")
+        for key in loop_fields - {"kinds"}:
+            if type(loops[key]) is not int or loops[key] < 1:
+                problems.append(f"loops.{key} must be a positive integer")
+        if type(loops["default_max_active"]) is int and type(loops["maximum_active"]) is int and loops["default_max_active"] > loops["maximum_active"]:
+            problems.append("default loop capacity exceeds maximum_active")
     ids: dict[str, list[str]] = {"class": [], "goal kind": []}
     classes = data["classes"] if isinstance(data["classes"], list) else []
     for entry in classes:
@@ -2002,14 +1825,13 @@ def check_product_namespace(tree: Tree, findings: list[Finding]) -> None:
 
 CHECKS = {
     "frontmatter_shape": check_frontmatter_shape,
-    "agent_name": check_agent_name,
+    "canonical_agents": check_canonical_agents,
     "skill_name": check_skill_name,
     "trigger_policy": check_trigger_policy,
     "size_caps": check_size_caps,
     "section_contract": check_section_contract,
     "content_bans": check_content_bans,
     "home_paths": check_home_paths,
-    "agent_tech_nouns": check_agent_tech_nouns,
     "handwritten_counts": check_handwritten_counts,
     "dead_links": check_dead_links,
     "reference_triggers": check_reference_triggers,

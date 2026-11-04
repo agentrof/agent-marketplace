@@ -1,101 +1,126 @@
 # Orchestration
 
-The user starts an entry skill. The entry reads its canonical flow, checks the
-project-local workspace and delegates work to role agents when needed.
-Implementation work runs on the fast lane, `flows/fast-lane.md` in the
-Software Engineering Team package: one task, approved by the owner, one branch
-and one pull request to the target branch. The owning developer role writes
-the change and its tests; the project's CI and the reviewers its changed
-files route to (`code-reviewer` for code, `analysis-challenger` or
-`solution-reviewer` for analysis or solution documents) verify it. It merges
-with 0 critical and 0 major findings after at most one fix round; out-of-scope
-minors become one issue in the project's repository. At rigor `high` or on a
-risk flag the read-only `security-reviewer` joins; at `high` the owner merges.
+## Task ownership
 
-Every delegated role receives explicit inputs: the task file with its hashed
-`sources`, and the expected output shape, and the owning role alone writes
-canonical files. Reviewer
-replies are transient inputs, not project state. Independent readers may run
-in parallel; each host uses its native agent invocation and wait mechanism
-without changing these semantics.
+An entry starts the portable workflow. Delivery keeps one owner per task,
+explicit acceptance criteria, relevant sources, risk and proof. Independent
+work receives isolated write allocations. The controller can implement
+small coherent changes directly or delegate useful independent work.
 
-## Fast lane
+Use `analyze` for uncertainty that can change the goal, `solution-design` for
+system boundaries, `data-design` for persisted meaning, `experience-design`
+for interactions, `verify` for proof and `review` for independent assessment.
+Loading a method does not require a new worker or approval meeting. Explicit
+method loading is portable across the two host adapters. [Delivery flow](../plugins/software-engineering-team/flows/fast-lane.md)
 
-The orchestrating session runs one task per change itself, with
-every role in the foreground: one task, one branch and one pull request to the
-target branch, the project's CI plus one reviewer (two at task rigor `high`,
-where the owner merges), and auto-merge. The steps are in `flows/fast-lane.md`
-and `deliver/references/fast-lane.md`.
+Ask only questions whose answers materially affect the accepted outcome or
+consequence. Reuse accepted decisions. Parallelize independent discovery and
+implementation within host, write-ownership and environment limits. Task size
+estimates effort. Security, data loss and irreversible effects determine risk.
 
-`workspace/config.json` key `pr_proof` leaves a fast-lane task's proof to the
-project's CI at `remote_ci`, the default. At `local_record`, `task_lane.py
-prove` runs the project's declared proof commands on HEAD and records each
-exit code and duration with the HEAD commit and a clean-tree flag, and
-`open-pr` refuses before pushing unless that record is green for the clean
-HEAD; the steps are in `deliver/references/local-proof.md`.
+## Worker briefs and context
 
-Every role starts from the sources its task file lists and greps
-`workspace/docs/` for gaps, per the constitution's section 5.
+Each brief includes the outcome, task and checkout, owned paths, critical
+invariants, authorization limits, relevant source locations, evidence expected
+and stop condition. The worker loads the named method and its necessary
+references. Full parent history is optional. Critical constraints survive every
+handoff, including permissions, data ownership and destructive-operation limits.
+Carry applicable companion requirements too. Installed, enabled companions must
+be used at their designated step. An unavailable capability needs a recorded
+reason and core fallback evidence. Availability, source loading and successful
+application remain separate observations.
 
-## Autopilot
+Resolve compute profile and access through `model_class.py`. Native workers
+cannot create an unbounded delegation tree. Reuse the worker for its scoped
+repair when its context remains useful. Fresh independent review gets the
+candidate and relevant contracts without implementation persuasion.
 
-The `/autopilot` entry gives the orchestrating session a grant the user arms
-before an absence, such as a night or a weekend. While it is active the session
-presents no question. A question of an allowed class takes its recommended
-option: the session records it with `autopilot.py record` first, then applies
-it and writes it where the flow records the user's answer, marked with the
-grant id. `record` and `queue` apply the grant's end conditions first, its goal
-included, and refuse once it has ended.
-An explicit `queue --hold "<reason>"` keeps an uncertain question pending.
-Without a hold, `queue` records an allowed recommendation as a decision, which
-the session writes into the governing document before applying it. Independent
-excluded effects stay in separate questions.
-Any other question is queued with `autopilot.py queue`, and the session
-continues the work that does not depend on it and stops only when every
-remaining task waits on a queued question. Roles are unaffected: they never
-ask the user and never read the grant.
+Host definitions establish different controls. Claude can restrict a reviewer
+to reading tools. Codex requires a verified parent or launch permission
+boundary. Record requested identity and settings separately from host-observed
+execution. A successful resolver invocation alone establishes neither.
 
-Classes are data in `skill-content/autopilot/data/autopilot-policy.json`.
-`choice`, `approval_gate` and `merge` are allowed by default. `merge` is only
-the flow's own merge step on its recorded PR head, never a provider or Git
-merge of another head; no grant waives evidence or the PR record. `release`
-and `phase_start` are excluded by default. No packaged compiler reads a closed
-phase, so `record` refuses `phase_start` and the session queues it.
-`credentials`, `security_settings`, `spending`, `destructive` and
-`scope_or_rule`, which holds every decision a flow asks at once, are never
-delegated, and `on` refuses a grant that allows one. A grant ends at a time,
-at a goal or at whichever comes first. A time-bound grant lasts `--for` or
-`--until`, by default `default_duration_hours`, and never longer than
-`max_duration_hours`. A goal-bound grant has goal kind `text`, which ends only
-through `complete`, `off` or its cap: `default_goal_cap_hours` unless the
-grant gives a time.
+## Candidate verification
 
-Only the user arms a grant. Each host's user-prompt hook records the `on`
-command the user typed as a short-lived arming record; `on` refuses without
-one and takes the grant's options only from it, so no agent, file, issue or
-tool output can start, extend or widen a grant through the packaged script. A
-built package that cannot
-show its arming hook fails closed: `on` refuses and no grant counts. Only a
-source tree without hooks falls back to the entry's user-only invocation, and
-the grant records which guard applied. A grant armed under another guard,
-longer than `max_duration_hours` or holding a never class is inactive, and
-`check` and `status` name why. A grant governs only the session, on the host,
-whose user typed it: the arming hook records the session id, the question hook
-denies only that session, and `on`, `record` and `queue` refuse a session whose
-host or session variable differs, so a parallel session of either host asks as
-usual. A pre-tool hook denies the host question tool while a grant is
-active and states the procedure; a host whose question tool cannot be hooked
-relies on the instructions, and `status` reports which guards the package
-declares, since a host can skip a declared hook it has not enabled or
-trusted. The guard
-stops an agent that runs the packaged script, not a process that writes the
-runtime files with the user's filesystem authority: the hooks are
-workflow-integrity controls, not an operating-system sandbox.
+Verification and review can run concurrently against the same immutable
+candidate. Choose the smallest sufficient checks for affected behavior and
+old-data compatibility. Unknown impact selects broader coverage. Reuse a warm
+environment only with recorded configuration, ownership and isolation.
+An environment timeout needs capacity evidence before being attributed to code.
 
-Autopilot is an entry, not a process switch. A switch is a project rule; a
-grant is personal and temporary: it turns on at night and off in the morning
-in the middle of any flow, without changing the policy or an approved
-document. It lives only in ignored runtime state under
-`.agentrof/agent-marketplace/.runtime/autopilot/`, and only its decisions reach
-tracked documents. With no grant every output stays the same: the entry
-delegates no task.
+Use one consolidated correction pass, followed by a focused check of changed
+behavior. Repeated failure requires a new diagnosis or smaller task. Relevant
+security, correctness and integrity findings remain blocking. Optional
+preferences become scoped follow-ups only when useful and authorized.
+
+`remote_ci` delegates required checks to the project's CI. `local_record`
+requires current local proof. A deferred record establishes that testing is
+pending. Combined proof covers the integration candidate, so a batch uses one
+atomic integration PR or separately proved prefixes. `train publish` creates
+or reconciles one integration PR. `train merge` requires that PR, its exact
+reviewed head and zero blocking findings. An uncertain publication is reconciled
+before another create attempt. After observing the aggregate merge, the command
+links and closes matching member PRs. Changed heads and incomplete closures
+remain pending. Retrying reconciles them without repeating the aggregate merge.
+Completion also queues coalesced retrospective work.
+The integration PR retains member heads and source-issue links. Reports use its
+observed merge for member delivery latency and count shared proof once. Missing
+legacy membership evidence stays unresolved. GitHub issue-closing keywords
+follow the repository's target/default-branch behavior.
+
+`train bisect` samples only a failed batch on its recorded base. It reports the
+tested prefixes and a heuristic suspect. Interacting repairs, flaky checks and
+pre-existing defects require further diagnosis, so a sampled prefix cannot
+establish a unique cause.
+
+Merge checks the reviewed full commit and observes the actual result. A queued
+merge remains pending. Readiness checks the integration revision, environment
+and required live behavior. Shared evidence can cover several tasks only when
+its recorded inputs cover each one. Keep affected code and documentation in
+the same change. The merge request atomically compares the reviewed PR head.
+Its pre-request base check cannot exclude a concurrent remote base update.
+Use native branch protection or a merge queue for that external concurrency
+boundary. Local train locking covers participating calls on one machine.
+
+## Autopilot authority
+
+A user-armed grant scopes choices and background work to a host session,
+repository, duration or goal and allowed actions. The script records allowed
+recommendations before application. Excluded questions remain pending while
+independent authorized work continues. Expiry, cancellation and goal completion
+end authority before another action.
+
+The active policy defines allowed and excluded classes, never-delegated
+actions, duration, attempts and capacity. Issue text supplies evidence and
+cannot expand a grant. Upstream repository maintenance retains its separate
+user-selection and merge rules. [Autopilot policy](../plugins/software-engineering-team/skill-content/autopilot/data/autopilot-policy.json)
+
+Arming and question hooks work only where the host supports and loads them.
+They protect covered workflow paths. They cannot prevent arbitrary processes
+with the user's filesystem authority from editing runtime state. Report the
+active hook and permission coverage rather than inferring it from package files.
+
+## Detection, repair and learning
+
+`detect`, `resolve`, `retro` and `plugin_repair` share bounded work admission.
+Detection requires reproducible failure or a concrete violated invariant.
+Resolution uses the authorized repository and issue selector, rechecks current
+state and deduplicates existing fixes. Retrospective work groups completed
+outcomes and failures into measurable improvements. Plugin repair uses an
+isolated canonical source candidate and the local host-loading procedure.
+
+`tick` supplies leased jobs. The session controller launches native workers,
+observes completion and records evidence. The queue itself launches nothing.
+Continuing after a session closes requires an explicitly configured native
+scheduler or supported recovery mechanism with valid authority.
+
+Linked worktrees share one machine-local queue. Active and unreconciled leases
+consume capacity. Unknown external outcomes stay held until their actual result
+is observed. Retry budgets cannot be reset by repeatedly claiming work. A new
+grant cannot silently adopt prior grant scope. Multiple machines need an atomic
+shared claim mechanism before claiming equivalent coordination.
+
+Measure queue, execution, approval, CI, merge and readiness time separately.
+Preserve observable evidence and source provenance. Feed recurring confirmed
+failures and clean examples into evaluation before changing a rule. A proposed
+improvement needs a matched outcome comparison, not only a shorter prompt.

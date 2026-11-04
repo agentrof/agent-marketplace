@@ -44,15 +44,12 @@ SESSION_MODEL = "inherit"
 # next apply judges it again. The stamp keeps the resolved settings, so the
 # session start check finds the render current.
 UNAVAILABLE_RE = re.compile(r"^# Model unavailable: (\S+)$")
-SESSION_PHRASE = "this session's model"
 # Claude Code substitutes these in a plugin agent's body, never in a project
 # agent's; the render resolves the two whose value it knows.
 SUBSTITUTION_RE = re.compile(r"\$\{(CLAUDE_[A-Z_]+|user_config\.[^}]*)\}")
 RESTART_NOTICE = (
-    "This run created .claude/agents/, which Claude Code loads only when a session"
-    " starts: restart Claude Code before the next workflow. Until then every role runs"
-    " as the plugin's {team}:<role> agent with the package's models and efforts, not"
-    " this project's model settings."
+    "This run changed Claude project agents or skill routing. Start a new Claude Code"
+    " session before the next workflow so it loads the current project settings."
 )
 
 atomic_write = atomic_file.replace_text
@@ -141,8 +138,7 @@ def render_agent(
     source: Path, team: str, package: dict, setting: dict,
     plugin_root: Path, project_root: Path, version: str, unavailable: bool = False,
 ) -> str:
-    """Render one plugin role as a project agent with its resolved ``setting``,
-    on the session's model when its model is ``unavailable``."""
+    """Render requested settings, reporting unavailability without changing pins."""
     fields, body = split_agent(source.read_text(encoding="utf-8"), source)
     if field_value(fields, "name") != source.stem:
         raise ValueError(f"{source}: agent name must equal its file stem")
@@ -152,7 +148,7 @@ def render_agent(
             f"{source}: its model and effort differ from the package class map;"
             " reinstall the package"
         )
-    model = SESSION_MODEL if setting["model"] == role_settings.SESSION or unavailable \
+    model = SESSION_MODEL if setting["model"] == role_settings.SESSION \
         else setting["model"]
     lines = ["---", owner(team), stamp(team, version, source, setting)]
     if unavailable:
@@ -216,13 +212,6 @@ def recorded_unavailable(project_root: Path, team: str) -> set[str]:
     return recorded
 
 
-def fallen_setting(setting: dict, unavailable: set[str]) -> dict:
-    """A resolved setting as rendered: `session` where its model is unavailable."""
-    if setting["model"] in unavailable:
-        return {**setting, "model": role_settings.SESSION, "model_source": "fallback"}
-    return setting
-
-
 def render_agents(
     plugin_root: Path, project_root: Path, team: str, workspace: str,
     model_listing: Callable[..., dict] | None = None,
@@ -260,13 +249,13 @@ def render_agents(
             source, team, slots.get(package[role], {}), rows[role], plugin_root,
             project_root, version, rows[role]["model"] in unavailable)
     report = {
-        "class_map": {slot: fallen_setting(setting, unavailable)
-                      for slot, setting in slot_settings.items()},
-        "roles": {role: fallen_setting(row, unavailable) for role, row in rows.items()},
+        "class_map": slot_settings,
+        "roles": rows,
         "model_check": check,
-        "model_fallbacks": {model: pins[model]["roles"] for model in sorted(unavailable)},
+        "model_fallbacks": {},
+        "unavailable_models": {model: pins[model]["roles"] for model in sorted(unavailable)},
         "model_notes": host_listing.check_notes("claude-project", check, pins, unavailable,
-                                                conflicts, SESSION_PHRASE),
+                                                conflicts),
     }
     return rendered, report
 
@@ -286,7 +275,7 @@ def stale_agents(project_root: Path, plugin_root: Path) -> tuple[list[str], int]
     package and the project's settings, and how many rendered role agents the
     project holds.
 
-    A file rendered by another package version, from another source agent,
+    A file rendered by another renderer, from another source agent,
     with another model or effort than `workspace/config.json` now resolves or
     before stamps existed still runs what it was rendered with until setup or
     a refresh renders it again; so does one whose role the package no longer
@@ -411,7 +400,8 @@ def preview(
             seed_user_files=seed_user_files,
         )
     result.update({"class_map": {}, "roles": {}, "kept": [], "model_check": {"status": "not_run"},
-                   "model_fallbacks": {}, "model_notes": []})
+                   "model_fallbacks": {}, "unavailable_models": {}, "model_notes": [],
+                   "companion_notes": []})
     if scope in {"all", "local"}:
         team = project_instructions.plugin_name(plugin_root)
         rendered, report = render_agents(plugin_root, project_root, team, workspace,
@@ -422,6 +412,13 @@ def preview(
         result["changes"] = {**result["changes"], **changes}
         result["current_surfaces"].update(current)
         result["target_surfaces"].update(target)
+        if (plugin_root / "templates/companion-routing.json").is_file():
+            import companion_routing
+            routing = companion_routing.plan(project_root, HOST, plugin_root)
+            result["changes"].update(routing["changes"])
+            result["current_surfaces"].update(routing["current_surfaces"])
+            result["target_surfaces"].update(routing["target_surfaces"])
+            result["companion_notes"] = routing["notes"]
     return result
 
 
@@ -436,7 +433,7 @@ def materialize(
     scope: str = "all",
     model_listing: Callable[..., dict] | None = None,
 ) -> tuple[list[Path], bool]:
-    """Apply the plan; also report whether it created the agents directory."""
+    """Apply the plan and report whether host routing needs a fresh session."""
     result = preview(
         project_root,
         plugin_root,
@@ -481,7 +478,8 @@ def materialize(
             except OSError:
                 pass
         raise
-    return written, not agents_existed and agents_dir.is_dir()
+    routing_changed = project_root / ".claude/settings.local.json" in changes
+    return written, routing_changed or (not agents_existed and agents_dir.is_dir())
 
 
 def main() -> int:
@@ -543,7 +541,9 @@ def main() -> int:
         "roles": result["roles"],
         "model_check": result["model_check"],
         "model_fallbacks": result["model_fallbacks"],
+        "unavailable_models": result["unavailable_models"],
         "kept": result["kept"],
+        "companion_notes": result["companion_notes"],
         "written": [str(path) for path in written],
         "restart_required": created,
         "notice": RESTART_NOTICE.format(team=team) if created else "",

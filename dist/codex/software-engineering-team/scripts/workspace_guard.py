@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Keep the workspace layout fixed: no new top-level folder outside the config.
+"""Guard workspace layout and direct procedure-output delivery.
+
+Recognizable task_lane.py method/companion source loads must return directly,
+with sufficient explicit output capacity. Evidence-only updates may be filtered.
+This covers shell calls visible to this hook, not arbitrary interpreter wrappers.
 
 pre, a file tool (Write, Edit, MultiEdit, apply_patch): a write that would
 create a new folder directly under ``workspace/`` or ``workspace/docs/`` is
@@ -27,10 +31,12 @@ import time
 from pathlib import Path
 
 import project_config
-from autopilot_guard import TOOL_NAME_CANON, canonical_shell_command, read_payload, written_paths
+from autopilot_guard import TOOL_NAME_CANON, canonical_shell_command, has_shell_composition, read_payload, written_paths
 
 MKDIR_RE = re.compile(r"(?<![\w./-])mkdir\s+([^;&|<>()]+)")
 REDIRECT_RE = re.compile(r">>?\s*([^\s;&|<>()]+)")
+EVIDENCE_OPTIONS = {"--task", "--name", "--host", "--source", "--unavailable", "--evidence"}
+SHELL_VARIABLE = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
 
 
 def deny(message: str) -> int:
@@ -61,6 +67,90 @@ def shell_targets(command: str) -> list[str]:
         if not match.group(1).startswith("&"):  # 2>&1 duplicates a stream, writes no file
             targets.append(match.group(1).strip("'\""))
     return targets
+
+
+def loads_procedure(command: str) -> bool:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|<>()\n")
+    lexer.whitespace_split = True
+    lexer.whitespace = " \t\r"
+    try:
+        words = list(lexer)
+    except ValueError:
+        return "task_lane.py" in command and any(word in command for word in ("method", "companion"))
+    tokens, variables, command_start = [], {}, True
+    for word in words:
+        expanded = SHELL_VARIABLE.sub(lambda match: variables.get(match[1] or match[2], match[0]), word)
+        name, separator, value = expanded.partition("=")
+        if command_start and separator and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            # Recognition only. Never evaluate substitutions or read ambient variables.
+            if "$" not in value and "`" not in value:
+                variables[name] = value
+            else:
+                variables.pop(name, None)
+            continue
+        tokens.append(expanded)
+        command_start = bool(word) and all(char in ";&|<>()\n" for char in word)
+    for index, token in enumerate(tokens):
+        if token.replace("\\", "/").rsplit("/", 1)[-1] != "task_lane.py":
+            continue
+        arguments = tokens[index + 1:]
+        if arguments[:1] == ["--project"]:
+            arguments = arguments[2:]
+        elif arguments and arguments[0].startswith("--project="):
+            arguments = arguments[1:]
+        if not arguments or arguments[0] not in ("method", "companion"):
+            continue
+        if arguments[1:2] in (["--help"], ["-h"]):
+            continue
+        values = {}
+        position = 1
+        while position < len(arguments):
+            option = arguments[position]
+            if option and all(char in ";&|<>()\n" for char in option):
+                break
+            name, separator, value = option.partition("=")
+            if name not in EVIDENCE_OPTIONS:
+                return True
+            position += 1
+            if not separator:
+                if position >= len(arguments):
+                    return True
+                value = arguments[position]
+                position += 1
+            values[name] = value
+        if not values.get("--evidence"):
+            return True
+    return False
+
+
+def procedure_output_refusal(payload: dict, command: str) -> str | None:
+    if not loads_procedure(command):
+        return None
+    direct = command.strip()
+    if payload.get("tool_name") == "PowerShell" and direct.startswith("& "):
+        direct = direct[2:].lstrip()
+    # A single leading directory change is needed by hosts without a per-call cwd.
+    prefix, separator, suffix = direct.partition("&&")
+    if separator and not has_shell_composition(prefix):
+        try:
+            words = shlex.split(prefix)
+        except ValueError:
+            words = []
+        if len(words) == 2 and words[0] == "cd":
+            direct = suffix.strip()
+    if has_shell_composition(direct):
+        return ("return the bounded method/companion output directly, without pipes, redirection or wrappers. "
+                "run one retrieval using task_lane.py --project <path> method|companion, or a single cd <path> && retrieval")
+    limit = payload.get("tool_input", {}).get("max_output_tokens")
+    if limit is not None:
+        policy = Path(project_config.__file__).resolve().parent.parent / "skill-content/review/data/review-policy.json"
+        try:
+            minimum = json.loads(policy.read_text(encoding="utf-8"))["procedure_min_output_tokens"]
+        except (OSError, ValueError, KeyError) as error:
+            return f"cannot verify procedure output capacity: {error}"
+        if isinstance(limit, bool) or not isinstance(limit, (int, float)) or limit < minimum:
+            return f"bounded procedure retrieval needs max_output_tokens of at least {minimum}. Actual output remains bounded"
+    return None
 
 
 def refusal(path: Path) -> str | None:
@@ -98,7 +188,11 @@ def main() -> int:
     raw_tool = str(payload.get("tool_name", ""))
     tool = TOOL_NAME_CANON.get(raw_tool, raw_tool)
     if tool in ("Bash", "PowerShell"):
-        paths = shell_targets(canonical_shell_command(payload.get("tool_input"))[0])
+        command, error = canonical_shell_command(payload.get("tool_input"))
+        message = error or procedure_output_refusal(payload, command)
+        if message:
+            return deny(message)
+        paths = shell_targets(command)
     elif tool in ("Write", "Edit"):
         paths = written_paths(raw_tool, payload.get("tool_input"))
     else:

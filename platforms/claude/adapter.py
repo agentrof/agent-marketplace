@@ -23,9 +23,14 @@ MODEL_ID_SHAPE = MODEL_ID_RE.pattern
 # This host's CLI in tools/data/host-cli-versions.json, the exact version CI
 # installs; no catalog model's min_cli_version may be newer.
 HOST_CLI_KEY = "claude_code"
-# A spawn sets the model by the family alias and the effort by its level, over
-# the role file's own pins, so purpose and escalation need no extra role file.
-SPAWN_MODEL = "alias"
+# Each technical launch definition pins its full model ID and effort. Passing
+# a family alias at spawn time would override that exact pin.
+SPAWN_MODEL = None
+READ_ACCESS = {
+    "definition_restricts_tools": True,
+    "note": "The launch definition restricts tools to Read, Grep and Glob. Verify that the host"
+            " loaded this identity before accepting independent review.",
+}
 # What every rendered role leaves out of its context; data beside this module.
 AGENT_TOOLS = json.loads((Path(__file__).resolve().parent / "agent-tools.json")
                          .read_text(encoding="utf-8"))
@@ -92,28 +97,23 @@ def disallowed_tools(name: str) -> list[str]:
     return denied
 
 
-def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
-    fields, body = context["parse_frontmatter"](source)
-    slot = fields.pop("model_class", "")
+def agent_artifacts(context: dict, name: str, spec: dict) -> list[tuple[str, str]]:
+    slot = spec["profile"]
     setting = context["execution_profile"].get(slot)
     if setting is None:
-        raise ValueError(f"{source}: invalid model class {slot!r}")
-    lines = ["---"]
-    for key in ("name", "description"):
-        if not fields.get(key):
-            raise ValueError(f"{source}: missing {key}")
-        lines.append(f"{key}: {fields.pop(key)}")
+        raise ValueError(f"{name}: invalid compute profile {slot!r}")
+    lines = ["---", f"name: {name}", f"description: {spec['description']}"]
     lines.append(f"model: {setting.get('model', 'inherit')}")
     if "effort" in setting:
         lines.append(f"effort: {setting['effort']}")
-    name = lines[1].split(": ", 1)[1]
-    lines.extend(f"{key}: {value}" for key, value in fields.items())
-    if "tools" not in fields:
+    if spec["access"] == "read":
+        lines.append("tools: Read, Grep, Glob")
+    else:
         lines.append(f"disallowedTools: {', '.join(disallowed_tools(name))}")
     if AGENT_TOOLS["omit_claude_md"]:
         lines.append("omitClaudeMd: true")
-    lines.extend(("---", "", body.lstrip("\n")))
-    return [(f"agents/{source.name}", "\n".join(lines))]
+    lines.extend(("---", "", context["instructions"], ""))
+    return [(f"agents/{name}.md", "\n".join(lines))]
 
 
 def native_manifest_directory(host_id: str) -> str:

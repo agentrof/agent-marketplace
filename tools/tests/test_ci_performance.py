@@ -15,8 +15,7 @@ class PerformanceTests(unittest.TestCase):
              'completed_at': '2026-09-28T10:15:00Z', 'steps': [{'name': 'Run the exact selected test partition',
                  'started_at': '2026-09-28T10:11:00Z', 'completed_at': '2026-09-28T10:15:00Z'}]},
             {'id': 3, 'name': 'deterministic-check', 'completed_at': '2026-09-28T10:00:20Z'},
-            {'id': 4, 'name': 'check', 'started_at': '2026-09-28T10:16:00Z'},
-            {'id': 5, 'name': 'changeset', 'completed_at': '2026-09-28T10:00:20Z'}]
+            {'id': 4, 'name': 'check', 'started_at': '2026-09-28T10:16:00Z'}]
         result = ci_performance.job_measurements(jobs, self.policy)
         self.assertEqual(result[1]['scheduling_seconds'], 540)
         self.assertEqual(result[1]['test_step_seconds'], 240)

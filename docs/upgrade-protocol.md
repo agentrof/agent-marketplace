@@ -1,86 +1,102 @@
 # Upgrade protocol
 
-An Agent Marketplace upgrade is a package replacement followed by one
-convergent project refresh. The consuming repository's authored Markdown and
-configuration remain the source of truth.
+## Choose the required operation
 
-1. Build and validate all registered host distributions from the same source snapshot.
-2. Run `setup_project.py inspect --project-root <root> --json`. This is a
-   read-only, pre-mutation plan over the workspace contract and the managed
-   ignore and checkout-attribute blocks. JSON changes expose exact
-   key-level before/after values; byte-owned assets expose hashes. Resolve
-   every blocker before applying. On native Windows, inspect also returns the
-   `git.core_longpaths` choice request while the repository's local Git
-   config does not turn `core.longpaths` on, and apply refuses until
-   `--choice git.core_longpaths=set|leave` answers it.
-3. Run `setup_project.py apply --project-root <root> --json`, then
-   `setup_project.py check --project-root <root> --json`. All three commands use
-   the same convergence planner; apply rebuilds its authoritative plan after
-   acquiring the mutation guard. Apply rolls back setup-owned paths that still
-   match its exact postimage when the closing check fails; a concurrent edit is
-   preserved and reported as a rollback conflict when observed at a target
-   boundary. Mutating setup apply processes are serialized and every target is
-   rechecked immediately before atomic replacement. Pause non-setup editors on
-   all setup-managed targets during this short window; no portable filesystem
-   primitive can conditionally replace against an uncooperative writer. Check
-   rejects any operation still required.
-4. Preserve authored documents and valid retained project configuration fields;
-   setup removes unknown or retired configuration keys as part of the closed
-   schema replacement. It preserves user-owned instruction companions through the separate host
-   projection choice gate. A Codex projection keeps its recorded execution
-   profile. A release
-   that moves a class slot to a newer pinned model rewrites the role files
-   of an `auto` projection on this refresh and leaves an `inherit` projection
-   unchanged. Claude Code roles change at the refresh that renders them again
-   into `.claude/agents/` with the project's class models, efforts and role
-   classes. Until a refresh renders them, on either host, the session start
-   check reports the role files whose stamp is not the installed package's or
-   the project config's, as after a pull that changes `class_models` or
-   `role_classes`; `.codex/agents/` and `.claude/agents/` are ignored local
-   projections, so a pull never updates them.
-5. Config schema v2 has only team identity, language settings and the
-   valid overrides `class_models` and `role_classes`, which setup keeps and
-   never writes, and the optional `pr_proof`, which setup keeps; it drops the
-   retired `tier_models` and `role_tiers`. An upgrade removes every field outside that closed shape without
-   editing Markdown, aliases or links, and stops on an override the installed
-   package no longer takes, naming the slot or role. Taxonomy additions and
-   graph-color changes therefore never write `workspace/config.json`.
-6. `workspace/` is the only managed workspace and every second managed workspace
-   is rejected. Repeated apply with the same package and project must produce an empty inspect plan.
-7. Review and commit the exact tracked diff, then start a fresh host session so
-   the refreshed skills and hooks load. When the refresh first adds the managed
-   `.gitattributes` block, a checkout whose governed files Git already converted
-   runs the one-time re-checkout in the
-   [setup skill](../plugins/software-engineering-team/skill-content/setup/SKILL.md).
+A package release replaces installed package content. Project setup is needed
+for first integration, incompatible or missing managed inputs, and explicit
+migration. A release number alone never requires project setup.
 
-The project-local `.agentrof/agent-marketplace/.runtime/` directory is
-disposable and never participates in compatibility decisions. A refresh may
-recreate it without changing project state.
+Launch projections use a behavior stamp derived from the definition, renderer
+and resolved model/effort. Definition, model or renderer changes need the
+affected host projection refreshed. Skill-body and hook updates need the host
+reload that makes the new package active. Neither implies a rewrite of authored
+project documents. [Host architecture](architecture.md)
+
+## Inspect, apply and verify
+
+1. Build and validate every registered host distribution from the same canonical
+   source. Identify the installed candidate and active host before inspecting
+   project integration.
+2. Run `setup_project.py inspect --project-root <root> --json` when setup or
+   migration is required. Inspect exact key changes and owned-file hashes.
+   Resolve actual blockers. Native Windows may require the explicit
+   `git.core_longpaths` choice before apply.
+3. Run `setup_project.py apply --project-root <root> --json`, followed by
+   `setup_project.py check --project-root <root> --json`. Both use the shared
+   planner. Apply rebuilds its plan under the mutation guard and checks each
+   preimage before atomic replacement.
+4. Inspect and refresh the affected host projection. Preserve unrelated host
+   configuration, user instruction companions and authored files. Retired
+   package-owned launch files are removed in the rollback-capable transaction.
+   A conflicting user-owned file remains a reported blocker.
+5. Verify the remaining plan is empty. Review and commit only the intended
+   tracked changes. Reload or restart the host as required, then verify the
+   loaded package, hooks, definitions and effective settings.
+
+Closing-check failure rolls back setup-owned paths that still match their
+postimage. Observed concurrent changes are preserved and reported as conflicts.
+Pause unrelated editors on setup-managed targets during apply. Portable atomic
+replacement cannot exclude an uncooperative writer between every check and
+write. Repeated apply against unchanged inputs must converge to an empty plan.
+
+The first managed `.gitattributes` addition may require a one-time re-checkout
+when Git already converted governed files. Follow the setup procedure for the
+identified case. [Setup](../plugins/software-engineering-team/skill-content/setup/SKILL.md)
+
+## Skill and profile migration
+
+The public entry names remain stable. Internal responsibilities move into six
+methods and their conditional references. Historical task records remain
+readable. New work explicitly loads current methods and records its own evidence.
+Preserving old history never establishes fresh completion for a new candidate.
+
+The four compute profiles are `light`, `work`, `review` and `critical`.
+`class_models.<host>.<profile>` retains project model and effort overrides.
+Profile selection leaves the launch access boundary unchanged.
+
+Preview old model overrides through the migration planner. Several old slots
+can collapse into one profile only when their explicit values agree. Conflicting
+values, persona-specific mappings and unsupported slots require an explicit
+migration decision. Preserve their original values until resolved. Migration
+is a one-time translation, with no permanent class aliases in new authoring.
+
+For a reviewed replacement, use `project_config.py migrate --config
+<workspace/config.json> --config-file <reviewed-replacement.json>
+--expected-sha256 <current-file-sha256> --dry-run --json`. Inspect the full
+before/after values and dropped keys, then apply the same command without
+`--dry-run`. The maintenance guard, exact pre-write hash and closed-schema
+validation protect this one-time replacement. Conflicting trigger mappings
+and customized retired settings require this explicit resolution.
+
+Retain valid project language, layout, proof and trigger settings allowed by the
+closed config schema. Surface removed or incompatible fields in inspect before
+apply. Keep datastore choices and business contracts in their authored sources.
+The four supported companions are mandatory at their applicable workflow step
+when installed and enabled. A migration records unavailable integrations without
+installing packages or removing independently installed companions.
+
+Local runtime caches are reconstructible. Losing a claim, receipt or session
+record requires reconciliation against tasks, candidate commits and external
+outcomes before retrying side effects. Package versions and cache presence do
+not grant authority or establish delivery compatibility.
 
 ## Version and build identity
 
-- A `.changes/*.json` file declares release impact. The release commit, which
-  `python3 tools/release.py bump` makes, is the only writer that bumps
-  `versions.json`; host manifests expose that calendar release version,
-  `YYYY.M.N`.
-- Each generated package carries `.agent-marketplace-package.json` with its
-  plugin and marketplace release versions, the closed file/hash inventory,
-  executable paths and the closed `delivery_protocol` read/write capability.
-  This schema-v4 metadata verifies the complete package and selects compatible
-  Delivery record adapters; it is not project state. Generated UTF-8 text uses
-  canonical LF bytes and release preparation rematerializes tracked files
-  under its fixed Git checkout policy; unknown and binary payloads remain
-  byte-exact.
-- Packages carry no per-commit source identity, and each file hash has a line
-  of its own, so pull requests that change different package files merge
-  without a `dist/` conflict, except adds at one sort position, an add after a
-  changed last entry, a removal next to another removal or an add, and a
-  removal of the last entry beside a change to the entry before it. The
-  deterministic snapshot `build_id` of the canonical sources that every host
-  build shares is computed instead: the release commit records it in
-  `.release/stable.json`, check-pr's replay reproduces it, and
-  `python3 tools/release.py verify-release` recomputes it at the commit a
-  release tags.
-- Setup never copies a package version or build ID into project configuration,
-  and upgrade never compares an old project build ID with a new one. Setup
-  never performs a remote mutation.
+- `.changes/*.json` declares release impact. The release command is the sole
+  writer of `versions.json`. Host manifests expose its calendar release version.
+- Schema-v4 `.agent-marketplace-package.json` binds the closed file inventory,
+  hashes, executable set and Delivery read/write capability. It verifies package
+  contents and selects supported record adapters.
+- Generated UTF-8 text uses canonical LF. Unknown and binary files remain
+  byte-exact. Release preparation uses the fixed Git checkout policy and the
+  tracked executable-mode contract.
+- Per-file hashes occupy separate lines. Packages carry no per-commit source
+  identity. Independent package edits can still conflict where sorted inventory
+  entries meet, so ordinary Git conflict resolution remains necessary.
+- The canonical snapshot `build_id` is recorded in `.release/stable.json` by the
+  release commit. PR replay and release verification recompute it. It is separate
+  from a local launch behavior stamp.
+- Setup writes no package version or build ID into project configuration and
+  performs no remote mutation. Package publication and release follow the
+  maintainer protocol and its exact-candidate validation, authority, ref leases,
+  immutable reconciliation and final clean-state checks. [Maintainer operations](maintainer-operations-protocol.md)

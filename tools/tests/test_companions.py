@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -31,11 +32,84 @@ class CompanionAvailabilityTests(unittest.TestCase):
         import setup_companions
         self.module = setup_companions
 
+    def test_explicit_selection_keeps_default_checks_inert_and_preserves_unselected_settings(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            settings = root / ".claude" / "settings.json"
+            settings.parent.mkdir()
+            settings.write_text(json.dumps({
+                "permissions": {"deny": ["Skill(superpowers:brainstorming)"]},
+                "env": {"SUPERPOWERS_DISABLE_TELEMETRY": "1", "PONYTAIL_DEFAULT_MODE": "full"},
+            }) + "\n", encoding="utf-8")
+            codex = root / "codex.toml"
+            codex.write_text("# agent-marketplace:software-engineering-team:companions:start" + '\n[[skills.config]]\n'
+                             'name = "superpowers:brainstorming"\nenabled = false\n'
+                             + "# agent-marketplace:software-engineering-team:companions:end" + "\n", encoding="utf-8")
+            original = {path: path.read_bytes() for path in (settings, codex)}
+            args = ["--project-root", str(root), "--json"]
+            with mock.patch.object(self.module, "status", return_value=([], [])) as status, \
+                    mock.patch.object(self.module, "install", return_value=([], [])) as install, \
+                    mock.patch.object(self.module, "uninstall", return_value=[]) as uninstall, \
+                    redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                self.assertEqual(self.module.main(["check", *args]), 0)
+                status.assert_not_called()
+                install.assert_not_called()
+                uninstall.assert_not_called()
+                for action in ("apply", "uninstall"):
+                    with self.assertRaises(SystemExit) as rejected:
+                        self.module.main([action, *args])
+                    self.assertEqual(rejected.exception.code, 2)
+                self.assertEqual(self.module.main(["apply", "--companion", "ponytail", *args]), 0)
+                self.assertEqual([item["id"] for item in install.call_args.args[0]["companions"]], ["ponytail"])
+                self.assertEqual(original, {path: path.read_bytes() for path in original})
+                self.assertEqual(self.module.main(["check", "--all", *args]), 0)
+                self.assertEqual({item["id"] for item in status.call_args.args[0]["companions"]},
+                                 {"ponytail", "graphify", "impeccable", "security-audit"})
+                with self.assertRaises(SystemExit) as rejected:
+                    self.module.main(["apply", "--companion", "superpowers", *args])
+                self.assertEqual(rejected.exception.code, 2)
+                self.assertEqual(install.call_count, 1)
+                self.assertEqual(self.module.main(["uninstall", "--companion", "ponytail", *args]), 0)
+                self.assertEqual([item["id"] for item in uninstall.call_args.args[0]["companions"]], ["ponytail"])
+                self.assertEqual(codex.read_bytes(), original[codex])
+                self.assertEqual(json.loads(settings.read_text(encoding="utf-8")), {
+                    "permissions": {"deny": ["Skill(superpowers:brainstorming)"]},
+                    "env": {"SUPERPOWERS_DISABLE_TELEMETRY": "1"},
+                })
+
+    def test_lightweight_check_preserves_unknown_availability_without_host_sessions(self):
+        self.assertEqual({item["id"] for item in REGISTRY["companions"]},
+                         {"ponytail", "graphify", "impeccable", "security-audit"})
+        self.assertEqual({item["recommendation"] for item in REGISTRY["companions"]},
+                         {"required_when_available"})
+        with tempfile.TemporaryDirectory() as raw, \
+                mock.patch.object(self.module.subprocess, "Popen") as session, \
+                mock.patch.object(self.module, "installed", return_value=True), \
+                mock.patch.object(self.module, "file_present", return_value=True), \
+                mock.patch.object(self.module, "hook_missing", return_value=[]), \
+                mock.patch.object(self.module, "plugin_state", return_value=(True, True)) as state:
+            root = Path(raw)
+            rows, findings = self.module.status(REGISTRY, root, ("codex",))
+            self.assertEqual(findings, [])
+            host_rows = [row for row in rows if row["host"] == "codex"]
+            self.assertEqual(len(host_rows), 4)
+            self.assertTrue(all(row["skills_available"] is None for row in host_rows))
+            self.assertTrue(all(row["skills_loaded"] == "unverified" for row in host_rows))
+            self.assertTrue(all(row["availability_reason"] == "host_loader_not_queried" for row in host_rows))
+            state.return_value = (None, None)
+            rows, findings = self.module.status(REGISTRY, root, ("codex",))
+            ponytail = next(row for row in rows if row["id"] == "ponytail")
+            self.assertIsNone(ponytail["installed"])
+            self.assertEqual(ponytail["availability_state"], "unverified")
+            self.assertTrue(findings)
+            session.assert_not_called()
+            self.assertEqual(list(root.iterdir()), [])
+
     def test_plugin_record_must_be_installed_enabled_and_in_the_selected_catalog(self):
         verify = REGISTRY["companions"][0]["hosts"]["codex"]["verify"]
-        self.assertEqual(verify["plugin_id"], "superpowers@openai-curated-remote")
+        self.assertEqual(verify["plugin_id"], "ponytail@ponytail")
         cases = [
-            ({"pluginId": "superpowers@openai-curated", "installed": True, "enabled": True}, False),
+            ({"pluginId": "ponytail@other-marketplace", "installed": True, "enabled": True}, False),
             ({"pluginId": verify["plugin_id"], "installed": False, "enabled": True}, False),
             ({"pluginId": verify["plugin_id"], "installed": True, "enabled": False}, False),
             ({"pluginId": verify["plugin_id"], "installed": True, "enabled": True}, True),
@@ -71,15 +145,13 @@ class CompanionAvailabilityTests(unittest.TestCase):
         self.assertEqual({scope for scope, _ in specs}, {"user"})
         self.assertFalse([command for _, command in specs if "--project" in command or "--scope project" in command])
 
-    def test_claude_session_probe_reads_the_init_event_and_reports_a_dead_host(self):
-        events = [{"type": "system", "subtype": "hook_started"}, {"type": "system", "subtype": "init", "skills": ["a:b"]}]
-        process = mock.Mock(stdin=None, stdout=io.StringIO("".join(json.dumps(e) + "\n" for e in events)))
-        with mock.patch.object(self.module.subprocess, "Popen", return_value=process):
-            self.assertEqual(self.module.claude_skills(ROOT), ({"a:b"}, []))
-        with mock.patch.object(self.module.subprocess, "Popen", side_effect=OSError):
+    def test_claude_loader_check_never_launches_a_prompt_capable_session(self):
+        with mock.patch.object(self.module.subprocess, "Popen") as launch:
             skills, findings = self.module.claude_skills(ROOT)
         self.assertIsNone(skills)
+        self.assertIn("active host session", findings[0])
         self.assertIn("unverified", findings[0])
+        launch.assert_not_called()
 
     def test_uninstall_runs_every_command_removes_paths_and_reports_what_is_left(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -107,10 +179,11 @@ class CompanionAvailabilityTests(unittest.TestCase):
             path = root / ".claude" / "settings.json"
             path.parent.mkdir()
             path.write_text(json.dumps({"permissions": {"allow": ["Bash(ls)"], "deny": ["Skill(superpowers:brainstorming)", "Skill(mine)"]},
-                                        "env": {"SUPERPOWERS_DISABLE_TELEMETRY": "1", "OWN": "1"}, "model": "x"}), encoding="utf-8")
+                                        "env": {"SUPERPOWERS_DISABLE_TELEMETRY": "1", "GRAPHIFY_OUT": ".agentrof/graphify", "OWN": "1"}, "model": "x"}), encoding="utf-8")
             self.module.remove_claude_settings(REGISTRY, root)
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")),
-                             {"permissions": {"allow": ["Bash(ls)"], "deny": ["Skill(mine)"]}, "env": {"OWN": "1"}, "model": "x"})
+                             {"permissions": {"allow": ["Bash(ls)"], "deny": ["Skill(superpowers:brainstorming)", "Skill(mine)"]},
+                              "env": {"SUPERPOWERS_DISABLE_TELEMETRY": "1", "OWN": "1"}, "model": "x"})
 
     def test_host_skill_probe_checks_local_loading_and_reads_remote_contents(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -146,7 +219,7 @@ class CompanionAvailabilityTests(unittest.TestCase):
                 mock.patch.object(self.module, "plugin_state", return_value=(True, True)), \
                 mock.patch.object(self.module, "file_present", return_value=True), \
                 mock.patch.object(self.module, "hook_missing", return_value=[]):
-            rows, _ = self.module.status(REGISTRY, ROOT, ("codex",))
+            rows, _ = self.module.status(REGISTRY, ROOT, ("codex",), verify_load=True)
         self.assertTrue(all(row["installed"] for row in rows))
         self.assertTrue(all(row["skills_available"] is False for row in rows if row["host"] == "codex"))
 
@@ -184,7 +257,7 @@ class GraphifyHookEnvTests(unittest.TestCase):
             line = "export GRAPHIFY_OUT=.agentrof/graphify"
             _rows, findings = setup_companions.status(REGISTRY, root, ())
             self.assertEqual([item for item in findings if "post-commit" in item],
-                             [f"graphify: hook post-commit lacks `{line}`; rerun companions apply"])
+                             [f"graphify: hook post-commit lacks `{line}`; rerun companions apply --companion graphify"])
             for _ in range(2):
                 setup_companions.write_hook_env(REGISTRY, root)
             self.assertEqual(hook.read_text(encoding="utf-8").splitlines()[:2], ["#!/bin/sh", line])
@@ -233,13 +306,14 @@ class CompanionCheckTests(unittest.TestCase):
 
             def run(*args: str) -> subprocess.CompletedProcess:
                 return subprocess.run(
-                    [sys.executable, str(OVERLAY / "scripts" / "setup_companions.py"), *args,
+                    [sys.executable, str(OVERLAY / "scripts" / "setup_companions.py"), *args, "--all",
                      "--project-root", str(project)],
                     env=env, capture_output=True, text=True, check=False)
 
             first = run("check")
             self.assertEqual(first.returncode, 1, first.stdout)
-            self.assertIn("superpowers | plugin | claude | yes | yes | 4/4 | NO | NO | -", first.stdout)
+            self.assertNotIn("superpowers |", first.stdout)
+            self.assertIn("ponytail | plugin | claude | yes | yes | unverified | - | - | -", first.stdout)
 
             for companion in REGISTRY["companions"]:
                 for spec in companion["hosts"].values():
@@ -253,13 +327,13 @@ class CompanionCheckTests(unittest.TestCase):
             self.assertEqual(run("apply").returncode, 0)
             self.assertFalse((project / "workspace" / "docs" / ".graphifyignore").exists())
             written = {path: path.read_bytes() for path in (
-                settings, codex_home / "config.toml", project / ".diagram-design",
-                project / ".impeccable" / "config.json")}
+                settings, project / ".impeccable" / "config.json")}
             self.assertEqual(run("apply").returncode, 0)
             self.assertEqual(written, {path: path.read_bytes() for path in written})
             merged = json.loads(settings.read_text(encoding="utf-8"))
             self.assertEqual(merged["permissions"]["allow"], ["Bash(ls)"])
-            self.assertIn("Skill(superpowers:brainstorming)", merged["permissions"]["deny"])
+            self.assertNotIn("Skill(superpowers:brainstorming)", merged["permissions"].get("deny", []))
+            self.assertFalse((codex_home / "config.toml").exists())
             self.assertEqual(merged["env"]["IMPECCABLE_CONTEXT_DIR"], "workspace/experience-design")
             self.assertIn("graphify | hook | git-hook | yes", run("check").stdout)
 
@@ -277,13 +351,14 @@ class GraphifyNoteTests(unittest.TestCase):
 
     def test_constitution_sources_rule_queries_the_graph_first(self):
         text = (TEAM / "constitution.md").read_text(encoding="utf-8")
-        rule = text.split("## 5. Sources first", 1)[1].split("\n## ", 1)[0]
-        self.assertLess(rule.index("graphify query|path|explain"), rule.index("sources the task file lists"))
+        rule = text.split("## Reasoning and execution", 1)[1].split("\n## ", 1)[0]
+        self.assertLess(rule.index("graphify query|path|explain"), rule.index("verify source content"))
         self.assertIn(".agentrof/graphify/docs/graph.json", rule)
         self.assertIn("without a shell", rule)
+        self.assertIn("record the fallback", rule)
         flow = (TEAM / "flows" / "fast-lane.md").read_text(encoding="utf-8")
-        self.assertIn("constitution section 5", flow)
-        self.assertNotIn("greps `workspace/docs/`", flow)
+        self.assertIn("../constitution.md", flow)
+
 
 
 @integration

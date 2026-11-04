@@ -4,8 +4,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import importlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -26,17 +29,19 @@ CONFIG_FIELDS = {
     "pr_proof",
     "local_proof",
     "local_proof_map",
-    "task_criteria_range",
     "proof_runner",
-    "role_routing",
     "task_triggers",
     role_settings.CLASS_MODELS,
-    role_settings.ROLE_CLASSES,
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout",
-                   "pr_proof", "local_proof", "local_proof_map", "task_criteria_range", "proof_runner", "role_routing", "task_triggers"}
+                   "pr_proof", "local_proof", "local_proof_map", "proof_runner", "task_triggers"}
 # Deliver settings the project owns; setup writes none of them and keeps the project's.
-PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "task_criteria_range", "proof_runner", "role_routing", "task_triggers")
+PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "proof_runner", "task_triggers")
+RETIRED_DEFAULTS = {"role_routing": {}, "task_criteria_range": [3, 8]}
+REVIEWER_ALIASES = {
+    "code-reviewer": "reviewer", "analysis-challenger": "reviewer",
+    "solution-reviewer": "critical-reviewer", "security-reviewer": "critical-reviewer",
+}
 # Who proves a task before its pull request; unset means remote_ci.
 PR_PROOF_VALUES = ("remote_ci", "local_record")
 # Setup writes these into a config that lacks them; the project owns them after.
@@ -61,10 +66,9 @@ PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 # `classes` reads only the config and the package; whether a model is available
 # is the project generators' to judge, and they report the roles they render.
 CLASS_MAP_NOTE = (
-    "Config-level effective map: each role's class, model and effort from"
+    "Config-level requested map: each launch profile's model and effort from"
     " workspace/config.json over the package class map. It knows nothing of model"
-    " availability, so the model a host's roles run is the roles table its project"
-    " generator reports."
+    " availability or actual runtime selection. Host observations remain separate."
 )
 
 
@@ -75,10 +79,56 @@ def load(path: Path) -> dict:
     return value
 
 
-def atomic(path: Path, value: dict) -> None:
-    atomic_file.replace_text(
-        path, json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-    )
+def atomic(path: Path, value: dict, *, expected: dict) -> None:
+    """Cooperate with setup and refuse to overwrite a newer config."""
+    import setup_project
+
+    root = path.parent.parent if path.parent.name == "workspace" else path.parent
+    with setup_project.refresh_guard(root):
+        if path.is_symlink() or load(path) != expected:
+            raise ValueError("config changed before write; inspect it again")
+        atomic_file.replace_text(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def migrate_replacement(path: Path, replacement: Path, expected_sha256: str, *, dry_run: bool) -> dict:
+    """Apply one reviewed closed config against its exact previous bytes."""
+    import setup_project
+
+    if path.name != "config.json" or path.parent.name != "workspace":
+        raise ValueError("migration target must be workspace/config.json")
+    if re.fullmatch(r"[0-9a-f]{64}", expected_sha256) is None:
+        raise ValueError("expected-sha256 must be a lowercase SHA-256 digest")
+    proposed = json.loads(replacement.read_text(encoding="utf-8"))
+    if not isinstance(proposed, dict):
+        raise ValueError("replacement config must be a JSON object")
+    errors = check(proposed)
+    if errors:
+        raise ValueError("invalid replacement config: " + "; ".join(errors))
+    rendered = (json.dumps(proposed, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+    def current_bytes() -> bytes:
+        if path.is_symlink() or path.parent.is_symlink() or not path.is_file():
+            raise ValueError("migration target must be an existing regular config in a real workspace")
+        current = path.read_bytes()
+        if hashlib.sha256(current).hexdigest() != expected_sha256:
+            raise ValueError("config digest changed; inspect and approve the replacement again")
+        return current
+
+    before_bytes = current_bytes()
+    before = json.loads(before_bytes)
+    if not isinstance(before, dict):
+        raise ValueError("current config must be a JSON object")
+    owner = marketplace_paths.team_from_config(before)
+    if owner and owner != TEAM:
+        raise ValueError(f"workspace is owned by {owner}")
+    if not dry_run:
+        with setup_project.refresh_guard(path.parent.parent):
+            current_bytes()
+            atomic_file.replace_bytes(path, rendered, before_replace=current_bytes)
+    return {"ok": True, "config": str(path), "before": before, "after": proposed,
+            "before_sha256": expected_sha256,
+            "after_sha256": hashlib.sha256(rendered).hexdigest(),
+            "dropped_keys": sorted(set(before) - set(proposed)), "dry_run": dry_run}
 
 
 def setting(config: dict, field: str):
@@ -122,6 +172,100 @@ def load_class_map() -> dict | None:
     return role_settings.load_class_map()
 
 
+def trigger_errors(value: object) -> list[str]:
+    """Validate only the trigger fields the delivery runtime can consume."""
+    keys = {"method_skills": "skill", "risk_flags": "flag", "reviewers": "role"}
+    if not isinstance(value, dict):
+        return ["task_triggers must be an object"]
+    errors = [f"task_triggers contains unknown table: {key}" for key in value if key not in keys]
+    methods = {path.parent.name for path in (PACKAGE_ROOT / "skill-content").glob("*/SKILL.md")}
+    for table, key in keys.items():
+        rules = value.get(table, [])
+        if not isinstance(rules, list):
+            errors.append(f"task_triggers.{table} must be a list")
+            continue
+        seen = set()
+        for index, rule in enumerate(rules):
+            where = f"task_triggers.{table}[{index}]"
+            allowed = {key, "path_globs", "keywords", "exclude_globs"}
+            if table == "reviewers":
+                allowed.update({"rigors", "on_any_risk"})
+            if not isinstance(rule, dict) or not isinstance(rule.get(key), str) or not rule[key].strip():
+                errors.append(f"{where} must name a non-empty {key}")
+                continue
+            name = rule[key]
+            if name in seen:
+                errors.append(f"{where} repeats {key} {name!r}; merge requires an explicit decision")
+            seen.add(name)
+            if set(rule) - allowed:
+                errors.append(f"{where} contains unsupported fields: {', '.join(sorted(set(rule) - allowed))}")
+            if table == "method_skills" and name not in methods:
+                errors.append(f"{where} names unavailable method {name!r}; migrate the trigger")
+            if table == "reviewers" and name not in {"reviewer", "critical-reviewer"}:
+                errors.append(f"{where} names unavailable reviewer {name!r}; migrate the trigger")
+            for field in ("path_globs", "keywords", "exclude_globs", "rigors"):
+                if field in rule and (not isinstance(rule[field], list) or not all(
+                        isinstance(item, str) and item.strip() for item in rule[field])):
+                    errors.append(f"{where}.{field} must list non-empty strings")
+            if "rigors" in rule and isinstance(rule["rigors"], list) \
+                    and any(item not in ("normal", "high") for item in rule["rigors"]):
+                errors.append(f"{where}.rigors must use normal or high")
+            if "on_any_risk" in rule and not isinstance(rule["on_any_risk"], bool):
+                errors.append(f"{where}.on_any_risk must be a boolean")
+    return errors
+
+
+def migrate_config(config: dict) -> dict:
+    """Preview supported legacy renames and report decisions without writing.
+
+    Distinct custom rules that collapse to one runtime ID are preserved in
+    the original config until the owner resolves their differing predicates.
+    """
+    model_keys = {role_settings.CLASS_MODELS, role_settings.ROLE_CLASSES, *role_settings.RETIRED_KEYS}
+    class_map = load_class_map() if model_keys & set(config) else None
+    result = role_settings.migrate_legacy_overrides(config, class_map)
+    proposed, changes, conflicts = result["config"], result["changes"], result["conflicts"]
+    for key, default in RETIRED_DEFAULTS.items():
+        if key not in config:
+            continue
+        if config[key] == default:
+            proposed.pop(key, None)
+            changes.append({"from": key, "to": None, "value": copy.deepcopy(config[key])})
+        else:
+            conflicts.append(f"{key} has custom settings; an explicit migration decision is required")
+    triggers = proposed.get("task_triggers")
+    if isinstance(triggers, dict):
+        import task_lane
+
+        for table, key, aliases in (("method_skills", "skill", task_lane.SKILL_ALIASES),
+                                     ("reviewers", "role", REVIEWER_ALIASES)):
+            rules = triggers.get(table)
+            if not isinstance(rules, list):
+                continue
+            renamed, seen = [], {}
+            for rule in rules:
+                if not isinstance(rule, dict) or not isinstance(rule.get(key), str):
+                    renamed.append(rule)
+                    continue
+                old = rule[key]
+                updated = {**rule, key: aliases.get(old, old)}
+                name = updated[key]
+                if old != name:
+                    changes.append({"from": f"task_triggers.{table}.{old}",
+                                    "to": f"task_triggers.{table}.{name}", "value": copy.deepcopy(rule)})
+                if name in seen and updated != seen[name]:
+                    conflicts.append(f"task_triggers.{table}.{name} has conflicting legacy rules;"
+                                     " an explicit migration decision is required")
+                elif name not in seen:
+                    renamed.append(updated)
+                    seen[name] = updated
+            triggers[table] = renamed
+    if "task_triggers" in proposed:
+        conflicts.extend(trigger_errors(proposed["task_triggers"]))
+    return {"config": copy.deepcopy(config) if conflicts else proposed,
+            "changes": changes, "conflicts": conflicts}
+
+
 def base_errors(config: dict) -> list[str]:
     """The errors of the config's closed field set, schema, team and languages."""
     errors: list[str] = []
@@ -147,15 +291,9 @@ def base_errors(config: dict) -> list[str]:
             and (r.get("none") is True) != bool(r.get("commands"))
             and all(isinstance(c, str) and c.strip() for c in r.get("commands", [])) for r in rules):
         errors.append("local_proof_map must list rules with paths and either commands or none: true")
-    span = config.get("task_criteria_range", [3, 8])
-    if not (isinstance(span, list) and len(span) == 2 and all(type(n) is int and n > 0 for n in span)
-            and span[0] <= span[1]):
-        errors.append("task_criteria_range must be [min, max] positive integers with min <= max")
     if not isinstance(config.get("proof_runner", ""), str):
         errors.append("proof_runner must be a string")
-    for field in ("role_routing", "task_triggers"):
-        if not isinstance(config.get(field, {}), dict):
-            errors.append(f"{field} must be an object")
+    errors.extend(trigger_errors(config.get("task_triggers", {})))
     errors.extend(layout_errors(config))
     return errors
 
@@ -375,23 +513,15 @@ def setting_command(args, path: Path, config: dict) -> int:
         for value in invalid:
             print(f"project_config: {value}", file=sys.stderr)
         return 1
-    slot = None
+    slot = args.model_class
     try:
-        if args.command == "set-class":
-            if args.default and (args.model is not None or args.effort is not None):
-                raise ValueError("--default takes no --model or --effort")
-            if not args.default and args.model is None and args.effort is None:
-                raise ValueError("set-class needs --model, --effort or --default")
-            slot = f"{args.model_class}_{role_settings.ESCALATED}" if args.escalated \
-                else args.model_class
-            proposed, before, after = role_settings.set_class(
-                config, class_map, args.host, slot, model=args.model, effort=args.effort,
-                default=args.default, confirmed=args.confirmed)
-        else:
-            if args.default == (args.model_class is not None):
-                raise ValueError("set-role-class needs exactly one of --class or --default")
-            proposed, before, after = role_settings.set_role_class(
-                config, class_map, args.role, args.model_class, default=args.default)
+        if args.default and (args.model is not None or args.effort is not None):
+            raise ValueError("--default takes no --model or --effort")
+        if not args.default and args.model is None and args.effort is None:
+            raise ValueError("set-class needs --model, --effort or --default")
+        proposed, before, after = role_settings.set_class(
+            config, class_map, args.host, slot, model=args.model, effort=args.effort,
+            default=args.default, confirmed=args.confirmed)
     except ValueError as exc:
         print(f"project_config: {exc}", file=sys.stderr)
         return 1
@@ -404,23 +534,19 @@ def setting_command(args, path: Path, config: dict) -> int:
             print(f"project_config: {value}", file=sys.stderr)
         return 1
     if not args.dry_run and proposed != config:
-        atomic(path, proposed)
+        try:
+            atomic(path, proposed, expected=config)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"project_config: {exc}", file=sys.stderr)
+            return 1
     result = {"ok": True, "config": str(path), "before": before, "after": after,
               "dry_run": args.dry_run, "errors": errors}
-    if args.command == "set-class":
-        where = f"{role_settings.CLASS_MODELS}.{args.host}.{slot}"
-        # A removed override of a retired slot or host has no setting left.
-        known = args.host in class_map["hosts"] \
-            and slot in role_settings.class_slots(class_map, args.host)
-        setting = role_settings.slot_setting(
-            class_map, args.host, slot,
-            role_settings.host_overrides(proposed, args.host).get(slot)) if known else {}
-        result.update(host=args.host, slot=slot, model=setting.get("model"),
-                      effort=setting.get("effort"))
-    else:
-        where = f"{role_settings.ROLE_CLASSES}.{args.role}"
-        roles = role_settings.movable_roles(class_map)
-        result.update(role=args.role, model_class=after or roles.get(args.role))
+    where = f"{role_settings.CLASS_MODELS}.{args.host}.{slot}"
+    known = args.host in class_map["hosts"] and slot in role_settings.class_slots(class_map, args.host)
+    setting = role_settings.slot_setting(
+        class_map, args.host, slot,
+        role_settings.host_overrides(proposed, args.host).get(slot)) if known else {}
+    result.update(host=args.host, slot=slot, model=setting.get("model"), effort=setting.get("effort"))
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     else:
@@ -441,6 +567,12 @@ def main(argv=None) -> int:
     p.add_argument("--value", required=True)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
+    p = sub.add_parser("migrate", help="apply an explicitly reviewed replacement against an exact config digest")
+    p.add_argument("--config", required=True)
+    p.add_argument("--config-file", required=True, help="the reviewed replacement JSON file")
+    p.add_argument("--expected-sha256", required=True)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--json", action="store_true")
     p = sub.add_parser("classes", help="report the config-level effective map of each host")
     p.add_argument("--config", required=True)
     p.add_argument("--host")
@@ -452,8 +584,6 @@ def main(argv=None) -> int:
     p.add_argument("--config", required=True)
     p.add_argument("--host", required=True)
     p.add_argument("--class", dest="model_class", required=True)
-    p.add_argument("--escalated", action="store_true",
-                   help="set the class's escalated slot instead of its default one")
     p.add_argument("--model", help="a model ID of the host's list, or session")
     p.add_argument("--effort")
     p.add_argument("--default", action="store_true",
@@ -462,7 +592,7 @@ def main(argv=None) -> int:
                    help="the owner confirmed an effort the host asks to confirm")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
-    p = sub.add_parser("set-role-class", help="move one role to another class, or back")
+    p = sub.add_parser("set-role-class", help="retired persona setting; requires explicit migration")
     p.add_argument("--config", required=True)
     p.add_argument("--role", required=True)
     p.add_argument("--class", dest="model_class")
@@ -471,13 +601,25 @@ def main(argv=None) -> int:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
+    if args.command == "set-role-class":
+        print("project_config: set-role-class is retired; migrate to explicit compute profiles", file=sys.stderr)
+        return 1
+    if args.command == "migrate":
+        try:
+            result = migrate_replacement(Path(args.config).absolute(), Path(args.config_file),
+                                         args.expected_sha256, dry_run=args.dry_run)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"project_config: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     path = Path(args.config).resolve()
     try:
         config = load(path)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"project_config: cannot read {path}: {exc}", file=sys.stderr)
         return 2
-    if args.command in {"classes", "set-class", "set-role-class"}:
+    if args.command in {"classes", "set-class"}:
         return setting_command(args, path, config)
     if args.command == "check":
         errors = check(config)
@@ -497,7 +639,11 @@ def main(argv=None) -> int:
             print(f"project_config: {value}", file=sys.stderr)
         return 1
     if not args.dry_run:
-        atomic(path, proposed)
+        try:
+            atomic(path, proposed, expected=config)
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"project_config: {exc}", file=sys.stderr)
+            return 1
     write_result(path, before, after, dry_run=args.dry_run,
                  json_output=args.json)
     return 0

@@ -1,35 +1,59 @@
 ---
 name: solution-design
-description: Solution landscape knowledge for the team's solution roles. Loaded by software-engineering-team flows; not user-facing.
+description: Chooses component boundaries, interfaces and implementation approach when a task changes architecture, technology or cross-component behavior.
 exposure: internal
 ---
 
 # Solution Design
 
-The project keeps one solution landscape under
-`workspace/docs/solution-design/`: components, engagements and decisions.
-Every accepted technology, boundary, integration, method and sustainability
-verdict is a linked Markdown decision; nothing decided stays only in
-conversation.
+## Outcome
 
-## When to Use
+An implementable design delta with clear ownership, compatible interfaces and
+proportionate operational cost.
 
-- A task adds or changes a component, integration, technology or method
-  decision.
-- A build task's pre-check compares a change with the landscape.
+## When to use
 
-## Rules
+Load for changed boundaries, interfaces, technologies, dependencies or runtime
+behavior. For an established local pattern, confirm its fit and implement it.
 
-An update to these documents is a knowledge task of the `deliver` entry and
-runs the fast lane: branch, change, pull request, review, merge.
+## Inputs and authority
 
-- `solution-architect` writes. Allocate every active business process to a
-  topology component, or record why it needs none.
-- A `build` component names its `app_kind` and its `workspace/apps/<component-id>`
-  path; external, managed and self-hosted dependencies stay components without
-  a source tree.
-- Record framing, constraints, options, rejected alternatives and the verdict
-  of each decision, with links to the analysis it serves. Component stacks may
-  differ; no global stack is assumed.
-- `solution-reviewer` reviews read-only and returns findings; the architect
-  applies accepted ones to the owning documents.
+Use the task, accepted Solution decisions, affected code and operation documents.
+The solution landscape under `workspace/docs/solution-design/` owns component
+topology and technology. Detailed contracts and module design live under
+`workspace/docs/system-architecture/`. Preserve existing paths and identities.
+Changes to accepted product direction require its decision authority.
+
+## Method
+
+1. Trace the requested behavior through current components, interfaces and
+   stores. Identify the exact gap and reuse existing capabilities.
+2. Compare the simplest sufficient design with the strongest credible
+   alternative when the choice is material. Evaluate build, buy or integrate
+   for a new capability. Consider operability, failure
+   recovery, team capability, cost, lock-in and exit. Record substantial
+   decisions once, with constraints, tradeoffs and affected scopes.
+3. Give each mutable resource and module one owner. Define boundary inputs,
+   outputs, authorization, errors, retries, timeouts and compatibility. Load
+   data-design before changing persisted structure or consistency semantics.
+4. Map implementation into independently verifiable tasks. Give concurrent
+   writers disjoint ownership and explicit integration seams. Sequence shared
+   state changes and account for generated outputs and migrations.
+5. Declare runtime impact, including services, configuration, secrets, data,
+   readiness, observability and rollout or recovery. Measure the uncertain
+   constraint that could invalidate the design. Escalate a conflicting accepted
+   decision with concrete evidence and a proposed resolution.
+
+## Evidence and completion
+
+Return changed decisions/contracts, ownership and integration order, testable
+failure behavior, and environment impact or a reasoned absence of impact.
+Update only documents the change makes stale. A local correction within an
+accepted design can remain in the task without a new architecture record.
+
+## Conditional references
+
+- For boundary, API or cross-cutting changes, read [architecture](references/architecture.md).
+- For implementation planning or stack-specific pitfalls, read [implementation](references/implementation.md).
+- For schemas and migrations, load [data-design](../data-design/SKILL.md).
+- For user interaction changes, load [experience-design](../experience-design/SKILL.md).

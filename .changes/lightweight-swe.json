@@ -1,0 +1,7 @@
+{
+  "summary": "Replace persona-driven delivery with thirteen scoped methods, explicit execution profiles, four context-required companions, bounded background work and exact-candidate delivery gates. Preserve existing settings through reviewed one-time migration. Align platform CI coverage and native installation checks, share validation setup and track exact release dispatches.",
+  "components": {
+    "agent-marketplace": "patch",
+    "software-engineering-team": "major"
+  }
+}

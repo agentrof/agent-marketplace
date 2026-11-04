@@ -140,6 +140,20 @@ class UserContextTests(unittest.TestCase):
             for host, surface in self.surfaces.items()
         }
 
+    def test_startup_keeps_user_rules_and_defers_task_documents(self):
+        declared = build_distributions.user_context_files(ROOT)
+        self.assertEqual(declared, [
+            COMPANION,
+            "{{workspace}}/memory/agent-marketplace.md",
+            "{{workspace}}/memory/me.md",
+            "{{workspace}}/memory/profile.md",
+        ])
+        team = (ROOT / "plugins/software-engineering-team/templates/"
+                "project-instructions/team.md").read_text(encoding="utf-8")
+        self.assertIn("current-plan.md", team)
+        self.assertIn("product-decisions.md", team)
+        self.assertIn("Every worker brief carries applicable authority, data safety", team)
+
     def test_every_host_loads_the_same_declared_files_in_order(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)

@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
-"""Resolve the purpose class, model and reasoning effort of every role, per host.
+"""Resolve compute profiles and project model overrides on each host.
 
-Every built package ships `templates/model-classes.json`: each role's package
-class, which classes escalate and on which risk flags, and per host each class
-slot's package model and effort (a class that escalates has a second slot,
-`<class>_escalated`), how a spawn sets its model, the host's model catalog with the
-efforts each model takes, the host's effort vocabulary and model ID shape,
-and the efforts the host asks the owner to confirm or refuses.
-`workspace/config.json` holds only a project's overrides:
-
-- `role_classes` moves a role to another class on every host.
-- `class_models.<host>.<slot>` sets that slot's `model`, a model ID of the
-  host's shape or `session`, and its `effort`; a missing key keeps the
-  package value. `session` runs the slot's roles on the session's model.
-
-`resolve` applies them in that order for the project config writer, the spawn
-model resolver and the host project generators, so every surface reports
-what setup renders.
+The package class map declares technical launch identities and their fixed
+profile/access pair. ``class_models.<host>.<profile>`` changes model or effort
+without changing access. Legacy role classes remain readable for historical
+packages and explicit migration, but cannot move current launch identities.
 """
 
 from __future__ import annotations
@@ -34,12 +22,24 @@ CLASS_MAP_SCHEMA_VERSION = 3
 CLASS_MODELS = "class_models"
 ROLE_CLASSES = "role_classes"
 # Keys the purpose classes replaced; a config that still holds one is refused.
-RETIRED_KEYS = {"tier_models": CLASS_MODELS, "role_tiers": ROLE_CLASSES}
+RETIRED_KEYS = {
+    "tier_models": CLASS_MODELS,
+    "role_tiers": ROLE_CLASSES,
+    "effort_overrides": CLASS_MODELS,
+}
 ESCALATED = "escalated"
 SESSION = "session"
 SETTING_KEYS = ("model", "effort")
 PACKAGE, CONFIG = "package", "config"
 REMEDY = " (change it through /configure models)"
+LEGACY_PROFILES = {
+    "mechanical": "light", "mechanical_escalated": "work",
+    "routine_authoring": "work", "routine_authoring_escalated": "critical",
+    "complex_authoring": "critical", "complex_authoring_escalated": "critical",
+    "routine_review": "review", "routine_review_escalated": "critical",
+    "critical_decision": "critical", "critical_decision_escalated": "critical",
+    "security_review": "critical",
+}
 
 
 def load_class_map(path: Path = CLASS_MAP) -> dict | None:
@@ -82,7 +82,83 @@ def valid_class_map(value: object) -> bool:
         if not all(isinstance(slot, dict) and isinstance(slot.get("model"), str)
                    for slot in spec["classes"].values()):
             return False
+    launches = value.get("launch_profiles")
+    if launches is not None:
+        if not isinstance(launches, dict):
+            return False
+        for host in hosts.values():
+            access = host.get("read_access")
+            if not isinstance(access, dict) \
+                    or not isinstance(access.get("definition_restricts_tools"), bool) \
+                    or not isinstance(access.get("note"), str):
+                return False
+        pairs = set()
+        for name, spec in launches.items():
+            if not isinstance(spec, dict) or not isinstance(spec.get("profile"), str) \
+                    or spec["profile"] not in classes or not isinstance(spec.get("access"), str) \
+                    or spec["access"] not in {"read", "write"} \
+                    or name not in roles.get(spec["profile"], []):
+                return False
+            pair = (spec["profile"], spec["access"])
+            if pair in pairs:
+                return False
+            pairs.add(pair)
+        role_names = [name for names in roles.values() for name in names]
+        if len(role_names) != len(set(role_names)) or set(launches) != set(role_names):
+            return False
     return True
+
+
+def migrate_legacy_overrides(config: dict, class_map: dict | None) -> dict:
+    """Preview a lossless model-override migration without writing any file.
+
+    Multiple old slots may collapse into one profile only when every explicit
+    setting agrees. Main-session and persona-specific overrides need an owner
+    decision. A conflict returns the original config, with all values intact.
+    """
+    proposed = copy.deepcopy(config)
+    changes, conflicts = [], []
+    for key in (*RETIRED_KEYS, ROLE_CLASSES):
+        if key in config and config[key] != {}:
+            conflicts.append(f"{key} requires an explicit profile migration decision")
+        elif key in proposed:
+            proposed.pop(key)
+            changes.append({"from": key, "to": None, "value": config[key]})
+    overrides = config.get(CLASS_MODELS)
+    if overrides is not None and class_map is None:
+        conflicts.append(f"{CLASS_MODELS} migration needs the installed package class map")
+    elif overrides is not None and not isinstance(overrides, dict):
+        conflicts.append(f"{CLASS_MODELS} must be an object before migration")
+    elif isinstance(overrides, dict):
+        mapped = {}
+        origins = {}
+        for host, slots in overrides.items():
+            if host not in class_map["hosts"] or not isinstance(slots, dict):
+                conflicts.append(f"{CLASS_MODELS}.{host} requires a valid host and slots")
+                continue
+            mapped[host] = {}
+            for old, setting in slots.items():
+                target = old if old in class_slots(class_map, host) else LEGACY_PROFILES.get(old)
+                where = f"{CLASS_MODELS}.{host}.{old}"
+                if target is None or not isinstance(setting, dict):
+                    conflicts.append(f"{where} requires an explicit profile migration decision")
+                    continue
+                new = f"{CLASS_MODELS}.{host}.{target}"
+                current = mapped[host].setdefault(target, {})
+                for key, value in setting.items():
+                    origin = (host, target, key)
+                    if key in current and current[key] != value:
+                        conflicts.append(f"{new}.{key} conflicts between {origins[origin]} and {where}")
+                    else:
+                        current[key] = value
+                        origins[origin] = where
+                if target != old:
+                    changes.append({"from": where, "to": new, "value": copy.deepcopy(setting)})
+        proposed[CLASS_MODELS] = mapped
+    if not conflicts:
+        conflicts.extend(config_errors(proposed, class_map))
+    return {"config": copy.deepcopy(config) if conflicts else proposed,
+            "changes": changes, "conflicts": conflicts}
 
 
 def escalated_slot(class_map: dict, model_class: str) -> str:
@@ -92,7 +168,7 @@ def escalated_slot(class_map: dict, model_class: str) -> str:
 
 
 def movable_roles(class_map: dict) -> dict[str, str]:
-    """Each role every host renders with its package class, which `role_classes` may move."""
+    """Package identity to compute class, including historical persona maps."""
     return {role: model_class for model_class, names in class_map["roles"].items()
             for role in names}
 
@@ -175,7 +251,9 @@ def slot_settings(class_map: dict, config: dict, host: str) -> dict[str, dict]:
 
 
 def role_classes(class_map: dict, config: dict) -> dict[str, str]:
-    """Each movable role's class: `role_classes`, else the package's."""
+    """Fixed launch profiles, or movable persona classes for historical packages."""
+    if "launch_profiles" in class_map:
+        return movable_roles(class_map)
     moved = config.get(ROLE_CLASSES)
     moved = moved if isinstance(moved, dict) else {}
     return {role: moved[role] if moved.get(role) in class_map["model_classes"] else package
@@ -185,8 +263,9 @@ def role_classes(class_map: dict, config: dict) -> dict[str, str]:
 def resolve(class_map: dict, config: dict, host: str) -> dict[str, dict]:
     """Every role's class slot, model and effort on one host, each with its source.
 
-    A role's class comes from `role_classes`, else the package; that slot's
-    model and effort come from `class_models`, else the package profile.
+    Current launch identities have fixed profile/access pairs. Historical
+    packages may use `role_classes`. Models and efforts use project overrides
+    where present, with package defaults for missing keys.
     """
     classes = role_classes(class_map, config)
     package = package_classes(class_map, host)
@@ -196,13 +275,15 @@ def resolve(class_map: dict, config: dict, host: str) -> dict[str, dict]:
         slot = classes.get(role, package_slot)
         rows[role] = {"class": slot, "class_source": PACKAGE if slot == package_slot else CONFIG,
                       **slot_setting(class_map, host, slot, overrides.get(slot))}
+        if "launch_profiles" in class_map:
+            rows[role].update(profile=slot, access=class_map["launch_profiles"][role]["access"])
     return rows
 
 
 def config_errors(config: dict, class_map: dict | None) -> list[str]:
     """Why the project's `class_models` and `role_classes` do not fit the package."""
-    errors = [f"{old} is retired: the purpose classes replaced the tiers; a setup refresh"
-              f" drops it, then set {new}" + REMEDY for old, new in RETIRED_KEYS.items()
+    errors = [f"{old} is retired: explicit migration to {new} requires an owner decision"
+              + REMEDY for old, new in RETIRED_KEYS.items()
               if old in config]
     present = [key for key in (CLASS_MODELS, ROLE_CLASSES) if key in config]
     if not present:
@@ -273,6 +354,8 @@ def slot_errors(class_map: dict, host: str, slot: str, override: object) -> list
 
 
 def role_classes_errors(value: object, class_map: dict) -> list[str]:
+    if "launch_profiles" in class_map:
+        return [f"{ROLE_CLASSES} is retired; migrate persona overrides to compute profiles" + REMEDY]
     classes = ", ".join(class_map["model_classes"])
     if not isinstance(value, dict) or not value:
         return [f"{ROLE_CLASSES} must map a role to one of the classes {classes}" + REMEDY]
@@ -423,15 +506,19 @@ def package_version(plugin_root: Path) -> str:
 
 
 def stamp(team: str, version: str, source: Path, setting: dict) -> str:
-    """Return the header line naming the package, the source agent and the
-    resolved settings a role renders from, on either host.
+    """Bind a launch definition, its renderer and resolved settings.
 
-    A plugin update changes the version or the source, and a project config
-    change the role's model or effort, so a rendered role that keeps the
-    previous stamp runs the previous role until a refresh renders it again.
+    Release versions do not change execution behavior. Keep the argument for
+    callers that also report package provenance, but exclude it from freshness.
     """
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    return (f"# Rendered from {team} {version} agents/{source.name} sha256:{digest}"
+    renderers = source.parent.parent / "scripts"
+    renderer_digest = hashlib.sha256()
+    for path in sorted(renderers.glob("generate_*_project.py")):
+        renderer_digest.update(path.name.encode("utf-8"))
+        renderer_digest.update(path.read_bytes())
+    return (f"# Rendered from {team} agents/{source.name} sha256:{digest}"
+            f" renderer sha256:{renderer_digest.hexdigest()}"
             f" settings sha256:{settings_digest(setting)}")
 
 

@@ -4,8 +4,8 @@
 ``inspect`` produces the exact managed-surface plan without changing the
 project, ``check`` verifies the installed project contract, and ``apply``
 executes the inspected plan with rollback when the closing check does not pass.
-Omitting the command runs ``apply``. ``companions [check|apply]`` checks or
-installs the optional third-party companion skills.
+Omitting the command runs ``apply``. ``companions [check|apply|uninstall|configure]``
+inspects or explicitly changes the selected workflow companions.
 """
 
 from __future__ import annotations
@@ -278,6 +278,14 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             raise SetupError(
                 "workspace config uses a future schema_version and cannot be downgraded"
             )
+        try:
+            migration = project_config.migrate_config(current)
+        except ValueError as exc:
+            raise SetupError(f"workspace config migration failed: {exc}") from exc
+        if migration["conflicts"]:
+            raise SetupError("workspace config migration requires a decision: "
+                             + "; ".join(migration["conflicts"]))
+        migrated = migration["config"]
         config = {
             "schema_version": project_config.SCHEMA_VERSION,
             "team_id": TEAM,
@@ -287,12 +295,9 @@ def desired_config(args, config_path: Path) -> tuple[dict, list[str]]:
             ),
             **{field: current.get(field, default)
                for field, default in project_config.DEFAULTS.items()},
-            **{field: current[field] for field in project_config.PROJECT_FIELDS if field in current},
+            **{field: migrated[field] for field in project_config.PROJECT_FIELDS if field in migrated},
         }
-        # The owner's class and role overrides survive a refresh, and setup
-        # writes none of its own; one the installed class map no longer takes
-        # stops it below, naming the slot or role. Retired tier keys drop.
-        config.update(role_settings.normalized(current))
+        config.update(role_settings.normalized(migrated))
     else:
         config = {
             "schema_version": project_config.SCHEMA_VERSION,

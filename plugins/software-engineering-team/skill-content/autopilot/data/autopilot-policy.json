@@ -78,5 +78,19 @@
   "native_watch_seconds": 259200,
   "native_poll_seconds": 2,
   "native_retry_delay_seconds": 5,
-  "native_permit_ttl_seconds": 300
+  "native_permit_ttl_seconds": 300,
+  "loops": {
+    "kinds": [
+      "detect",
+      "resolve",
+      "retro",
+      "plugin_repair"
+    ],
+    "default_max_active": 4,
+    "maximum_active": 64,
+    "interval_seconds": 900,
+    "lease_seconds": 1200,
+    "max_attempts": 2,
+    "issue_limit": 50
+  }
 }

@@ -511,7 +511,7 @@ Release takes `--bootstrap` in place of `--prior-stable-sha`.
 | --- | --- | --- |
 | Issue intake | No background consumption or model/API invocation | Maintainer must explicitly select each issue; live issue evidence prevents stale assumptions |
 | Agent behavior | One short instruction expands to a repository-defined procedure | Scope and irreversible transitions remain bound to explicit user authority |
-| CI | One stable-name aggregate requires the changeset or release-commit check on every PR, plus fresh static gates and complete selected test coverage or verified equivalent evidence | Every expected report and test ID is checked; missing, failed, cancelled or unjustified skipped work fails closed |
+| CI | One stable-name aggregate requires the changeset or release-commit check on every PR, plus fresh static gates and complete selected test coverage or verified equivalent evidence | The gate checks every expected report and test ID. Missing, failed or cancelled work fails closed. Test-declared skips remain visible and accepted |
 | Hosts and operating systems | Every PR runs the required Claude Code and Codex lifecycle; policy selects complete Linux, macOS and native Windows partitions on the one supported Python | Unknown/shared changes run full coverage; native Windows regressions cannot be replaced by emulation or unexpected skips |
 | Releases | One command tags a validated `main` commit and publishes it | Selected-set rule, deterministic release-commit replay, the commit's own `main` validation, public-host smoke, exact leases, resumable reconciliation and no force repair |
 | Branch cleanup | Deletes merged refs after a published release | Only named, bounded branches proven merged are eligible; ambiguity or drift stops cleanup |

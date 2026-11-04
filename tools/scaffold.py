@@ -6,7 +6,6 @@ Compliant components are born, not fixed: every stub this tool emits passes
 
 Subcommands:
   new-plugin --name <kebab>
-  new-agent  --plugin <plugin> --name <role>
   new-skill  --plugin <plugin> --name <skill> --kind entry|hidden
 
 Stdlib only.
@@ -24,72 +23,41 @@ import build_distributions
 
 KEBAB_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-AGENT_TEMPLATE = """---
-name: {name}
-description: {title} role invoked by {plugin} flows with explicit project-local inputs; not auto-triggered.
-model_class: routine_authoring
-output_contract: prose
----
-
-# {title}
-
-One-sentence mission for this role, stated as what it produces and to what bar.
-
-## Principles
-- State the few non-negotiable judgments this role applies.
-- Keep each principle testable against an output.
-
-## Boundaries
-- Does: the concrete territory this role owns.
-- Does not: what it defers, and to which role.
-- Never guesses silently; asks or escalates when inputs conflict.
-
-## Approach
-1. Read the constitution included in the invocation; if absent, read the canonical team constitution from the installed package.
-2. Read every project-local input file named in the invocation; trust files over memory.
-3. Work in small verifiable increments toward the output contract.
-4. Stop and report blocked with a specific question when inputs are missing or contradictory.
-
-## Output Contract
-- Return or write only the explicitly requested results and artifact paths.
-- End the reply with SELF-CHECK: each required element marked present or missing.
-"""
-
 SKILL_ENTRY_TEMPLATE = """---
 name: {name}
-description: Entry point for {title}. Invoked by the user as a slash skill; routes into the plugin flow.
+description: Use for {title} requests with an explicit outcome and scoped project inputs.
 exposure: entry
 ---
 
 # {title}
 
-One-line purpose of this entry.
+## Outcome
 
-## When to Use
-- The user explicitly starts this flow.
+State the concrete result this method delivers.
 
-## Procedure
-1. Parse arguments and mode.
-2. Pre-flight: validate project-local prerequisites and tracked artifacts, then identify the next incomplete stage from those files.
-3. Delegate to the owning flow file and follow it exactly.
+## When to use
+
+Name the request or effect that needs this method.
+
+## Inputs and authority
+
+Read relevant sources and preserve the current authorization boundaries.
+
+## Method
+
+Take the smallest sequence that establishes and delivers the outcome.
+
+## Evidence and completion
+
+Name the observed evidence that proves completion and report missing evidence.
+
+## Conditional references
+
+Link supporting guidance with its specific read-when condition.
 """
 
-SKILL_HIDDEN_TEMPLATE = """---
-name: {name}
-description: Knowledge skill for {title}. Loaded by {plugin} agents for scoped work; not user-facing.
-exposure: internal
----
+SKILL_HIDDEN_TEMPLATE = SKILL_ENTRY_TEMPLATE.replace("exposure: entry", "exposure: internal")
 
-# {title}
-
-One-line statement of the knowledge this skill carries.
-
-## When to Use
-- Loaded by the bound agent when its task touches this domain.
-
-## Core Rules
-- State prescriptive DO/DON'T rules; keep depth in references/.
-"""
 
 def sync_distributions(root: Path) -> None:
     output = root / "dist"
@@ -172,8 +140,7 @@ def new_plugin(root: Path, name: str) -> None:
     }
     created = [plugin, *platforms.values()]
     try:
-        (plugin / "agents").mkdir(parents=True)
-        (plugin / "skill-content").mkdir()
+        (plugin / "skill-content").mkdir(parents=True)
         project_instructions = plugin / "templates" / "project-instructions"
         project_instructions.mkdir(parents=True)
         (project_instructions / "common.md").write_text(
@@ -263,24 +230,10 @@ def new_plugin(root: Path, name: str) -> None:
 
 
 def new_agent(root: Path, plugin_name: str, name: str) -> None:
-    require_kebab(name, "agent name")
-    plugin = root / "plugins" / plugin_name
-    if not plugin.is_dir():
-        raise SystemExit(f"scaffold: plugin '{plugin_name}' does not exist")
-    path = plugin / "agents" / f"{name}.md"
-    if path.exists():
-        raise SystemExit(f"scaffold: agent '{name}' already exists")
-    try:
-        path.parent.mkdir(exist_ok=True)
-        path.write_text(
-            AGENT_TEMPLATE.format(plugin=plugin_name, name=name, title=title_of(name)),
-            encoding="utf-8",
-        )
-        sync_distributions(root)
-    except BaseException:
-        rollback_created(root, [path])
-        raise
-    print(f"scaffold: created {path.relative_to(root)}")
+    raise SystemExit(
+        "scaffold: canonical persona agents are retired; create a method skill and"
+        " select an existing technical profile/access pair from the host launch registry"
+    )
 
 
 def new_skill(root: Path, plugin_name: str, name: str, kind: str) -> None:

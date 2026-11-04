@@ -23,15 +23,17 @@ sys.path.insert(0, str(TESTS))
 sys.path.insert(0, str(TESTS.parent))
 
 import fixtures  # noqa: E402
+import build_distributions  # noqa: E402
 import validate  # noqa: E402
 from git_fixture import init_repository  # noqa: E402
 
-# The checks that read tools/data/models.json, directly or through the declared tiers.
-MODEL_CONFIG_READERS = ("model_config_shape", "frontmatter_shape", "execution_profiles")
+# The checks that read tools/data/models.json and its compute profiles.
+MODEL_CONFIG_READERS = ("model_config_shape", "execution_profiles")
 
 PLUGIN_ROOT = "plugins/software-engineering-team"
 MODEL_CONFIG = "tools/data/models.json"
 HOST_CLI_PINS = "tools/data/host-cli-versions.json"
+LAUNCH_REGISTRY = "platforms/shared/software-engineering-team/launch-profiles.json"
 
 # The repository paths a check reads. A mutation test copies only these, runs
 # only its check, and first sees the copy clean, so no finding comes from a
@@ -119,6 +121,34 @@ class ValidatorContractTests(unittest.TestCase):
                 path.write_text(text, encoding="utf-8")
                 self.assert_reported(root, "frontmatter_shape")
 
+    def test_canonical_agents_are_rejected_before_build(self):
+        root = self.whole()
+        self.assertEqual(set(VALIDATOR_BUILDERS), set(validate.CHECKS))
+        self.assert_silent(root, "canonical_agents")
+        registry = json.loads((root / LAUNCH_REGISTRY).read_text(encoding="utf-8"))
+        for host in build_distributions.HOSTS:
+            package = root / "dist" / host / fixtures.PLUGIN
+            self.assertEqual({path.stem for path in (package / "agents").glob("*.md")},
+                             set(registry["profiles"]))
+        self.assertTrue((root / "dist/codex" / fixtures.PLUGIN
+                         / "skills/deliver/agents/openai.yaml").is_file())
+
+        source = root / PLUGIN_ROOT
+        agents = source / "agents"
+        agents.mkdir()
+        for populated in (False, True):
+            with self.subTest(populated=populated):
+                if populated:
+                    (agents / "retired.md").write_text("# Retired\n", encoding="utf-8")
+                self.assert_reported(root, "canonical_agents")
+                output = root / "rejected-build"
+                with self.assertRaisesRegex(ValueError, "canonical agents are retired"):
+                    build_distributions.build(root, output)
+                self.assertFalse(output.exists())
+                with self.assertRaisesRegex(ValueError, "canonical agents are retired"):
+                    build_distributions.copy_canonical(source, output)
+                self.assertFalse(output.exists())
+
     def test_execution_profile_tables_are_validated(self):
         # build_distributions owns the table and catalog rules, and
         # test_single_team_distribution proves them one by one; here each
@@ -127,7 +157,7 @@ class ValidatorContractTests(unittest.TestCase):
         codex_model = sorted(catalog_models("codex"))[0]
         # (changed file, mutation or None to delete it, check, files the findings name)
         cases = (
-            (claude, lambda value: value["profiles"]["auto"]["critical_decision"].update(
+            (claude, lambda value: value["profiles"]["auto"]["critical"].update(
                 model="claude-ghost-5-5"), "execution_profiles", {claude}),
             ("platforms/codex/model-catalog.json", lambda value: value["models"][codex_model].update(
                 efforts=["low", "ultra", "turbo"]), "execution_profiles",
@@ -136,8 +166,13 @@ class ValidatorContractTests(unittest.TestCase):
             ("tools/data/models.json", lambda value: value["model_classes"].update(
                 extreme={"escalates": False}), "execution_profiles", {claude, codex}),
             (codex, None, "execution_profiles", {codex}),
+            (LAUNCH_REGISTRY, lambda value: value["profiles"]["reviewer"].update(
+                access="execute"), "execution_profiles", {LAUNCH_REGISTRY}),
+            (LAUNCH_REGISTRY, lambda value: value["profiles"].update(
+                duplicate=dict(value["profiles"]["reviewer"])),
+             "execution_profiles", {LAUNCH_REGISTRY}),
         )
-        root = self.partial(PROFILE_READS)
+        root = self.partial(PROFILE_READS + (PLUGIN_ROOT,))
         self.assert_silent(root, "execution_profiles", "model_config_shape")
         for relative, mutate, check, named in cases:
             path = root / relative
@@ -245,8 +280,8 @@ class ValidatorContractTests(unittest.TestCase):
                     and finding.check == "model_config_shape"
                     and message in finding.message
                     for finding in findings), findings)
-                # The agent classes are not judged against a malformed
-                # declaration; model_config_shape alone reports it.
+                # Frontmatter is not judged against a malformed class
+                # declaration; model_config_shape reports that defect.
                 self.assertEqual([finding for finding in findings
                                   if finding.check == "frontmatter_shape"], [])
 
@@ -278,9 +313,10 @@ class ValidatorContractTests(unittest.TestCase):
 # puts the fixture back after each builder instead of copying it per check.
 # ---------------------------------------------------------------------------
 
-AGENT = f"{PLUGIN_ROOT}/agents/code-reviewer.md"
+CONFIGURE = f"{PLUGIN_ROOT}/skill-content/configure/SKILL.md"
 FLOW = f"{PLUGIN_ROOT}/flows/fast-lane.md"
 ORIGINALS: dict = {}
+CREATED_DIRS: set[Path] = set()
 
 
 def remember(path: Path) -> Path:
@@ -295,6 +331,9 @@ def restore() -> None:
         else:
             path.write_bytes(original)
     ORIGINALS.clear()
+    for path in sorted(CREATED_DIRS, key=lambda item: len(item.parts), reverse=True):
+        path.rmdir()
+    CREATED_DIRS.clear()
 
 
 def edit(root: Path, relative: str, old: str, new: str) -> None:
@@ -323,6 +362,15 @@ def edit_json(root: Path, relative: str, mutate) -> None:
     value = json.loads(path.read_text(encoding="utf-8"))
     mutate(value)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def canonical_agent(root: Path) -> None:
+    """Introduce the forbidden source path and restore it after the check."""
+    directory = root / PLUGIN_ROOT / "agents"
+    if not directory.exists():
+        directory.mkdir()
+        CREATED_DIRS.add(directory)
+    write(root, f"{PLUGIN_ROOT}/agents/retired.md", "# Retired\n")
 
 
 class TreeGuard:
@@ -370,26 +418,26 @@ class TreeGuard:
 
 VALIDATOR_BUILDERS = {
     "frontmatter_shape": lambda root: edit(
-        root, AGENT, "output_contract: prose", "output_contract: table"),
-    "agent_name": lambda root: edit(root, AGENT, "name: code-reviewer", "name: code-auditor"),
+        root, CONFIGURE, "exposure: entry", "exposure: entry\nunsupported_field: true"),
+    "canonical_agents": canonical_agent,
     "skill_name": lambda root: edit(
-        root, f"{PLUGIN_ROOT}/skill-content/configure/SKILL.md",
+        root, CONFIGURE,
         "name: configure", "name: configuration"),
     "trigger_policy": lambda root: edit(
-        root, AGENT, "description: ", "description: Use when planning. "),
+        root, CONFIGURE, "exposure: entry", "exposure: automatic"),
     "size_caps": lambda root: append(
         root, f"{PLUGIN_ROOT}/constitution.md", "- Filler principle.\n" * 61),
-    "section_contract": lambda root: edit(root, AGENT, "## Output Contract", "## Output"),
+    "section_contract": lambda root: edit(
+        root, CONFIGURE, "## Evidence and completion", "## Evidence"),
     "content_bans": lambda root: append(root, FLOW, "\nOne step \u2014 then another.\n"),
     "home_paths": lambda root: edit_json(
         root, ".changes/fixture.json",
         lambda value: value.update(summary="Measured in /Users/fixture/checkout.")),
-    "agent_tech_nouns": lambda root: append(root, AGENT, "- Reads pytest reports.\n"),
     "handwritten_counts": lambda root: append(root, FLOW, "\nThe team ships 12 agents.\n"),
     "dead_links": lambda root: append(root, FLOW, "\nSee [the ghost](ghost.md).\n"),
     "reference_triggers": lambda root: append(
-        root, f"{PLUGIN_ROOT}/skill-content/container-environment/SKILL.md",
-        "- [triage again](references/triage.md): triage.\n"),
+        root, f"{PLUGIN_ROOT}/skill-content/data-design/SKILL.md",
+        "- [Modeling](references/modeling.md).\n"),
     "registration": lambda root: edit_json(
         root, ".claude-plugin/marketplace.json",
         lambda value: value["plugins"][0].update(source="./elsewhere")),
@@ -402,7 +450,7 @@ VALIDATOR_BUILDERS = {
     "json_hygiene": lambda root: write(
         root, f"{PLUGIN_ROOT}/skill-content/deliver/data/probe.json", '{"camelCase": 1}\n'),
     "orchestrator_integrity": lambda root: edit(
-        root, FLOW, "{{constitution}}", "the constitution"),
+        root, FLOW, "[working contract](../constitution.md)", "working contract"),
     "choice_gate": lambda root: append(root, FLOW, "\n\n\n\nThis needs an explicit user choice.\n"),
     "stdlib_only": lambda root: write(
         root, f"{PLUGIN_ROOT}/scripts/probe_import.py", "import requests\n"),
@@ -423,10 +471,10 @@ VALIDATOR_BUILDERS = {
         lambda value: value["plugins"].update({fixtures.PLUGIN: "9.9.9"})),
     "model_config_shape": lambda root: edit_json(
         root, "tools/data/models.json", lambda value: value["model_classes"].update(
-            mechanical={"escalates": "yes"})),
+            light={"escalates": "yes"})),
     "execution_profiles": lambda root: edit_json(
-        root, "platforms/codex/execution-profiles.json",
-        lambda value: value["profiles"].update(fast={})),
+        root, LAUNCH_REGISTRY,
+        lambda value: value["profiles"].update(duplicate=dict(value["profiles"]["reviewer"]))),
     "host_cli_versions": lambda root: edit_json(
         root, "tools/data/host-cli-versions.json", lambda value: value.update(codex="0.157.0")),
     "effort_policy": lambda root: edit_json(

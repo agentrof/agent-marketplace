@@ -31,7 +31,7 @@ class ScaffoldContracts(unittest.TestCase):
             self.assertTrue((plugin / "scripts/marketplace_paths.py").is_file())
             self.assertEqual(
                 {path.name for path in plugin.iterdir()},
-                {"agents", "scripts", "skill-content", "templates"},
+                {"scripts", "skill-content", "templates"},
             )
             for host in ("claude", "codex"):
                 self.assertTrue((root / "dist" / host / "sample-team").is_dir())

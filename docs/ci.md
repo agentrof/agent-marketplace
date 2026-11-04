@@ -3,6 +3,11 @@
 The required `check` aggregate proves the selected test inventory completed;
 it depends directly on the shard results. Every PR also emits the CodeQL and two-host lifecycle contexts. Branch protection
 requires `check`, `analyze-python` and `Claude Code and Codex lifecycle`.
+The PR release-impact check shares the deterministic-check job's checkout and
+Python setup. Its failure fails that job and the required aggregate. Superseded
+PR validations cancel by PR number. Main validations use the commit SHA and
+event type so a later push, manual run or schedule preserves the push validation
+a release is waiting for.
 
 ## Test scope and execution
 
@@ -35,8 +40,16 @@ the workers' results, one row per planned test, and records each worker's test
 count and wall time; a worker that fails, exits early or reports a test outside
 its set fails the shard. The aggregate checks the exact report set and test
 IDs: missing, duplicate, failed, cancelled or mismatched results fail
-validation. Explicit platform skips remain visible; mandatory native Windows
-regressions cannot skip.
+validation. Test-declared skips remain visible in the reports and count as
+accepted outcomes. The aggregate verifies accounting. Reviewers assess the
+justification for each skip.
+
+The shared platform group covers detached retrospective collection, contended
+and duplicate queue writes, native failure hooks, bounded Graphify execution,
+serial proof execution and work-queue fencing. These run on both macOS and
+Windows as well as in Linux's full inventory. Integration tests keep the
+`test_<module>.py` name so source changes select their own suite before the
+local gate applies its unit-only boundary.
 
 A worker, in CI or local validation, holds every test not marked
 `@integration` to its own process and its own temporary directory. Each such
@@ -48,8 +61,8 @@ directory, link, rename, remove, mode, time and FIFO calls, through a
 directory descriptor too) raises, is recorded and fails the test even when
 the test catches the error, and so does a thread the test leaves running.
 The innermost runner decides, so a runner under test keeps its own watch.
-Class and module fixtures run outside it, and `make test` runs unittest
-without it.
+Class and module fixtures run outside it. Direct unittest invocations do not
+install the CI worker boundary.
 
 CLI rule matrices use `tools/tests/python_entry.py` to execute the actual Python
 entry point in the worker, with isolated argv, import roots, environment, binary
@@ -73,36 +86,21 @@ reaches a tripwire, never the developer's Claude Code or Codex, its MCP
 servers or its account's model cache. A tripwire records the call and fails;
 the worker fails the test during which it ran, or the shard when a class or
 module fixture ran it after the last test. A test pins fakes of its own with
-`fixtures.isolated_hosts`. `make check` runs unittest without the tripwires.
+`fixtures.isolated_hosts`. Direct unittest invocations need their own isolated host fixtures.
 Every CI worker process also gets its own `TMPDIR`, `TMP` and `TEMP` under the
 runner's work directory, outside any Git checkout; on Windows that directory is
 on the work disk, which creates small files several times faster than the
 system disk that holds the default `TEMP`.
 
-Delivery compiler and execution fixtures may copy an immutable, process-local
-starting repository prepared before the first Item starts. PR-intent fixtures
-may copy the state `prepare_pr_creation` leaves for the default Item:
-integrated and reviewed, its worktree removed and its writer receipt released;
-its verification sessions stay, named by the removed worktree's path, so no
-copy reads them. Setup and project vault tests may copy a project one
-`setup_project.py apply` left, which holds no absolute path. Every test gets
-independent files, Git objects and a bare remote; the origin is rebound to that
-copy and transient fetch metadata is removed. Architecture push tests may copy
-the state a stamped architecture Item leaves: started, stamped and committed in
-its Item worktree, the seed's only linked worktree; each copy repairs both
-worktree links to its own paths, and no copy names the seed. No other seed
-contains a linked Item worktree or an active writer receipt. Construction and isolation have dedicated
-coverage; changed setup functions or environment use fresh preparation. The
-named Windows text-pipe emulator may build a separate seed under its exact
-wrapper and reuse it only within that wrapper's lifetime. Its underlying runner
-must be the native runner and every other setup binding and environment value
-must remain unchanged; seeds are discarded on context exit. Arbitrary mocks
-never qualify. Git operations under test, including concurrent ref and lease
-observations, remain real.
+Setup and project-vault tests may copy an immutable, process-local project
+prepared by one setup apply. Each test receives independent files and Git
+objects, and fixture construction is invalidated when relevant setup functions
+or environment inputs change. Real worktree, ref, refresh and rollback tests
+retain their operating-system and Git boundaries.
 
 | Profile | Selection |
 | --- | --- |
-| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups, with the mandatory native regressions. Every PR, manual and scheduled run, and main without reusable proof |
+| `full` | Every test on Linux; on macOS the platform and macOS groups; on Windows the platform and Windows groups. Every PR, manual and scheduled run, and main without reusable proof |
 | `reuse` | Main's prior successful validation of the identical input, its PR's full run, with fresh static and transition checks |
 
 Every pull request runs `full`: the local gate runs only a change's own tests,
@@ -177,8 +175,8 @@ warms a fresh external bytecode cache from an explicit standard-library import
 list. Workers share that cache with bytecode writes disabled; project and
 fixture bytecode are never populated there. Cache contents are checked after
 workers finish, and a prewarm failure or changed cache invalidates the run.
-`make check` still runs all tests without requiring staging or producing a local
-receipt. No Git hooks are installed.
+`make check` includes the staged local gate. Full-suite execution remains in
+pull request CI. Local validation installs no Git hooks.
 
 The local driver compares every tracked worktree byte and executable mode with
 the index, using NUL-safe Git records. Partial staging, unresolved merges,
@@ -215,9 +213,8 @@ bytes and the filtered configuration are compared instead.
 Results expire after at most 24 hours; reuse does not extend that deadline.
 The latest failed, interrupted, changed or corrupt attempt invalidates prior
 success. The source is rechecked after statics and workers. Missing, duplicate,
-partial or failed worker reports fail, and so does a skipped mandatory native
-regression the gate selected; the Windows lane's mandatory regressions are
-integration tests, so only its CI shards run them.
+partial or failed worker reports fail. Test-declared skips retain their recorded
+outcome. Platform integration regressions run in the CI shards.
 `verify` checks this identity immediately before commit. A process-scoped OS lock
 prevents simultaneous validators in one checkout and releases on process exit.
 
@@ -285,6 +282,19 @@ hosts fresh on macOS with Python 3.14, Node 24 and the CLI versions
 `tools/data/host-cli-versions.json` pins; no host result is reused. A PR that
 changes none of them skips the install, and the required check still reports.
 
+Both hosts' checkout and public-channel lifecycles verify installed file hashes
+and executable modes against the candidate before and after refresh.
+Codex's installation receipt supplies the cache path and must match the enabled
+inventory's package identity and version. A marketplace source path cannot
+satisfy that check.
+Codex installation and upgrade checks require enabled entry skills from the
+exact installed source. The same app-server process lists configured hooks
+and compares their source, event, command, timeout and normalized hash with
+the installed package. Untrusted hook metadata is accepted. This check proves
+discovery, while the separate subprocess regression exercises hook-to-report
+behavior with both hosts' payloads. Native dispatch and model compliance need
+live host acceptance evidence.
+
 Evidence never replaces current Git topology, release policy, ref-transaction
 checks, CodeQL or newly published public-channel installs. The read-only
 validation workflows never publish refs or releases.
@@ -305,7 +315,9 @@ validation workflows never publish refs or releases.
 3. A release dispatches the `Release` workflow for one `main` commit. The
    `Auto release` workflow does so on the push that merges a release commit,
    when `versions.json` names a version no release tag holds yet; `ship`
-   does so by hand. The `Release` workflow checks the commit's release state,
+   does so by hand. Both use the dispatch response's `workflow_run_id` to
+   identify the run. A missing or invalid ID stops with an unknown outcome
+   that must be inspected before retrying. The `Release` workflow checks the commit's release state,
    including a version newer than every release tag or, with no tag at all,
    than the version of the commit `stable` points to, an ancestor of the
    release commit. It waits for that commit's own `main` validation and
@@ -314,6 +326,11 @@ validation workflows never publish refs or releases.
    leases, installs both hosts from the real public `stable` channel and
    creates the immutable Release. Rollback, immutable Release reconciliation
    and clean-main completion keep their contracts.
+
+Public-channel installation retries only the failing host. Every attempt
+verifies the expected `stable` SHA before and after that host's lifecycle.
+The dispatch response follows GitHub's versioned REST contract.
+[GitHub workflow dispatch API](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event)
 
 Workflow or policy changes invalidate prior receipts deliberately. Measure a
 release from the merge to the immutable Release, and the pull request that

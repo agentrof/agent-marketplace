@@ -560,9 +560,9 @@ class SetupCheckTests(unittest.TestCase):
         pins = host_listing.pinned(self.ROWS, "session", ("high", "medium", "low"))
         check = host_listing.model_check({**self.LISTING, "view": "generic"}, pins)
         conflicts = [{"class": "high", "model": "model-c", "effort": "high", "efforts": ["low"]}]
-        notes = host_listing.check_notes("host-project", check, pins, {"model-a"}, conflicts,
-                                         "the parent session's model")
+        notes = host_listing.check_notes("host-project", check, pins, {"model-a"}, conflicts)
         self.assertEqual(len(notes), 3, notes)
+        self.assertIn("keep their requested pins", notes[0])
         for note, fragments in zip(notes, (
                 ("warning: model-a is unavailable", "architect, developer"),
                 ("note: model-b keeps its pin unverified",),

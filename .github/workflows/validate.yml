@@ -14,7 +14,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-validation
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}-validation
   cancel-in-progress: true
 
 defaults:
@@ -22,24 +22,6 @@ defaults:
     shell: bash
 
 jobs:
-  changeset:
-    if: github.event_name == 'pull_request'
-    needs: plan
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ needs.plan.outputs.python }}
-      - name: Require a release-impact declaration or an exact release commit
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 tools/release.py check-pr --base "$BASE_SHA" --head "$HEAD_SHA"
-
   plan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -88,6 +70,12 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ needs.plan.outputs.python }}
+      - name: Require a release-impact declaration or an exact release commit
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 tools/release.py check-pr --base "$BASE_SHA" --head "$HEAD_SHA"
       - name: Validate contracts, release metadata, counts and generated distributions
         run: make static-check
 
@@ -140,7 +128,6 @@ jobs:
     name: check
     if: always()
     needs:
-      - changeset
       - plan
       - test-shards
       - deterministic-check
@@ -149,8 +136,6 @@ jobs:
     steps:
       - name: Require every validation result
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          CHANGESET_RESULT: ${{ needs.changeset.result }}
           PLAN_RESULT: ${{ needs.plan.result }}
           HAS_TESTS: ${{ needs.plan.outputs.has_tests }}
           TEST_RESULT: ${{ needs.test-shards.result }}
@@ -165,11 +150,6 @@ jobs:
             test "$HAS_TESTS" = false
             test "$TEST_RESULT" = skipped
           fi
-          expected_changeset=skipped
-          if [ "$EVENT_NAME" = pull_request ]; then
-            expected_changeset=success
-          fi
-          test "$CHANGESET_RESULT" = "$expected_changeset"
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ github.sha }}

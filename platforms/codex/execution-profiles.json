@@ -2,18 +2,22 @@
   "schema_version": 4,
   "profiles": {
     "auto": {
-      "mechanical": {"model": "gpt-6-luna", "effort": "high"},
-      "mechanical_escalated": {"model": "gpt-6.1-sol", "effort": "low"},
-      "routine_authoring": {"model": "gpt-6.1-sol", "effort": "medium"},
-      "routine_authoring_escalated": {"model": "gpt-6.1-sol", "effort": "high"},
-      "complex_authoring": {"model": "gpt-6.1-sol", "effort": "high"},
-      "complex_authoring_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "routine_review": {"model": "gpt-6.1-sol", "effort": "medium"},
-      "routine_review_escalated": {"model": "gpt-6.1-sol", "effort": "high"},
-      "critical_decision": {"model": "gpt-6.1-sol", "effort": "high"},
-      "critical_decision_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "security_review": {"model": "gpt-6.1-sol", "effort": "high"},
-      "orchestration": {"model": "gpt-6.1-sol", "effort": "low"}
+      "light": {
+        "model": "gpt-6-luna",
+        "effort": "high"
+      },
+      "work": {
+        "model": "gpt-6.1-sol",
+        "effort": "medium"
+      },
+      "review": {
+        "model": "gpt-6.1-sol",
+        "effort": "medium"
+      },
+      "critical": {
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      }
     }
   }
 }

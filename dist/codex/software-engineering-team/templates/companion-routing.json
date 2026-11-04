@@ -1,0 +1,34 @@
+{
+  "companion": "graphify",
+  "routes": [
+    {
+      "host": "claude",
+      "target": ".claude/settings.local.json",
+      "format": "json",
+      "source_paths": [
+        ".claude/skills/graphify/SKILL.md"
+      ],
+      "setting_path": [
+        "skillOverrides",
+        "graphify"
+      ],
+      "setting_value": "user-invocable-only",
+      "accepted_values": [
+        "user-invocable-only",
+        "off"
+      ],
+      "replace_values": [
+        "on",
+        "name-only"
+      ]
+    },
+    {
+      "host": "codex",
+      "source_paths": [
+        ".codex/skills/graphify/SKILL.md",
+        ".agents/skills/graphify/SKILL.md"
+      ],
+      "catalog_control": false
+    }
+  ]
+}

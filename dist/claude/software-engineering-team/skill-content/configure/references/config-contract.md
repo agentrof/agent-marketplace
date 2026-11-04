@@ -1,59 +1,53 @@
-# Configuration Contract
+# Configuration contract
 
-`workspace/config.json` is a closed bootstrap contract, not a project-design
-database. Its keys are `schema_version`, `team_id`, `output_language`,
-`terminology_language`, `tests_root`, `workspace_layout`, the optional
-`pr_proof` and, once the project overrides the package's role settings, `class_models` and
-`role_classes`. Setup deterministically
-reconstructs this shape, preserving valid language values and overrides
-while dropping retired and unknown keys. Setup writes neither key; an
-override the installed package no longer takes stops setup, naming the slot
-or role, and `project_config.py set-class --default` or `set-role-class
---default` removes it, also for a slot, host or role the package no longer
-has. The retired `tier_models` and `role_tiers` fail the check; setup drops
-them.
+`workspace/config.json` is the closed project bootstrap contract. Accepted
+keys are `schema_version`, `team_id`, `output_language`, `terminology_language`,
+`tests_root`, `workspace_layout`, `pr_proof`, `local_proof`, `local_proof_map`,
+`proof_runner`, `task_triggers` and `class_models`. The current schema is 2.
+Setup supplies missing layout defaults and preserves valid project overrides.
 
-`output_language`, `terminology_language`, `tests_root`, `workspace_layout`,
-`pr_proof`, `local_proof`, `local_proof_map`, `proof_runner`, `role_routing` and `task_triggers` are changed
-through `project_config.py set`. `local_proof` lists the proof commands, `local_proof_map` maps changed paths to the commands a change needs and `proof_runner` queues them (see the deliver entry's `references/local-proof.md`),
-`role_routing` and `task_triggers` hold project rules in the shape of the
-deliver entry's `data/role-routing.json` and `data/task-triggers.json`. They
-live here because `.agentrof/` is never tracked; setup writes none of them and
-keeps the project's.
-`pr_proof` says who proves a fast-lane task before its pull request:
-`remote_ci` (the default when absent) leaves it to the project's CI;
-`local_record` makes `open-pr` require a green `task_lane.py prove` record of
-the clean HEAD, as the deliver entry's `references/local-proof.md` defines.
-Setup writes no `pr_proof` and keeps the project's value.
-`tests_root` (default `workspace/tests`) is where the project's tests live.
-`workspace_layout` lists the only top-level folders a write may create under
-`workspace/` (`workspace`) and `workspace/docs/` (`docs`); setup creates them
-and the workspace guard refuses any other. Project-specific data goes to
-`workspace/project/<name>/`. Setup writes both from the package defaults when
-absent and keeps the project's values after. Authored note titles are direct user-facing labels,
-not configuration data; a language change does not rewrite them.
+Use `project_config.py set --config workspace/config.json --field <field>
+--value <JSON-or-string>` for ordinary fields. Preview the requested delta with
+`--dry-run` and show its consumers before applying a durable setting change.
+Model settings use `set-class`, described in `role-models.md`.
 
-`class_models` and `role_classes` are changed through `project_config.py
-set-class` and `set-role-class`, which `/configure models` runs
-(`references/role-models.md`). Per host `class_models` records a class slot's
-`model`, an ID of the host's model list or `session`, and its `effort`,
-within the efforts the installed package's class map lets that model take; a
-missing key keeps the package value. `role_classes` moves a role to another
-purpose class on every host.
+## Field ownership
 
-The other configuration targets are documents with their own lifecycle:
+- Languages control authored prose and terminology. Keys, paths and machine
+  output remain English. Changing a language does not rewrite existing notes.
+- `tests_root` defaults to `workspace/tests`. `workspace_layout` declares
+  permitted top-level workspace and documentation folders.
+- `pr_proof` selects `remote_ci` or `local_record`. Local proof commands,
+  impact rules and an optional runner follow the delivery entry's
+  `references/local-proof.md`. An uncovered path requires full proof.
+- `task_triggers` overrides named method, risk and reviewer trigger rules.
+  Rule predicates may use `path_globs`, `keywords` and `exclude_globs`.
+  Reviewers may additionally use `rigors` and `on_any_risk`. Available reviewer
+  identities are `reviewer` and `critical-reviewer`. Discovery triggers still
+  require the owner to confirm semantic effects.
+- `class_models.<host>.<profile>` overrides model or effort for `light`, `work`,
+  `review` or `critical`. Missing keys use package defaults. `session` follows
+  the parent model while retaining the profile's effort.
 
-| Concern | Authoritative location | Owner |
-|---|---|---|
-| Technology, database, environment and integration choice | accepted Solution Design decision plus `_generated/capability-registry.json` | Solution Architect |
-| Test, mutation and dependency-audit commands | `workspace/docs/operation/` | QA Engineer |
-| Runtime environment command and scenarios | `workspace/docs/operation/` | DevOps Engineer |
-| Role model and reasoning effort | the installed package's class map, resolved per spawn by `model_class.py resolve`; `class_models` sets a class slot's model and effort per host and `role_classes` a role's class; a personal session-wide override follows the host contract | Package release for the defaults; `/configure models` for the project's overrides; User for a session-wide override |
+Technology choices, data invariants, capacities and service boundaries belong
+in accepted design records. Environment and verification commands belong in
+operation documents, with executable proof commands referenced by config.
+Keep those records aligned with code when their contract changes.
 
-No `scale`, `limits`, stack, source-directory or command field is accepted in
-config: the config stays closed. Product capacity and performance are concrete
-BA/Solution requirements, not global configuration knobs.
+## Legacy migration
 
-Before approving a change, show the exact consumer, lifecycle and downstream
-effect. A config refresh
-does not invent Solution decisions from retired stack fields.
+Setup previews compatible model and trigger renames. It removes empty
+`role_routing` and the old default `task_criteria_range` of `[3, 8]`.
+Custom retired settings, persona overrides and differing rules that would
+collapse onto one identifier require an explicit decision. Their original
+values remain intact while that decision is pending.
+
+Prepare a complete reviewed replacement JSON and calculate the SHA-256 of the
+current config bytes. Preview the exact replacement with
+`project_config.py migrate --config workspace/config.json --config-file
+<reviewed.json> --expected-sha256 <digest> --dry-run --json`. Show before,
+after and dropped keys. Apply the identical reviewed payload without
+`--dry-run` under the owner's migration approval. The writer validates the
+closed shape, serializes with project maintenance and rejects a changed source
+digest. Then run `project_config.py check --config workspace/config.json` and
+refresh affected local launch definitions through the host contract.

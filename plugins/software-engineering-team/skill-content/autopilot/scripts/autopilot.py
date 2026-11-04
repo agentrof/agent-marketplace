@@ -434,6 +434,10 @@ def option_parser() -> Parser:
     parser.add_argument("--until")
     parser.add_argument("--goal")
     parser.add_argument("--recover-transport", action="store_true")
+    parser.add_argument("--loop", action="append", default=[], choices=load_policy()["loops"]["kinds"])
+    parser.add_argument("--issue-filter", help="GitHub search terms selecting the authorized issues")
+    parser.add_argument("--publish-issues", action="store_true")
+    parser.add_argument("--max-active", type=int)
     parser.add_argument("--allow", action="append", default=[])
     parser.add_argument("--deny", action="append", default=[])
     return parser
@@ -536,11 +540,206 @@ def grant_terms(policy: dict, options: argparse.Namespace, now: datetime,
         expires = now + timedelta(hours=hours)
     return {"expires_at": stamp(expires), "goal": goal,
             "classes": grant_classes(policy, names(options.allow), names(options.deny)),
-            **({"transport_recovery": True} if options.recover_transport else {})}
+            **({"transport_recovery": True} if options.recover_transport else {}),
+            **loop_terms(policy, options)}
 
 
 def options_given(options: argparse.Namespace) -> bool:
-    return bool(options.duration or options.until or options.goal or options.allow or options.deny or options.recover_transport)
+    return bool(options.duration or options.until or options.goal or options.allow or options.deny or options.recover_transport
+                or getattr(options, "loop", None) or getattr(options, "issue_filter", None)
+                or getattr(options, "publish_issues", False) or getattr(options, "max_active", None))
+
+
+def loop_terms(policy: dict, options: argparse.Namespace) -> dict:
+    kinds = list(dict.fromkeys(getattr(options, "loop", []) or []))
+    selector = getattr(options, "issue_filter", None)
+    active = getattr(options, "max_active", None)
+    publish = getattr(options, "publish_issues", False)
+    if not kinds:
+        if selector or active or publish:
+            raise Refusal("loop options need at least one --loop")
+        return {}
+    if selector and (len(selector) > 1024 or re.search(r"(?:^|\s)(?:repo|org|user):", selector)):
+        raise Refusal("issue filter must stay within the granted repository")
+    if "resolve" in kinds and not selector:
+        raise Refusal("the resolve loop needs an explicit --issue-filter")
+    settings = policy["loops"]
+    active = settings["default_max_active"] if active is None else active
+    if active < 1 or active > settings["maximum_active"]:
+        raise Refusal("--max-active is outside the loop policy bounds")
+    return {"loops": {"kinds": kinds, "issue_filter": selector,
+                      "publish_issues": bool(publish), "max_active": active}}
+
+
+def loop_repository(project: Path) -> str:
+    import task_lane
+    return task_lane.repo_slug(project)
+
+
+def cmd_tick(args: argparse.Namespace, now: datetime) -> int:
+    import task_lane
+    import work_queue
+    project = Path(args.project_root).resolve()
+    directory = state_dir(project)
+    with locked(directory):
+        grant = active_grant(directory, now)
+    scope = grant.get("loops")
+    if not scope:
+        raise Refusal("this grant authorizes no background loops")
+    if loop_repository(project) != scope["repository"]:
+        raise Refusal("the repository changed since loop authorization")
+    policy = load_policy()["loops"]
+    slot = int(now.timestamp()) // policy["interval_seconds"]
+    for kind in scope["kinds"]:
+        if kind in ("detect", "retro"):
+            if kind == "retro":
+                work_queue.enqueue(project, kind, f"retro:{slot}", {"window": slot})
+            else:
+                work_queue.enqueue(project, kind, f"{grant['id']}:{kind}:{slot}",
+                                   {"repository": scope["repository"], "grant": grant["id"]})
+    if "resolve" in scope["kinds"]:
+        raw = task_lane.run("gh", "issue", "list", "--repo", scope["repository"],
+                            "--state", "open", "--search", scope["issue_filter"],
+                            "--limit", str(policy["issue_limit"]), "--json", "number,updatedAt", cwd=project)
+        for issue in json.loads(raw):
+            key = f"{grant['id']}:issue:{issue['number']}:{issue['updatedAt']}"
+            work_queue.enqueue(project, "resolve", key,
+                               {"repository": scope["repository"], "grant": grant["id"], "issue": issue["number"],
+                                "resource_key": f"issue:{issue['number']}",
+                                "revision": issue["updatedAt"]})
+    with locked(directory):
+        current_grant = active_grant(directory, datetime.now(timezone.utc))
+    if current_grant["id"] != grant["id"]:
+        raise Refusal("loop authority changed while work was discovered")
+    claimed = []
+    for _ in range(scope["max_active"]):
+        job = work_queue.claim(project, grant["id"], scope["kinds"], scope["max_active"],
+                               grant["expires_at"], policy["lease_seconds"], policy["max_attempts"], scope=grant["id"], shared_kinds=("retro",))
+        if not job:
+            break
+        claimed.append(job)
+    print(json.dumps({"grant": grant["id"], "repository": scope["repository"],
+                      "publish_issues": scope["publish_issues"], "jobs": claimed,
+                      "next_poll_seconds": policy["interval_seconds"],
+                      "execution": "dispatch claimed jobs through the native host workers"}, sort_keys=True))
+    return 0
+
+
+def cmd_loop_finish(args: argparse.Namespace, now: datetime) -> int:
+    import work_queue
+    project = Path(args.project_root).resolve()
+    with locked(state_dir(project)):
+        grant = active_grant(state_dir(project), now)
+    if not grant.get("loops"):
+        raise Refusal("this grant authorizes no background loops")
+    job = next((item for item in work_queue.status(project)["jobs"] if item["id"] == args.job), None)
+    if job is None or job.get("owner") != grant["id"] or (
+            job["payload"].get("grant") != grant["id"] and not (
+                job["kind"] == "retro" and job["payload"].get("grant") is None)) :
+        raise Refusal("this job belongs to another grant")
+    result = work_queue.finish(project, args.job, args.lease, args.outcome,
+                              {"reference": args.evidence, "reported_by": grant["id"]})
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+def cmd_loop_status(args: argparse.Namespace, now: datetime) -> int:
+    import work_queue
+    print(json.dumps(work_queue.status(Path(args.project_root)), sort_keys=True))
+    return 0
+
+
+def cmd_loop_reconcile(args: argparse.Namespace, now: datetime) -> int:
+    import work_queue
+    project = Path(args.project_root)
+    if args.outcome == "retry":
+        with locked(state_dir(project)):
+            grant = active_grant(state_dir(project), now)
+        job = next((item for item in work_queue.status(project)["jobs"] if item["id"] == args.job), None)
+        if not job or job.get("owner") != grant["id"] or (
+                job["payload"].get("grant") != grant["id"] and not (
+                    job["kind"] == "retro" and job["payload"].get("grant") is None)):
+            raise Refusal("retry needs the original active grant")
+    result = work_queue.reconcile(project, args.job, args.outcome, {"reference": args.evidence})
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+def cmd_queue_work(args: argparse.Namespace, now: datetime) -> int:
+    import work_queue
+    project = Path(args.project_root)
+    with locked(state_dir(project)):
+        grant = active_grant(state_dir(project), now)
+    scope = grant.get("loops", {})
+    if args.kind not in scope.get("kinds", []):
+        raise Refusal("this work kind is outside the active grant")
+    result = work_queue.enqueue(project, args.kind, f"{grant['id']}:{args.key}",
+                                {"grant": grant["id"], "repository": scope["repository"], "evidence": args.evidence})
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+def cmd_file_finding(args: argparse.Namespace, now: datetime) -> int:
+    import hashlib
+    import task_lane
+    import work_queue
+    project = Path(args.project_root).resolve()
+    with locked(state_dir(project)):
+        grant = active_grant(state_dir(project), now)
+    scope = grant.get("loops", {})
+    if not scope.get("publish_issues") or loop_repository(project) != scope.get("repository"):
+        raise Refusal("this grant does not authorize issue publication in this repository")
+    job = next((row for row in work_queue.status(project)["jobs"] if row["id"] == args.job), None)
+    if not job or job.get("owner") != grant["id"] or job.get("lease_token") != args.lease or job["state"] != "claimed":
+        raise Refusal("issue publication needs this grant's active job lease")
+    if job["kind"] not in ("detect", "retro"):
+        raise Refusal("only detection and retrospective jobs publish project findings")
+    if not re.fullmatch(r"[a-zA-Z0-9._-]{1,100}", args.fingerprint):
+        raise Refusal("finding fingerprint must be a stable short identifier")
+    body = sys.stdin.read(65537)
+    if len(body) > 65536 or not body.strip() or not args.title.strip():
+        raise Refusal("finding title and bounded body are required")
+    import atomic_file
+    import file_lock
+    marker = "agentrof-finding:" + args.fingerprint
+    common = Path(task_lane.run("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=project))
+    directory = common / "agentrof" / "runtime" / "findings"
+    directory.mkdir(parents=True, exist_ok=True)
+    receipt = directory / (args.fingerprint + ".json")
+    with receipt.with_suffix(".lock").open("a+", newline="\n") as handle:
+        if not file_lock.acquire(handle.fileno(), timeout=1):
+            raise Refusal("this finding is being reconciled or published by another worker")
+        found = json.loads(task_lane.run("gh", "issue", "list", "--repo", scope["repository"], "--state", "all",
+                                         "--search", '"' + marker + '" in:body', "--limit", "20",
+                                         "--json", "number,url,body", cwd=project))
+        matches = [row for row in found if "<!-- " + marker + " -->" in row.get("body", "")]
+        if matches:
+            result = {"url": matches[0]["url"], "created": False}
+            atomic_file.replace_text(receipt, json.dumps(result) + "\n")
+            print(json.dumps(result, sort_keys=True))
+            return 0
+        if receipt.exists():
+            raise Refusal("a prior publication exists or has an unknown result; reconcile it before creating again")
+        with locked(state_dir(project)):
+            current_grant = active_grant(state_dir(project), datetime.now(timezone.utc))
+        current_job = next((row for row in work_queue.status(project)["jobs"] if row["id"] == args.job), None)
+        if current_grant["id"] != grant["id"] or not current_grant.get("loops", {}).get("publish_issues"):
+            raise Refusal("publication authority changed before the write")
+        if not current_job or current_job.get("owner") != grant["id"] or current_job.get("lease_token") != args.lease or current_job["state"] != "claimed":
+            raise Refusal("publication lease expired before the write")
+        payload = body.rstrip() + "\n\n<!-- " + marker + " -->\n"
+        digest = hashlib.sha256(payload.encode()).hexdigest()
+        atomic_file.replace_text(receipt, json.dumps({"state": "pending", "payload_sha256": digest}) + "\n")
+        try:
+            url = task_lane.run("gh", "issue", "create", "--repo", scope["repository"], "--title", args.title,
+                                "--body", payload, cwd=project)
+        except (task_lane.Refused, OSError) as error:
+            work_queue.finish(project, args.job, args.lease, "unknown", {"operation": "issue_create", "fingerprint": args.fingerprint})
+            raise Refusal("issue creation outcome unknown; reconcile by finding fingerprint before retry") from error
+        result = {"url": url, "created": True, "payload_sha256": digest}
+        atomic_file.replace_text(receipt, json.dumps(result) + "\n")
+        print(json.dumps(result, sort_keys=True))
+        return 0
 
 
 def fresh_arming(directory: Path, policy: dict, now: datetime) -> dict:
@@ -725,10 +924,19 @@ def cmd_on(args: argparse.Namespace, now: datetime) -> int:
         typed += [f"--deny {value}" for value in args.deny]
         if args.recover_transport:
             typed.append("--recover-transport")
+        typed += ["--loop " + value for value in args.loop]
+        if args.issue_filter:
+            typed += ["--issue-filter " + shlex.quote(args.issue_filter)]
+        if args.publish_issues:
+            typed += ["--publish-issues"]
+        if args.max_active is not None:
+            typed += ["--max-active " + str(args.max_active)]
         armed_by = {"guard": "user_only_entry", "arguments": " ".join(["on", *typed])}
         host = args.host
     terms = grant_terms(policy, options, now,
                         parse_stamp(armed_by["armed_at"]) if "armed_at" in armed_by else None)
+    if "loops" in terms:
+        terms["loops"]["repository"] = loop_repository(project)
     with locked(directory):
         previous = current(directory, now)
         grant = {"schema_version": 1,
@@ -1266,6 +1474,30 @@ def parser() -> argparse.ArgumentParser:
                           help="start or replace a grant")
     on.add_argument("--host")
     on.set_defaults(handler=cmd_on)
+    finding = verbs.add_parser("file-finding")
+    finding.add_argument("--job", required=True)
+    finding.add_argument("--lease", required=True)
+    finding.add_argument("--fingerprint", required=True)
+    finding.add_argument("--title", required=True)
+    finding.set_defaults(handler=cmd_file_finding)
+    verbs.add_parser("loop-status").set_defaults(handler=cmd_loop_status)
+    reconcile = verbs.add_parser("loop-reconcile")
+    reconcile.add_argument("--job", required=True)
+    reconcile.add_argument("--outcome", choices=("completed", "failed", "retry"), required=True)
+    reconcile.add_argument("--evidence", required=True)
+    reconcile.set_defaults(handler=cmd_loop_reconcile)
+    queued = verbs.add_parser("queue-work")
+    queued.add_argument("--kind", choices=("detect", "retro", "plugin_repair"), required=True)
+    queued.add_argument("--key", required=True)
+    queued.add_argument("--evidence", required=True)
+    queued.set_defaults(handler=cmd_queue_work)
+    verbs.add_parser("tick", help="claim bounded loop work under the current grant").set_defaults(handler=cmd_tick)
+    finish = verbs.add_parser("loop-finish")
+    finish.add_argument("--job", required=True)
+    finish.add_argument("--lease", required=True)
+    finish.add_argument("--outcome", choices=("completed", "failed", "unknown"), required=True)
+    finish.add_argument("--evidence", required=True)
+    finish.set_defaults(handler=cmd_loop_finish)
     for name, handler in (("off", cmd_off), ("check", cmd_check)):
         verbs.add_parser(name).set_defaults(handler=handler)
     for name, handler in (("status", cmd_status), ("report", cmd_report)):

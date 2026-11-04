@@ -450,6 +450,26 @@ class CITestPlannerUnitTests(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.policy), encoding="utf-8")
 
+    def test_native_delivery_runtime_checks_are_selected_on_every_operating_system(self):
+        policy = ci_tests.policy_at(ci_tests.ROOT)
+        inventory, _ = ci_tests.inventory(ci_tests.ROOT)
+        required = {
+            "tools.tests.test_retrospective.AutomaticRetrospectiveTests.test_detached_observer_collects_without_grant_or_model_process",
+            "tools.tests.test_retrospective.AutomaticRetrospectiveTests.test_durable_emit_does_not_wait_for_contended_queue",
+            "tools.tests.test_retrospective.AutomaticRetrospectiveTests.test_inbox_duplicate_consumed_during_publish_remains_queued",
+            "tools.tests.test_graph_evidence.GraphEvidenceTests.test_native_query_bounds_failures_and_current_evidence",
+            "tools.tests.test_proof_execution.ProofExecutionTests.test_proof_is_bounded_serial_and_preserves_the_first_failure",
+            "tools.tests.test_retrospective_hook.RetrospectiveHookTests.test_subprocess_hook_drains_detached_report_on_both_host_payloads",
+            "tools.tests.test_work_queue.WorkQueueTests.test_shared_dedup_fencing_reconciliation_and_budgets",
+        }
+        self.assertTrue(required <= set(inventory))
+        self.assertEqual(policy["lanes"]["linux"]["groups"], ["all"])
+        for name in ("macos", "windows"):
+            with self.subTest(lane=name):
+                selected = set(ci_tests.group_ids(policy["lanes"][name]["groups"], policy, inventory))
+                self.assertTrue(required <= selected, sorted(required - selected))
+                self.assertLess(len(selected), len(inventory))
+
     def test_dynamic_discovery_and_unsupported_inheritance_fail_closed(self):
         test_file = self.root / "tools/tests/test_dynamic.py"
         test_file.parent.mkdir(parents=True, exist_ok=True)

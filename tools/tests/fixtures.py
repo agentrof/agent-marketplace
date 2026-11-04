@@ -104,19 +104,13 @@ def make_refresh_pair(n_root: Path, next_root: Path) -> None:
     make_valid_root(n_root, REFRESH_N_VERSION, build=False)
     plugin = n_root / "plugins" / PLUGIN
 
-    write(plugin / "agents" / "refresh-retired-probe.md", (
-        "---\n"
-        "name: refresh-retired-probe\n"
-        "description: N-only agent used to prove package refresh cleanup.\n"
-        "model_class: mechanical\n"
-        "output_contract: prose\n"
-        "---\n\n"
-        "# Refresh Retired Probe\n\n"
-        "## Principles\n- Preserve the fixture boundary.\n\n"
-        "## Boundaries\n- Does only the N refresh probe.\n\n"
-        "## Approach\n1. Return the probe result.\n\n"
-        "## Output Contract\n- Probe result.\n"
-    ))
+    registry_path = n_root / "platforms/shared" / PLUGIN / "launch-profiles.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    registry["profiles"]["refresh-retired-probe"] = {
+        "profile": "light", "access": "read",
+        "description": "N-only launch used to prove package refresh cleanup.",
+    }
+    write(registry_path, json.dumps(registry, indent=2) + "\n")
     team_instructions = plugin / "templates" / "project-instructions" / "team.md"
     write(
         team_instructions,

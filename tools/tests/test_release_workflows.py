@@ -280,12 +280,18 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         self.assertIn("native-host-lifecycle", hosts)
         self.assertIn("if: always()", validate)
         jobs = workflow_jobs(validate)
-        self.assertEqual(jobs["changeset"]["if"], "github.event_name == 'pull_request'")
+        self.assertNotIn("changeset", jobs)
         self.assertEqual(jobs["check"]["needs"], [
-            "changeset", "plan", "test-shards", "deterministic-check",
+            "plan", "test-shards", "deterministic-check",
         ])
-        self.assertEqual(jobs["changeset"]["needs"], ["plan"])
         self.assertEqual(jobs["deterministic-check"]["needs"], ["plan"])
+        checks = validate.split("\n  deterministic-check:\n", 1)[1].split("\n  test-shards:\n", 1)[0]
+        self.assertIn("      - name: Require a release-impact declaration or an exact release commit\n"
+                      "        if: github.event_name == 'pull_request'", checks)
+        self.assertIn('check-pr --base "$BASE_SHA" --head "$HEAD_SHA"', checks)
+        self.assertNotIn("continue-on-error", checks)
+        self.assertEqual(validate.count('check-pr --base "$BASE_SHA" --head "$HEAD_SHA"'), 1)
+        self.assertIn('test "$DETERMINISTIC_RESULT" = success', validate)
 
     def test_finalize_requires_a_release_github_reports_immutable(self):
         text = self.text("release.yml")
@@ -322,14 +328,14 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             "release-hosts.yml:native-host-lifecycle", "release.yml:public-smoke", "validate.yml:plan"]})
         self.assertEqual(expressions, {
             "${{ needs.plan.outputs.python }}": [
-                "validate.yml:changeset", "validate.yml:deterministic-check", "validate.yml:check"],
+                "validate.yml:deterministic-check", "validate.yml:check"],
             "${{ matrix.python }}": ["validate.yml:test-shards"]})
 
     def test_no_job_inherits_a_skip_its_need_tolerates(self):
         validate = workflow_jobs(self.text("validate.yml"))
         self.assertEqual(validate["check"]["if"], "always()")
         self.assertEqual(validate["check"]["needs"], [
-            "changeset", "plan", "test-shards", "deterministic-check",
+            "plan", "test-shards", "deterministic-check",
         ])
         release_jobs = workflow_jobs(self.text("release.yml"))
         self.assertEqual(release_jobs["stage"]["needs"], ["verify"])
@@ -410,7 +416,12 @@ class ReleaseWorkflowContracts(unittest.TestCase):
             with self.subTest(workflow=workflow):
                 text = self.text(workflow)
                 self.assertIn("cancel-in-progress: true", text)
-                self.assertIn("github.event.pull_request.number || github.ref", text)
+                if workflow == "validate.yml":
+                    self.assertIn("${{ github.event_name }}", text)
+                    self.assertIn("github.event.pull_request.number || github.sha", text)
+                    self.assertNotIn("github.event.pull_request.number || github.ref", text)
+                else:
+                    self.assertIn("github.event.pull_request.number || github.ref", text)
         self.assertIn("}}-validation", self.text("validate.yml"))
         self.assertIn("group: stable-release", self.text("release.yml"))
         self.assertIn("cancel-in-progress: false", self.text("release.yml"))

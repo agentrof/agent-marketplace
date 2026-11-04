@@ -1,0 +1,28 @@
+{
+  "description": "Require applicable companion evidence or an explicit unavailable reason with core fallback evidence. Host availability claims remain worker reports unless independently observed.",
+  "companions": [
+    {
+      "id": "ponytail",
+      "allowed_skills": ["ponytail", "ponytail-review"],
+      "kinds": ["build"],
+      "methods": ["solution-design", "data-design", "experience-design"]
+    },
+    {
+      "id": "graphify",
+      "allowed_skills": ["graphify"],
+      "kinds": ["build"]
+    },
+    {
+      "id": "impeccable",
+      "allowed_skills": ["impeccable"],
+      "methods": ["experience-design"]
+    },
+    {
+      "id": "security-audit",
+      "allowed_skills": ["security-audit"],
+      "methods": ["solution-design"],
+      "rigors": ["high"],
+      "on_any_risk": true
+    }
+  ]
+}

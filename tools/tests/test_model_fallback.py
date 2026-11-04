@@ -1,4 +1,4 @@
-"""Fallback to the session's model when a role's pinned model cannot run.
+"""Preserve requested model pins when a host cannot verify or serve them.
 
 Setup on both hosts: the project generators judge each pinned model against
 the host's own model list, read by `host_models.py` from fake `claude` and
@@ -8,6 +8,7 @@ models cache is reached. No test starts a model.
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import os
@@ -25,10 +26,12 @@ from pathlib import Path
 TESTS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TESTS_DIR))
 sys.path.insert(0, str(TESTS_DIR.parent))
+sys.path.insert(0, str(TESTS_DIR.parents[1] / "plugins" / "software-engineering-team" / "scripts"))
 
 import build_distributions  # noqa: E402
 import fixtures  # noqa: E402
 import git_fixture  # noqa: E402
+import model_class  # noqa: E402
 
 RENDERED = f"{fixtures.PLUGIN}-"
 
@@ -49,6 +52,30 @@ def codex_catalog(*slugs: str, efforts: tuple = ("low", "medium", "high", "xhigh
 FAKE_CODEX_VERSION = "0.159.2-test"
 
 
+class AttemptResolutionTests(unittest.TestCase):
+    def test_explicit_attempt_resolution_does_not_rewrite_default_pins(self):
+        root = TESTS_DIR.parents[1]
+        mapping = build_distributions.class_map(
+            root, root / "plugins" / fixtures.PLUGIN, build_distributions.load_adapters(root))
+        original = copy.deepcopy(mapping)
+        config = {}
+        for host in mapping["hosts"]:
+            before = model_class.resolve(mapping, config, host, "critical", access="read")
+            # The caller supplies a separately authorized attempt override.
+            attempt = {"class_models": {host: {"critical": {"model": "session"}}}}
+            alternative = model_class.resolve(mapping, attempt, host, "critical", access="read")
+            self.assertEqual(alternative["requested_model"], "session")
+            self.assertEqual(alternative["requested_effort"], before["requested_effort"])
+            self.assertEqual((alternative["profile"], alternative["access"], alternative["agent"]),
+                             ("critical", "read", "critical-reviewer"))
+            self.assertEqual(alternative["spawn"], {})
+            self.assertIsNone(alternative["observed_model"])
+            self.assertEqual(model_class.resolve(mapping, config, host, "critical", access="read"),
+                             before)
+        self.assertEqual(mapping, original)
+        self.assertEqual(config, {})
+
+
 @integration
 class CodexModelCheckTests(unittest.TestCase):
     """Apply judges each model a role is pinned to against Codex's own model list."""
@@ -58,16 +85,16 @@ class CodexModelCheckTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary.name) / "marketplace"
         fixtures.make_valid_root(cls.root, build=False)
-        # Two pinned models whatever the package defaults: the routine review
-        # class runs another model of the catalog.
+        # Two pinned models whatever the package defaults: the review
+        # profile runs another model of the catalog.
         table_path = build_distributions.execution_profile_path(cls.root, "codex")
         table = json.loads(table_path.read_text(encoding="utf-8"))
         catalog = json.loads(build_distributions.model_catalog_path(cls.root, "codex").read_text(
             encoding="utf-8"))["models"]
-        cls.pinned = table["profiles"]["auto"]["critical_decision"]["model"]
+        cls.pinned = table["profiles"]["auto"]["critical"]["model"]
         cls.second = sorted(model for model in catalog if model != cls.pinned)[0]
         efforts = catalog[cls.second]["efforts"]
-        table["profiles"]["auto"]["routine_review"] = {"model": cls.second,
+        table["profiles"]["auto"]["review"] = {"model": cls.second,
                                             "effort": "high" if "high" in efforts else efforts[0]}
         table_path.write_text(json.dumps(table, indent=2) + "\n", encoding="utf-8")
         build_distributions.replace_generated(cls.root, cls.root / "dist")
@@ -134,25 +161,25 @@ class CodexModelCheckTests(unittest.TestCase):
         return {path.stem: path.read_text(encoding="utf-8")
                 for path in sorted((self.project / ".codex/agents").glob("*.toml"))}
 
-    def assert_pinned(self, files: dict[str, str], roles) -> None:
+    def assert_pinned(self, files: dict[str, str], roles, *, unavailable=frozenset()) -> None:
         for role in roles:
             model, effort = self.pins[role]
             with self.subTest(role=role):
                 self.assertEqual(role_settings(files[role]), [
                     f'model = "{model}"', f'model_reasoning_effort = "{effort}"'])
-                self.assertNotIn("# Model", files[role])
+                if model in unavailable:
+                    self.assertIn(f"# Model unavailable: {model}", files[role].splitlines())
+                else:
+                    self.assertNotIn("# Model unavailable:", files[role])
 
-    def assert_fallen_back(self, files: dict[str, str], model: str, record: str) -> None:
-        for role, (pinned, effort) in self.pins.items():
-            if pinned != model:
-                continue
-            with self.subTest(role=role):
-                self.assertEqual(files[role].splitlines()[1], f"# {record}: {model}")
-                self.assertEqual(role_settings(files[role]),
-                                 [f'model_reasoning_effort = "{effort}"'])
+    def assert_no_config_rewrite(self, before: bytes | None) -> None:
+        path = self.project / "workspace/config.json"
+        self.assertEqual(path.read_bytes() if path.exists() else None, before)
 
-    def test_apply_moves_an_unavailable_model_s_roles_to_the_session_model(self):
+    def test_apply_keeps_unavailable_critical_pins_and_reports_access_gap(self):
         self.assertTrue(self.on_pinned and self.on_second)
+        config = self.project / "workspace/config.json"
+        before = config.read_bytes() if config.exists() else None
         self.cache(self.second, "gpt-5.5")
         result, warning = self.generated("apply", "--scope", "local")
         self.assertEqual(result["execution_profile"], "auto")
@@ -162,43 +189,46 @@ class CodexModelCheckTests(unittest.TestCase):
                           "version": FAKE_CODEX_VERSION, "view": "account"})
         self.assertIn("models_cache.json", check["detail"])
         self.assertEqual(check["verdicts"], {self.pinned: "unavailable", self.second: "available"})
-        self.assertEqual(result["model_fallbacks"], {self.pinned: self.on_pinned})
+        self.assertEqual(result["model_fallbacks"], {})
+        self.assertEqual(result["unavailable_models"], {self.pinned: self.on_pinned})
         files = self.role_files()
         self.assertEqual(set(files), set(self.pins))
-        self.assert_fallen_back(files, self.pinned, "Model unavailable")
-        self.assert_pinned(files, self.on_second)
+        self.assert_pinned(files, self.pins, unavailable={self.pinned})
         self.assertIn(f"codex-project: warning: {self.pinned} is unavailable", warning)
         self.assertEqual({role: result["roles"][role]["model_source"] for role in self.on_pinned},
-                         {role: "fallback" for role in self.on_pinned})
-        # The cached account catalog answers: no command beyond the version.
+                         {role: "package" for role in self.on_pinned})
+        self.assert_no_config_rewrite(before)
         self.assertEqual(self.commands(), [["--version"]])
-        checked, _ = self.generated("check", "--scope", "local")
-        self.assertEqual((checked["changes"], checked["model_fallbacks"]),
-                         ([], {self.pinned: self.on_pinned}))
-        self.assertEqual(checked["model_check"], {"status": "not_run"})
-        inspected, _ = self.generated("inspect", "--scope", "local")
-        self.assertEqual(inspected["changes"], [])
+        for action in ("check", "inspect"):
+            report, _ = self.generated(action, "--scope", "local")
+            self.assertEqual(report["changes"], [])
+            self.assertEqual(report["model_fallbacks"], {})
+            self.assertEqual(report["unavailable_models"], {self.pinned: self.on_pinned})
+            self.assertEqual(report["model_check"], {"status": "not_run"})
         self.assertEqual(self.commands(), [["--version"]])
+        self.assertEqual(self.role_files(), files)
+        self.assert_no_config_rewrite(before)
 
-    def test_a_setup_fallback_follows_the_current_verdict(self):
+    def test_refresh_updates_verdicts_without_substituting_models(self):
         self.cache(self.second)
         self.generated("apply", "--scope", "local")
-        self.assert_fallen_back(self.role_files(), self.pinned, "Model unavailable")
+        self.assert_pinned(self.role_files(), self.pins, unavailable={self.pinned})
         self.cache(self.pinned, self.second)
-        restored, _ = self.generated("apply", "--scope", "all", "--seed-user-files")
-        self.assertEqual(restored["model_check"]["verdicts"][self.pinned], "available")
-        self.assertEqual(restored["model_fallbacks"], {})
+        available, _ = self.generated("apply", "--scope", "all", "--seed-user-files")
+        self.assertEqual(available["model_check"]["verdicts"][self.pinned], "available")
+        self.assertEqual(available["model_fallbacks"], {})
+        self.assertEqual(available["unavailable_models"], {})
         self.assert_pinned(self.role_files(), self.pins)
-        # A fallback the list no longer backs ends too: without a verdict the pin stays.
         self.cache(self.second)
         self.generated("apply", "--scope", "local")
         (self.home / "models_cache.json").unlink()
-        self.codex.answer("debug models", exit=3, stdout="boom")
+        self.codex.answer("debug models", exit=3, stdout="access denied")
         unverified, note = self.generated("apply", "--scope", "local")
         self.assertEqual(unverified["model_check"]["status"], "failed")
         self.assertEqual(unverified["model_check"]["verdicts"],
                          {self.pinned: "unverified", self.second: "unverified"})
         self.assertEqual(unverified["model_fallbacks"], {})
+        self.assertEqual(unverified["unavailable_models"], {})
         self.assert_pinned(self.role_files(), self.pins)
         self.assertIn("keep their pins unverified", note)
 
@@ -216,16 +246,20 @@ class CodexModelCheckTests(unittest.TestCase):
         self.assertEqual(self.commands(), [["--version"], ["debug", "models"],
                                            ["debug", "models", "--bundled"]])
 
-    def test_the_inherit_profile_keeps_each_role_s_effort_and_runs_no_check(self):
-        result, _ = self.generated("apply", "--scope", "local", "--execution-profile", "inherit")
-        self.assertEqual(result["model_check"], {"status": "not_run"})
-        self.assertEqual(result["model_fallbacks"], {})
-        self.assertEqual(self.commands(), [])
-        for role, text in self.role_files().items():
-            with self.subTest(role=role):
-                self.assertEqual(text.splitlines()[1], "# Execution profile: inherit")
-                self.assertEqual(role_settings(text),
-                                 [f'model_reasoning_effort = "{self.pins[role][1]}"'])
+    def test_retired_inherit_profile_cannot_silently_downgrade_existing_pins(self):
+        self.cache(self.pinned, self.second)
+        self.generated("apply", "--scope", "local")
+        before = self.role_files()
+        calls = self.commands()
+        refused = subprocess.run(
+            [sys.executable, str(self.generator), "apply", "--scope", "local",
+             "--execution-profile", "inherit", "--project-root", str(self.project)],
+            capture_output=True, text=True, check=False, timeout=120,
+            env=fixtures.isolated_hosts(os.environ, self.isolation))
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("inherit", refused.stderr)
+        self.assertEqual(self.role_files(), before)
+        self.assertEqual(self.commands(), calls)
 
 
 CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
@@ -246,10 +280,10 @@ class ClaudeModelCheckTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory()
         cls.root = Path(cls.temporary.name) / "marketplace"
         fixtures.make_valid_root(cls.root, build=False)
-        # No package role runs the mechanical class, so the review class runs its model.
+        # Exercise the light model from both a writer and an independent reviewer.
         table_path = build_distributions.execution_profile_path(cls.root, "claude")
         table = json.loads(table_path.read_text(encoding="utf-8"))
-        table["profiles"]["auto"]["routine_review"] = table["profiles"]["auto"]["mechanical"]
+        table["profiles"]["auto"]["review"] = table["profiles"]["auto"]["light"]
         table_path.write_text(json.dumps(table, indent=2) + "\n", encoding="utf-8")
         build_distributions.replace_generated(cls.root, cls.root / "dist")
         cls.package = cls.root / "dist/claude" / fixtures.PLUGIN
@@ -259,7 +293,7 @@ class ClaudeModelCheckTests(unittest.TestCase):
         cls.map, cls.roles = class_map["hosts"]["claude"], class_map["roles"]
         # Three models run the package classes: one decides, one writes, one is mechanical.
         cls.opus, cls.sonnet, cls.haiku = (cls.map["classes"][slot]["model"] for slot in (
-            "critical_decision", "routine_authoring", "mechanical"))
+            "critical", "work", "light"))
         assert len({cls.opus, cls.sonnet, cls.haiku}) == 3
 
     @classmethod
@@ -318,7 +352,9 @@ class ClaudeModelCheckTests(unittest.TestCase):
         return self.roles_on(*(slot for slot in self.roles
                                if self.map["classes"][slot]["model"] == model))
 
-    def test_apply_renders_an_unavailable_model_s_roles_on_the_session_model(self):
+    def test_apply_keeps_unavailable_critical_pins_and_reports_access_gap(self):
+        config = self.project / "workspace/config.json"
+        before = config.read_bytes()
         result, warning = self.generated("apply", "--scope", "local")
         check = result["model_check"]
         self.assertEqual({key: check[key] for key in ("status", "binary", "version", "view")},
@@ -327,20 +363,22 @@ class ClaudeModelCheckTests(unittest.TestCase):
         self.assertEqual(check["verdicts"], {self.opus: "unavailable", self.sonnet: "available",
                                              self.haiku: "available"})
         on_opus = self.roles_running(self.opus)
-        self.assertEqual(result["model_fallbacks"], {self.opus: on_opus})
+        self.assertEqual(result["model_fallbacks"], {})
+        self.assertEqual(result["unavailable_models"], {self.opus: on_opus})
         rendered = self.rendered()
-        for role in self.roles_on("critical_decision"):
+        for role in self.roles_on("critical"):
             with self.subTest(role=role):
-                slot = "critical_decision"
+                slot = "critical"
                 lines = rendered[role]
                 # The stamp names the settings the config resolves, so the
                 # session start check finds the render current.
                 self.assertIn(f" settings sha256:{settings_digest(self.opus, slot, self.map)}",
                               lines[1])
                 self.assertEqual(lines[2], f"# Model unavailable: {self.opus}")
-                self.assertIn("model: inherit", lines)
+                self.assertIn(f"model: {self.opus}", lines)
+                self.assertNotIn("model: inherit", lines)
                 self.assertIn(f"effort: {self.map['classes'][slot]['effort']}", lines)
-                self.assertEqual(result["roles"][role]["model_source"], "fallback")
+                self.assertEqual(result["roles"][role]["model_source"], "package")
         for role in self.roles_running(self.sonnet):
             with self.subTest(role=role):
                 self.assertIn(f"model: {self.sonnet}", rendered[role])
@@ -352,11 +390,13 @@ class ClaudeModelCheckTests(unittest.TestCase):
         self.assertEqual([json.loads(line)["type"] for line in probes[0]["stdin"].splitlines()],
                          ["control_request"])
         checked, _ = self.generated("check", "--scope", "local")
-        self.assertEqual((checked["changes"], checked["model_fallbacks"]),
-                         ([], {self.opus: on_opus}))
+        self.assertEqual((checked["changes"], checked["model_fallbacks"]), ([], {}))
+        self.assertEqual(checked["unavailable_models"], {self.opus: on_opus})
         self.assertEqual(checked["model_check"], {"status": "not_run"})
         inspected, _ = self.generated("inspect", "--scope", "local")
-        self.assertEqual(inspected["model_fallbacks"], {self.opus: on_opus})
+        self.assertEqual(inspected["model_fallbacks"], {})
+        self.assertEqual(inspected["unavailable_models"], {self.opus: on_opus})
+        self.assertEqual(config.read_bytes(), before)
         self.assertEqual(len([call for call in self.claude.calls()
                               if call["argv"] != ["--version"]]), 1)
         guard = subprocess.run(
@@ -368,11 +408,12 @@ class ClaudeModelCheckTests(unittest.TestCase):
         self.assertEqual((guard.returncode, guard.stderr), (0, ""))
         self.assertNotIn("AGENT_MARKETPLACE_RENDERED_AGENTS: stale", guard.stdout)
 
-    def test_a_fallback_follows_the_verdict_at_every_refresh(self):
+    def test_refresh_updates_verdicts_without_substituting_models(self):
         self.generated("apply", "--scope", "local")
         self.reply(self.opus, self.sonnet, self.haiku)
         restored, _ = self.generated("apply", "--scope", "local")
         self.assertEqual(restored["model_fallbacks"], {})
+        self.assertEqual(restored["unavailable_models"], {})
         self.assertTrue(all(f"model: {self.opus}" in lines
                             for role, lines in self.rendered().items()
                             if role in self.roles_running(self.opus)))
@@ -388,6 +429,11 @@ class ClaudeModelCheckTests(unittest.TestCase):
         failed, note = self.generated("apply", "--scope", "local")
         self.assertEqual(failed["model_check"]["status"], "failed")
         self.assertEqual(failed["model_fallbacks"], {})
+        self.assertEqual(failed["unavailable_models"], {})
+        for slot, roles in self.roles.items():
+            for role in roles:
+                self.assertIn(f"model: {self.map['classes'][slot]['model']}", self.rendered()[role])
+                self.assertIn(f"effort: {self.map['classes'][slot]['effort']}", self.rendered()[role])
         self.assertIn("keep their pins unverified", note)
 
     def test_the_cli_floor_is_the_highest_minimum_of_the_models_the_classes_run(self):
@@ -417,16 +463,20 @@ class ClaudeModelCheckTests(unittest.TestCase):
         fable, ghost = "claude-fable-5-1", "claude-ghost-9-9"
         self.assertNotIn(fable, self.map["models"])
         self.config({"class_models": {"claude": {
-            "critical_decision": {"model": fable, "effort": "max"},
-            "routine_review": {"model": ghost}}}})
-        self.reply(self.opus, self.sonnet, fable, efforts=["low", "medium", "high"])
+            "critical": {"model": fable, "effort": "max"},
+            "review": {"model": ghost}}}})
+        self.reply(self.opus, self.sonnet, self.haiku, fable, efforts=["low", "medium", "high"])
         result, warning = self.generated("apply", "--scope", "local")
         self.assertEqual(result["model_check"]["verdicts"],
                          {fable: "available", ghost: "unavailable", self.sonnet: "available",
-                          self.opus: "available"})
-        self.assertEqual(result["model_fallbacks"], {ghost: self.roles_on("routine_review")})
-        self.assertIn(f"the critical_decision class runs {fable} at effort max", warning)
-        high = self.roles_on("critical_decision")[0]
+                          self.haiku: "available"})
+        self.assertEqual(result["model_fallbacks"], {})
+        self.assertEqual(result["unavailable_models"], {ghost: self.roles_on("review")})
+        self.assertIn(f"the critical class runs {fable} at effort max", warning)
+        for role in self.roles_on("review"):
+            self.assertIn(f"model: {ghost}", self.rendered()[role])
+            self.assertEqual(result["roles"][role]["model_source"], "config")
+        high = self.roles_on("critical")[0]
         self.assertIn(f"model: {fable}", self.rendered()[high])
         self.assertIn("effort: max", self.rendered()[high])
 

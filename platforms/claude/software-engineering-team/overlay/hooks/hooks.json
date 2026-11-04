@@ -8,6 +8,15 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/team_guard.py register"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host claude",
+            "timeout": 2
+          }
+        ]
       }
     ],
     "UserPromptExpansion": [
@@ -88,6 +97,15 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/autopilot_guard.py post"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host claude",
+            "timeout": 2
+          }
+        ]
       }
     ],
     "SubagentStart": [
@@ -119,6 +137,50 @@
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-watch --host claude",
             "asyncRewake": true,
             "timeout": 260000
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host claude",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host claude",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host claude",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host claude",
+            "timeout": 2
           }
         ]
       }

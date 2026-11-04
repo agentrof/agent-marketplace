@@ -8,6 +8,15 @@
             "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/team_guard.py register"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host codex",
+            "timeout": 2
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -70,6 +79,15 @@
             "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/autopilot_guard.py post"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host codex",
+            "timeout": 2
+          }
+        ]
       }
     ],
     "SubagentStart": [
@@ -79,6 +97,50 @@
             "type": "command",
             "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py skill-content/autopilot/scripts/autopilot.py hook native-register --host codex",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host codex",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host codex",
+            "timeout": 1
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host codex",
+            "timeout": 2
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}\"/scripts/hook_launcher.py scripts/retrospective_hook.py --host codex",
+            "timeout": 1
           }
         ]
       }

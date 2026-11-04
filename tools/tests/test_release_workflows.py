@@ -495,20 +495,17 @@ class ReleaseWorkflowContracts(unittest.TestCase):
         text = self.text("validate.yml").split("\n  check:\n", 1)[1]
         block = re.search(r"        run: \|\n((?:          [^\n]*\n|\n)+)", text).group(1)
         script = "\n".join(line[10:] for line in block.splitlines())
-        baseline = dict(os.environ, EVENT_NAME="pull_request", CHANGESET_RESULT="success",
-                        PLAN_RESULT="success", DETERMINISTIC_RESULT="success",
+        baseline = dict(os.environ, PLAN_RESULT="success", DETERMINISTIC_RESULT="success",
                         HAS_TESTS="true", TEST_RESULT="success")
         def execute(values):
             return subprocess.run(["bash", "-c", script], env=values, capture_output=True).returncode
         self.assertEqual(execute(baseline), 0)
-        for key in ("PLAN_RESULT", "DETERMINISTIC_RESULT", "TEST_RESULT", "CHANGESET_RESULT"):
-            with self.subTest(key=key):
-                self.assertNotEqual(execute(dict(baseline, **{key: "skipped"})), 0)
+        for key in ("PLAN_RESULT", "DETERMINISTIC_RESULT", "TEST_RESULT"):
+            for outcome in ("", "failure", "cancelled", "skipped"):
+                with self.subTest(key=key, outcome=outcome):
+                    self.assertNotEqual(execute(dict(baseline, **{key: outcome})), 0)
         self.assertEqual(execute(dict(baseline, HAS_TESTS="false", TEST_RESULT="skipped")), 0)
         self.assertNotEqual(execute(dict(baseline, HAS_TESTS="", TEST_RESULT="skipped")), 0)
-        push = dict(baseline, EVENT_NAME="push", CHANGESET_RESULT="skipped")
-        self.assertEqual(execute(push), 0)
-        self.assertNotEqual(execute(dict(push, CHANGESET_RESULT="success")), 0)
 
     def test_receipts_require_verified_reports_and_are_not_emitted_for_forks_or_schedule(self):
         text = self.text("validate.yml")

@@ -9,7 +9,6 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
-import time
 import types
 import unittest
 from unittest import mock
@@ -25,6 +24,25 @@ HOOK = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/retros
 class RetrospectiveHookTests(unittest.TestCase):
     @integration
     def test_subprocess_hook_drains_detached_report_on_both_host_payloads(self):
+        # The observer removes its reservation before process exit. Join the
+        # hook's existing child reaper so Windows can release the fixture cwd.
+        driver = """
+import runpy
+import sys
+import threading
+import time
+
+sys.argv = sys.argv[1:]
+try:
+    runpy.run_path(sys.argv[0], run_name="__main__")
+finally:
+    deadline = time.monotonic() + 8
+    for thread in threading.enumerate():
+        if thread is not threading.current_thread():
+            thread.join(max(0, deadline - time.monotonic()))
+            if thread.is_alive():
+                raise RuntimeError("hook child did not exit before fixture cleanup")
+"""
         for host in ("claude", "codex"):
             with self.subTest(host=host), tempfile.TemporaryDirectory() as temporary:
                 home = Path(temporary).resolve()
@@ -58,18 +76,13 @@ class RetrospectiveHookTests(unittest.TestCase):
                            "tool_name": "Bash", "tool_use_id": "failed-tool",
                            "tool_input": {"command": "PRIVATE_COMMAND"},
                            "tool_response": {"exit_code": 7, "output": "PRIVATE_OUTPUT"}}
-                result = subprocess.run([sys.executable, str(HOOK), "--host", host], cwd=project,
+                result = subprocess.run([sys.executable, "-c", driver, str(HOOK), "--host", host], cwd=project,
                     env=environment, input=json.dumps(payload), text=True, capture_output=True,
-                    timeout=5, check=True)
+                    timeout=15, check=True)
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(result.stderr, "")
                 directory = project / ".git/agentrof/runtime/work-queue"
                 report_path = directory / "observations/latest.json"
-                deadline = time.monotonic() + 8
-                while time.monotonic() < deadline:
-                    if report_path.is_file() and not (directory / "observer.json").exists():
-                        break
-                    time.sleep(0.05)
                 self.assertTrue(report_path.is_file(), "hook did not produce a detached report")
                 self.assertFalse((directory / "observer.json").exists(), "observer did not finish")
                 report = json.loads(report_path.read_text(encoding="utf-8"))

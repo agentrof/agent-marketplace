@@ -198,6 +198,8 @@ def prepare(root: Path, members: list[dict], base: str, lane, *, diff_path: Path
               "Review this immutable candidate read-only. Apply every supplied source to its listed tasks. "
               "Read the full diff and affected current files. Report each source/task assessment with actual "
               "current project-relative file and line citations with an exact short quote from that line. "
+              "Before returning the report, check every proposed path, line and quote against the current file. "
+              "Copy literal contiguous text from that one line; paraphrases and incorrect line numbers reject the report. "
               "Citations must reference tracked source, test or contract files. Describe runtime proof in assessment text. "
               "Report findings and limitations honestly. "
               "Source delivery is observed; application is your report. Do not edit or launch other agents.\n"

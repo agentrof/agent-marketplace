@@ -359,9 +359,9 @@ class AutomaticRetrospectiveTests(unittest.TestCase):
             return {"coverage": {"state": "unavailable"}, "usage": None,
                     "deliveries": [], "events": list(failures)}
 
-        with mock.patch.object(retrospective.time, "time", side_effect=lambda: clock["wall"]), \
-                mock.patch.object(retrospective.time, "monotonic", side_effect=lambda: clock["monotonic"]), \
-                mock.patch.object(retrospective.time, "sleep", side_effect=sleep), \
+        # Subprocess waits and file locks must retain their real clocks.
+        scheduler_time = SimpleNamespace(time=lambda: clock["wall"], monotonic=lambda: clock["monotonic"], sleep=sleep)
+        with mock.patch.object(retrospective, "time", scheduler_time), \
                 mock.patch.object(retrospective, "collect", side_effect=collect), \
                 mock.patch.dict(sys.modules, {"session_cost": SimpleNamespace(observe=observe)}):
             self.emit(**hint)
@@ -389,10 +389,9 @@ class AutomaticRetrospectiveTests(unittest.TestCase):
             clock["wall"] += seconds
             clock["monotonic"] += seconds
 
+        scheduler_time = SimpleNamespace(time=lambda: clock["wall"], monotonic=lambda: clock["monotonic"], sleep=sleep)
         with mock.patch.object(retrospective, "policy", return_value=settings), \
-                mock.patch.object(retrospective.time, "time", side_effect=lambda: clock["wall"]), \
-                mock.patch.object(retrospective.time, "monotonic", side_effect=lambda: clock["monotonic"]), \
-                mock.patch.object(retrospective.time, "sleep", side_effect=sleep), \
+                mock.patch.object(retrospective, "time", scheduler_time), \
                 mock.patch.dict(sys.modules, {"session_cost": SimpleNamespace(observe=lambda *a, **k: observation)}):
             self.emit(kind="session", operation="PostToolUse", host="codex", session_id="main-session",
                       tool="Bash", status="unknown")

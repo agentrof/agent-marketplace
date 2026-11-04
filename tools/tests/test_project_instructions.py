@@ -140,6 +140,20 @@ class UserContextTests(unittest.TestCase):
             for host, surface in self.surfaces.items()
         }
 
+    def test_startup_keeps_user_rules_and_defers_task_documents(self):
+        declared = build_distributions.user_context_files(ROOT)
+        self.assertEqual(declared, [
+            COMPANION,
+            "{{workspace}}/memory/agent-marketplace.md",
+            "{{workspace}}/memory/me.md",
+            "{{workspace}}/memory/profile.md",
+        ])
+        team = (ROOT / "plugins/software-engineering-team/templates/"
+                "project-instructions/team.md").read_text(encoding="utf-8")
+        self.assertIn("current-plan.md", team)
+        self.assertIn("product-decisions.md", team)
+        self.assertIn("Every worker brief carries applicable authority, data safety", team)
+
     def test_every_host_loads_the_same_declared_files_in_order(self):
         with tempfile.TemporaryDirectory() as temporary:
             project = Path(temporary)
@@ -165,6 +179,26 @@ class UserContextTests(unittest.TestCase):
                     for path in files:
                         target = companion if path == COMPANION else path
                         self.assertTrue((project / target).is_file(), target)
+
+    def test_setup_seeds_worker_rules_once_and_repairs_missing_memory(self):
+        skill = (ROOT / "plugins/software-engineering-team/skill-content/setup/SKILL.md").read_text()
+        self.assertIn("--scope all --seed-user-files", skill)
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            self.setup_project(project)
+            memory = project / "workspace/memory"
+            for name in ("me.md", "profile.md", "current-plan.md", "product-decisions.md", "agent-marketplace.md"):
+                self.assertTrue((memory / name).is_file(), name)
+            profile = memory / "profile.md"
+            profile.write_text("# Authored preferences\nKeep this exact content.\n")
+            (memory / "current-plan.md").unlink()
+            self.setup_project(project)
+            self.assertEqual(profile.read_text(), "# Authored preferences\nKeep this exact content.\n")
+            self.assertTrue((memory / "current-plan.md").is_file())
+            plan = self.contract.plan_portable_project_files(
+                project, CODEX_PACKAGE, "workspace", seed_user_files=True)
+            self.assertEqual(plan["changes"], {})
+            self.assertEqual(plan["choice_requests"], [])
 
     def test_build_refuses_a_host_fragment_without_one_user_context_line(self):
         with tempfile.TemporaryDirectory() as temporary:

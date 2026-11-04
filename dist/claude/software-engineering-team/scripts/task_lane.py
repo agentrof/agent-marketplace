@@ -1,71 +1,32 @@
 #!/usr/bin/env python3
-"""Fast-lane task path: one task, one branch, one pull request, one clock.
+"""Task delivery, candidate evidence and retrospective reporting.
 
-Every implementation request runs through this script:
+start creates an isolated task worktree, records confirmed risks and required
+methods, and starts the task clock. lint and approve validate its criteria.
+method loads a packaged procedure and records separately supplied evidence.
+review-inputs returns the candidate diff, method gaps and changed sources.
+prove executes bounded impact-selected checks. open-pr publishes the task.
+merge checks the reviewed head, proof and blocking findings before requesting
+merge. train integrates a reviewed batch through one proved integration PR.
+ready records environment evidence against an observed merged revision.
 
-- ``start`` creates ``task/<id>-<slug>`` from the target branch in its own
-  git worktree (the current checkout is never switched; ``--switch`` opts back
-  in) and writes the task ``workspace/docs/backlog/tasks/<id>-<slug>.md`` with its
-  ``requested_at`` time and the proposed ``rigor``.
-- ``lint`` checks one task: title, size, rigor, 3 to 8 acceptance criteria
-  and a test list. ``approve`` lints it and writes ``approved_at``.
-- ``start`` also writes ``risks`` (``--risk`` and, for a build task, the risk flags its request hits),
-  ``applied_skills`` (the method skills ``task-triggers.json`` makes mandatory)
-  and ``sources`` (each doc it relies on with a short sha256); ``approve``
-  hashes a source added since. ``review-inputs`` lists the reviewers the diff
-  and the task's rigor and risks route to, writes the diff to a file the
-  reviewers read themselves, and reports triggered skills the task did not
-  apply and changed sources.
-- ``overlap`` warns, never refuses, when an open pull request touches the
-  same files as this branch.
-- ``start`` and ``approve`` also route roles: each rule in
-  ``skill-content/deliver/data/role-routing.json`` (and the project's
-  ``role_routing`` in ``workspace/config.json``) that matches the task's kind, size, named
-  files or keywords, at the trigger kinds its size allows, lands in its
-  ``roles`` field, and the roles of a ``spawn_modes`` mode in ``spawn``;
-  ``role-check`` records a role's verdict in the task's ``## Role Checks`` section.
-- ``open-pr`` marks the task delivered, pushes the branch and opens the PR; it
-  refuses while a ``require`` role, routed by the task or its diff, has no verdict.
-- ``prove`` runs the project's local proof commands on HEAD and records each
-  one's exit code and time; at config ``pr_proof`` ``local_record`` ``open-pr``
-  refuses without a green record of a clean HEAD and adds it to the PR body.
-- ``merge`` posts the reviewers' pass on the PR and, at rigor ``normal``,
-  turns on auto-merge; at rigor ``high`` the owner merges unless ``--delegated``.
-- ``criteria`` lists a backlog story's numbered criteria, its open linked tasks
-  and a warning when the story changed after an open task was requested;
-  ``board`` groups tasks by epic and story and marks a story delivered once
-  merged tasks cover every criterion, derived on every run.
-- ``report`` is the retrospective: the tasks, read from ``origin/main`` (the
-  working tree when there is none), hold the request and approval times,
-  GitHub holds the PR, review, CI and merge times, read at report time, and
-  ``session_cost.py`` reads each task's cost and active minutes from
-  the host session transcripts, so every wait gets an owner; ``--deep`` adds reading waste.
-  Cost is tokens and dollars per task, its spawns and their startup context,
-  priced by ``session_cost.load_prices``. Quality is read beside them: the
-  review counts ``merge`` writes into its pass comment, CI first pass from the
-  branch's workflow runs, escaped defects from later tasks' ``fixes`` and story
-  coverage from the merged tasks' ``covers``. Rework asks why a task did not finish
-  in one pass: red runs (with the first failing test and error line of a bounded number of
-  failed logs), blocking findings, role ``changes`` verdicts, unexplained commits after the PR
-  opened and causes recorded with ``rework``, classified by ``rework-causes.json``; causes that
-  recur become lessons (``--write-lessons``), memory candidates and process levers. Each run appends every
-  merged task's cost and waits to the history once, and later runs read that
-  row first, so a task keeps its cost after the host deletes old transcripts. ``--export`` rebuilds a derived file under ``.agentrof/``.
-  ``file-issues`` opens one
-  issue per proposal the user approved, in the project's own repository.
-
-Nothing is written after a merge, and no file is shared between tasks: each
-task travels in its own pull request.
+report combines task, GitHub and available host-session evidence. It retains
+unknown timing and usage, distinguishes shared integration work, and can export
+local history. criteria and board derive backlog coverage. rework records an
+observed cause. file-issues publishes explicitly authorized proposals.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import fnmatch
 import hashlib
 import io
 import json
+import os
+import signal
 import re
 import shlex
 import shutil
@@ -73,9 +34,15 @@ import statistics
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
+
+import atomic_file
+import file_lock
+import project_paths
+import proof_cache
 
 from vault_markdown import parse_frontmatter
 
@@ -95,8 +62,6 @@ EPIC_RE = re.compile(r"^EP-[0-9]{3,}$")
 STORY_RE = re.compile(r"^ST-[0-9]{3,}$")
 STORIES = Path("workspace") / "docs" / "backlog" / "epics"
 BOARD = EXPORT / "board.md"
-AC_RANGE = (3, 8)
-# Optional project override: "task_criteria_range": [min, max] in workspace/config.json.
 # Every build task proves its change is wired into the running system and names its docs change.
 LIVE_WIRING = "Live wiring:"
 DOCS_DELTA = "Docs delta:"
@@ -109,11 +74,16 @@ TARGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["kinds"]
 # Cost budget in USD per kind and size; the retrospective flags a merged task above its own.
 COST_BUDGETS = json.loads(TARGETS_FILE.read_text(encoding="utf-8")).get("cost_budget_usd", {})
 TARGET_MINUTES = TARGETS["build"]["average"]
-ROUTING_FILE = TARGETS_FILE.with_name("role-routing.json")
 TRIGGERS_FILE = TARGETS_FILE.with_name("task-triggers.json")
 TRIGGER_KEYS = {"method_skills": "skill", "risk_flags": "flag", "reviewers": "role"}
 # Renamed skills: a project trigger rule or an open task may still name the old one.
-SKILL_ALIASES = {"docker-compose": "container-environment"}
+SKILL_ALIASES = {
+    "docker-compose": "verify", "container-environment": "verify",
+    "business-analysis": "analyze", "software-architecture": "solution-design",
+    "sql-database-design": "data-design", "nosql-database-design": "data-design",
+    "ui-ux-design": "experience-design", "code-review": "review",
+    "python-fastapi": "verify", "react-typescript": "experience-design",
+}
 SKILLS = Path(__file__).resolve().parent.parent / "skill-content"
 SOURCE_HASH = 12
 GRAPH_REFRESH = Path(__file__).resolve().with_name("graphify_refresh.py")
@@ -121,9 +91,6 @@ GRAPH_REFRESH = Path(__file__).resolve().with_name("graphify_refresh.py")
 PROOF_COMMANDS = ("make test",)
 PROOFS = Path(".agentrof") / "agent-marketplace" / ".runtime" / "proof"
 REVIEWS = PROOFS.with_name("review")
-ROLE_MODES = ("require", "suggest", "off")
-ROLE_STEPS = ("pre_check", "author")
-VERDICTS = ("go", "changes")
 ROLE_RE = re.compile(r"^[a-z][a-z0-9-]*:(require|suggest):(pre_check|author)$")
 CHECK_RE = re.compile(r"^- (\S+) ([a-z][a-z0-9-]*) (go|changes)(?:: (.*))?$")
 # A token with a slash or a file extension is a file the text names.
@@ -233,11 +200,14 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def run(*args: str, cwd: Path | None = None) -> str:
-    out = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True)
+def run(*args: str, cwd: Path | None = None, strip_output: bool = True) -> str:
+    try:
+        out = subprocess.run(list(args), cwd=cwd, capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        raise Refused(f"{' '.join(args[:3])} timed out; reconcile its outcome before retrying") from None
     if out.returncode != 0:
         raise Refused(f"{' '.join(args[:3])} failed: {out.stderr.strip() or out.stdout.strip()}")
-    return out.stdout.strip()
+    return out.stdout.strip() if strip_output else out.stdout
 
 
 def project_root(value: str | None) -> Path:
@@ -259,12 +229,11 @@ def next_id(names: list[str]) -> str:
 
 
 def taken_names(root: Path, base: str) -> list[str]:
-    """Tasks on the target branch and every task branch on the remote, so parallel
-    tasks never share an id; ``start`` pushes its branch at once to claim it."""
+    """Reserve IDs held by target tasks and local or remote task branches."""
     tasks = run("git", "ls-tree", "--name-only", f"origin/{base}", f"{TASKS.as_posix()}/",
                 cwd=root).splitlines()
     branches = run("git", "for-each-ref", "--format=%(refname:short)",
-                   "refs/remotes/origin/task/", cwd=root).splitlines()
+                   "refs/heads/task/", "refs/remotes/origin/task/", cwd=root).splitlines()
     return tasks + branches
 
 
@@ -273,51 +242,16 @@ def proposed_rigor(request: str) -> tuple[str, list[str]]:
     return ("high" if hits else "normal"), hits
 
 
-def role_rules(root: Path | None = None) -> list[dict]:
-    """Packaged rules, a rule of the project's role_routing setting replacing the one of its role."""
-    rules = {rule["role"]: rule for rule in json.loads(ROUTING_FILE.read_text(encoding="utf-8"))["rules"]}
-    rules.update({rule["role"]: rule for rule in project_setting(root, "role_routing", {}).get("rules", [])})
-    for rule in rules.values():
-        if rule.get("mode") not in ROLE_MODES or rule.get("step") not in ROLE_STEPS:
-            raise Refused(f"role rule {rule['role']}: mode must be one of {', '.join(ROLE_MODES)}"
-                          f" and step one of {', '.join(ROLE_STEPS)}")
-    return [rule for rule in rules.values() if rule["mode"] != "off"]
 
 
-def routing_policy(root: Path | None = None) -> dict:
-    """pre_check_triggers and spawn_modes, the project's role_routing value replacing the packaged one."""
-    keys = ("pre_check_triggers", "spawn_modes")
-    policy = {key: value for key, value in json.loads(ROUTING_FILE.read_text(encoding="utf-8")).items() if key in keys}
-    return policy | {key: value for key, value in project_setting(root, "role_routing", {}).items() if key in keys}
 
 
-def spawn_roles(roles: list[dict], root: Path | None = None) -> list[str]:
-    """The routed roles the flow spawns on its own; any other routed role spawns only when the owner asks."""
-    modes = routing_policy(root).get("spawn_modes", ["require"])
-    return [item["role"] for item in roles if item["mode"] in modes]
 
 
 def named_files(text: str) -> set[str]:
     return {token.rstrip(".") for token in PATH_RE.findall(text) if token.rstrip(".")}
 
 
-def route(rules: list[dict], text: str, kind: str, size: str, files: set[str],
-          allowed: list[str] | None = None) -> list[dict]:
-    """The rules a task hits, each with the triggers that matched as its reasons; ``allowed``
-    names the trigger kinds (size, path, keyword) that may route at this size, all when None."""
-    allowed = ["size", "path", "keyword"] if allowed is None else allowed
-    found = []
-    for rule in rules:
-        if kind not in rule.get("kinds", KINDS):
-            continue
-        reasons = [f"size {size}"] if "size" in allowed and size in rule.get("sizes", []) else []
-        reasons += [reason for reason in trigger_reasons(rule, text, files)
-                    if ("path" if reason.startswith("file ") else "keyword") in allowed]
-        if reasons:
-            found.append({key: rule.get(key)
-                          for key in ("role", "mode", "step", "model_class", "time_budget_minutes", "ask")}
-                         | {"reasons": reasons})
-    return found
 
 
 def trigger_reasons(rule: dict, text: str, files: set[str]) -> list[str]:
@@ -334,14 +268,16 @@ def task_triggers(root: Path | None = None) -> dict:
     """Packaged trigger tables, a rule of the project's task_triggers setting replacing the one of its id."""
     tables = json.loads(TRIGGERS_FILE.read_text(encoding="utf-8"))
     extra = project_setting(root, "task_triggers", {})
-    result = {}
+    result = {"confirmed_risk_methods": tables["confirmed_risk_methods"]}
     for table, key in TRIGGER_KEYS.items():
         rules = {rule[key]: rule for rule in tables[table]}
         own_rules = [dict(rule, skill=SKILL_ALIASES.get(rule["skill"], rule["skill"])) if key == "skill" else rule
                      for rule in extra.get(table, [])]
         rules.update({rule[key]: rule for rule in own_rules})
         result[table] = list(rules.values())
-    unknown = {rule["skill"] for rule in result["method_skills"]} - {
+    methods = {rule["skill"] for rule in result["method_skills"]}
+    methods.update(method for names in result["confirmed_risk_methods"].values() for method in names)
+    unknown = methods - {
         path.parent.name for path in SKILLS.glob("*/SKILL.md")}
     if unknown:
         raise Refused(f"task triggers name skills this package does not ship: {', '.join(sorted(unknown))}")
@@ -357,6 +293,17 @@ def field_items(props: dict, key: str) -> list[str]:
     value = props.get(key) or []
     items = value if isinstance(value, list) else str(value).split(",")
     return [str(item).strip() for item in items if str(item).strip()]
+
+
+def required_methods(root: Path | None, props: dict, files: set[str], text: str = "",
+                     *, triggers: dict | None = None) -> list[str]:
+    """Confirmed risks retain their methods even when project discovery rules differ."""
+    triggers = task_triggers(root) if triggers is None else triggers
+    methods = set(field_items(props, "required_methods"))
+    methods.update(triggered(triggers["method_skills"], "skill", f"{props.get('title', '')}\n{text}", files))
+    for risk in field_items(props, "risks"):
+        methods.update(triggers["confirmed_risk_methods"].get(risk, []))
+    return sorted(methods)
 
 
 def applied_skills(props: dict) -> list[str]:
@@ -384,20 +331,15 @@ def changed_sources(root: Path, items: list[str]) -> list[dict]:
 
 
 def task_body(path: Path) -> str:
-    """The task's own words: the body before the navigation and the recorded verdicts."""
-    return re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks|^## Rework",
+    """The task contract for method discovery, with unstructured legacy text retained."""
+    body = re.split(r"(?m)^<!-- sec: nav -->|^## Role Checks|^## Rework",
                     path.read_text(encoding="utf-8").split("\n---\n", 1)[-1])[0]
+    request = section(body, "Request")
+    return "\n".join(request + section(body, "Acceptance Criteria")) if request else body
 
 
-def task_roles(props: dict) -> dict[str, dict]:
-    """The roles field: role -> mode and step, as start, approve or the main session wrote it."""
-    items = [item.strip() for item in str(props.get("roles") or "").split(",") if item.strip()]
-    return {role: {"role": role, "mode": mode, "step": step}
-            for role, mode, step in (item.split(":") for item in items if ROLE_RE.match(item))}
 
 
-def roles_value(roles: list[dict]) -> str:
-    return ", ".join(f"{item['role']}:{item['mode']}:{item['step']}" for item in roles)
 
 
 def role_checks(path: Path) -> list[dict]:
@@ -414,27 +356,8 @@ def rework_notes(path: Path) -> list[dict]:
             for line in section(body, "Rework") if (match := REWORK_RE.match(line))]
 
 
-def routed_roles(root: Path | None, path: Path, files: set[str] = frozenset()) -> tuple[list[dict], list[str]]:
-    """Every role the task routes to now (its roles field, then the rules its text, size and the
-    given changed files hit), and the require roles that have no recorded verdict yet."""
-    props = task_props(path)
-    body = task_body(path)
-    text = f"{props.get('title', '')}\n{body}"
-    roles = task_roles(props)
-    size = props.get("size", "s")
-    for item in route(role_rules(root), text, props.get("task_kind", "build"), size,
-                      named_files(body) | set(files), routing_policy(root).get("pre_check_triggers", {}).get(size)):
-        roles.setdefault(item["role"], item)
-        if item["mode"] == "require":
-            roles[item["role"]] |= {"mode": "require"}
-    done = {check["role"] for check in role_checks(path)}
-    return list(roles.values()), [item["role"] for item in roles.values()
-                                  if item["mode"] == "require" and item["role"] not in done]
 
 
-def missing_message(task: str, missing: list[str]) -> str:
-    return "; ".join(f"{role} has no recorded verdict; run task_lane.py role-check --task {task}"
-                     f" --role {role} --verdict go|changes --note \"<reason>\"" for role in missing)
 
 
 def role_stamp(value: str | None) -> datetime | None:
@@ -465,7 +388,7 @@ def task_text(task: str, title: str, request: str, requested_at: str,
               skills: list[str] = (), sources: list[str] = ()) -> str:
     grouped = f"fixes: {fixes}\n" if fixes else ""
     facts = "".join(f"{key}:{' ' if items else ''}{', '.join(items)}\n"
-                    for key, items in (("risks", risks), ("sources", sources), ("applied_skills", skills)))
+                    for key, items in (("risks", risks), ("sources", sources), ("required_methods", skills)))
     if kind == "knowledge":
         # A knowledge task needs no separate approval: the owner's request is the approval.
         return (f"---\ntype: {TASK_TYPE}\ntitle: {json.dumps(title)}\nstatus: active\nid: {task}\n"
@@ -481,7 +404,7 @@ def task_text(task: str, title: str, request: str, requested_at: str,
             f"requested_at: {requested_at}\nsize: {size}\nrigor: {rigor}\n{facts}{grouped}"
             f"tags:\n  - doc/{TASK_TYPE}\n  - status/active\naliases:\n  - {task}\n---\n"
             f"# {title}\n\n## Request\n\n{request.strip()}\n\n### Do\n\n- \n\n## Acceptance Criteria\n\n"
-            f"1. \n2. {LIVE_WIRING} \n3. {DOCS_DELTA} \n\n## Tests\n\n- 1: \n- 2: \n- 3: \n\n"
+            "1. \n\n## Tests\n\n- 1: \n\n"
             "<!-- sec: nav -->\n## Navigation\n")
 
 
@@ -559,14 +482,11 @@ def lint(path: Path, root: Path | None = None) -> list[str]:
         return errors
     criteria = [line for line in section(body, "Acceptance Criteria")
                 if re.match(r"^[0-9]+\.\s+\S", line)]
-    low, high = project_setting(root, "task_criteria_range", list(AC_RANGE))
-    if not low <= len(criteria) <= high:
-        errors.append(f"Acceptance Criteria needs {low} to {high} numbered"
-                      f" criteria, found {len(criteria)}")
+    if not criteria:
+        errors.append("Acceptance Criteria needs at least one numbered, verifiable criterion")
     numbers = {int(line.split(".", 1)[0]) for line in criteria}
-    for label in (LIVE_WIRING, DOCS_DELTA):
-        if not any(re.match(rf"^[0-9]+\.\s+{label}\s*\S", line) for line in criteria):
-            errors.append(f"Acceptance Criteria needs a filled '{label}' criterion")
+    if len(numbers) != len(criteria):
+        errors.append("Acceptance Criteria numbers must be unique")
     mapped = {int(number) for line in section(body, "Tests") if (match := TESTS_MAP_RE.match(line))
               for number in match.group(1).split(",")}
     if numbers - mapped:
@@ -586,7 +506,15 @@ def covered(props: dict) -> list[int] | None:
 
 
 def task_path(root: Path, task: str) -> Path:
-    matches = sorted((root / TASKS).glob(f"{task.lower()}-*.md"))
+    matches = []
+    identity = task.upper()
+    for path in sorted((root / TASKS).glob(f"{task.lower()}-*.md")):
+        props, _, error = parse_frontmatter(path.read_text(encoding="utf-8"))
+        if props.get("type") != TASK_TYPE and props.get("id") != identity:
+            continue
+        if error or props.get("type") != TASK_TYPE or props.get("id") != identity:
+            raise Refused(f"ambiguous task metadata for {task} in {path}")
+        matches.append(path)
     if len(matches) != 1:
         raise Refused(f"no single task for {task} under {TASKS}")
     return matches[0]
@@ -708,29 +636,75 @@ def first_pass(runs: list[dict], merged: str | None = None) -> dict:
             "red_runs": sum(item["conclusion"] in RED_RUNS for item in done) + sum(attempts) - len(done)}
 
 
+def integration_record(body: str) -> dict | None:
+    """Read the durable member map from an integration PR body."""
+    match = re.search(r"<!-- agent-marketplace:integration (\{[^\n]*\}) -->", body or "")
+    if not match:
+        return None
+    try:
+        value = json.loads(match.group(1))
+    except ValueError:
+        return None
+    if not isinstance(value, dict) or value.get("schema_version") != 1 \
+            or not re.fullmatch(r"[1-9][0-9]*", str(value.get("batch", ""))) \
+            or not isinstance(value.get("head"), str) \
+            or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["head"]) \
+            or not isinstance(value.get("base_head"), str) \
+            or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["base_head"]) \
+            or not isinstance(value.get("members"), list) or not value["members"]:
+        return None
+    tasks = set()
+    for member in value["members"]:
+        if not isinstance(member, dict) or not isinstance(member.get("task"), str) \
+                or not ID_RE.fullmatch(member["task"]) or member["task"] in tasks \
+                or not re.fullmatch(r"[1-9][0-9]*", str(member.get("pr", ""))) \
+                or not isinstance(member.get("head"), str) \
+                or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", member["head"]):
+            return None
+        tasks.add(member["task"])
+    return value
+
+
 def pull_requests(root: Path) -> dict[str, dict]:
-    """The newest task pull request of each task id."""
+    """The newest member PR and any observed merged integration for each task."""
     listed = json.loads(run("gh", "pr", "list", "--state", "all", "--limit", "1000", "--json",
-                            "number,headRefName", cwd=root) or "[]")
+                            "number,headRefName,headRefOid,state,mergedAt,body", cwd=root) or "[]")
     found: dict[str, dict] = {}
     for pr in listed:
         match = re.match(r"^task/(tk-[0-9]+)-", pr.get("headRefName") or "")
         if match:
             found.setdefault(match.group(1).upper(), pr)
+    for pr in sorted(listed, key=lambda item: item.get("mergedAt") or "", reverse=True):
+        if pr.get("state") != "MERGED" or not pr.get("mergedAt") \
+                or not re.fullmatch(r"train/[0-9]+", pr.get("headRefName") or ""):
+            continue
+        record = integration_record(pr.get("body") or "")
+        if not record or record["head"] != pr.get("headRefOid") \
+                or pr["headRefName"] != f"train/{record['batch']}":
+            continue
+        for member in record["members"]:
+            current = found.get(member["task"], {"number": member["pr"]})
+            if str(current["number"]) != str(member["pr"]) or current.get("integration"):
+                continue
+            found[member["task"]] = {**current, "member_head": member["head"],
+                                     "integration": {"number": pr["number"], "head": record["head"],
+                                                     "members": [item["task"] for item in record["members"]]}}
     return found
 
 
-def pr_times(root: Path, number, runs: bool = True, causes: dict | None = None) -> dict:
+def pr_times(root: Path, number, runs: bool = True, causes: dict | None = None,
+             integration: dict | None = None, member_head: str | None = None) -> dict:
     """Times, check minutes and quality of one pull request; ``runs`` adds the CI first pass and
     the red runs' causes, read from at most ``ci_logs.max_calls_per_task`` failed logs."""
     data = json.loads(run("gh", "pr", "view", str(number), "--json",
-                          "createdAt,mergedAt,statusCheckRollup,comments,headRefName,commits,body", cwd=root))
+                          "createdAt,mergedAt,statusCheckRollup,comments,headRefName,headRefOid,state,commits,body", cwd=root))
     checks = data.get("statusCheckRollup") or []
     comments = data.get("comments") or []
     # At pr_proof local_record no CI runs: the PR opens on a passed local proof, so it is green
     # when it opens and its CI step is the proof's own minutes.
     proof = None if checks else local_proof(data.get("body") or "")
-    result = {"pr": str(number), "pr_opened": data.get("createdAt"),
+    result = {"pr": str(number), "head": data.get("headRefOid"), "state": data.get("state"),
+              "pr_opened": data.get("createdAt"),
               "ci_green": data.get("createdAt") if proof else ci_green_at(checks), "review": review_at(comments),
               **({"proof_minutes": proof["minutes"]} if proof else {}),
               "merged": data.get("mergedAt"), "checks": check_minutes(checks), **findings(comments),
@@ -742,6 +716,11 @@ def pr_times(root: Path, number, runs: bool = True, causes: dict | None = None) 
         listed = ci_runs(root, data.get("headRefName") or "")
         result.update(first_pass(listed, data.get("mergedAt")),
                       red=red_events(root, listed, data.get("mergedAt"), (causes or rework_causes())["ci_logs"]))
+    if integration and integration.get("state") == "MERGED" and integration.get("merged"):
+        result.update(member_pr=str(number), member_head=member_head,
+                      integration_pr=integration["pr"], integration_head=integration["head"],
+                      merged=integration["merged"], ci_green=integration.get("ci_green"),
+                      review=integration.get("review"), timing_scope="request_to_shared_integration")
     return result
 
 
@@ -898,6 +877,8 @@ def task_row(task: dict, pr: dict | None) -> dict:
             "fixes": task.get("fixes", ""), "role_checks": role_minutes(task),
             "quality": {key: (pr or {}).get(key) for key in QUALITY_KEPT},
             "pr": (pr or {}).get("pr", ""), **times,
+            **{key: pr[key] for key in ("member_pr", "member_head", "integration_pr", "integration_head",
+                                        "timing_scope") if pr and key in pr},
             "total": total, "steps": steps, "missing": missing,
             "unaccounted": None if total is None else round(total - accounted, 1),
             "largest_step": max(known, key=known.get) if known else None,
@@ -979,7 +960,8 @@ def attach_sessions(rows: list[dict], tasks: list[dict], events: list[dict], dee
     claims = []
     for row, task in zip(rows, tasks):
         start = parse_time(row["requested_at"]).timestamp()
-        end = parse_time(row["merged"]).timestamp() if row.get("merged") else until
+        completed = row.get("ready_at") or row.get("merged")
+        end = parse_time(completed).timestamp() if completed else until
         claims.append([session_cost.belongs(event, task_branch(task), start, end, task.get("id", ""))
                        for event in events])
     ids = [task.get("id", "") for task in tasks]
@@ -1559,6 +1541,9 @@ def report(rows: list[dict], scope: str, previous: dict | None = None,
                      key=lambda row: -row["total"])[:3]
     return {"scope": scope, "tasks": len(rows), "merged": len(totals),
             "target_minutes": TARGET_MINUTES, "request_to_merge_minutes": summary(totals),
+            "request_to_ready_minutes": summary([row["request_to_ready_minutes"] for row in rows
+                                                  if row.get("request_to_ready_minutes") is not None]),
+            "readiness_unknown": [row["task_id"] for row in rows if row.get("ready_at") is None],
             "per_task": rows,
             "slowest": [{"task_id": row["task_id"], "total": row["total"],
                          "largest_step": row["largest_step"],
@@ -1577,10 +1562,17 @@ def report(rows: list[dict], scope: str, previous: dict | None = None,
 
 def render(data: dict) -> str:
     total = data["request_to_merge_minutes"]
+    ready = data.get("request_to_ready_minutes", summary([]))
     lines = [f"Scope: {data['scope']}",
              f"Tasks: {data['tasks']} ({data['merged']} merged), target {data['target_minutes']} min",
              f"Request to merge: average {total['average']}, median {total['median']},"
-             f" max {total['max']} min", *headline(data), "",
+             f" max {total['max']} min",
+             f"Request to recorded readiness {ready['count']} measured,"
+             f" {len(data.get('readiness_unknown', data['per_task']))} unknown,"
+             f" average {ready['average']}, median {ready['median']}, max {ready['max']} min",
+             "Readiness uses the first reported environment and worker evidence at that time.",
+             "Task clocks start at registration. Earlier intake and queue time is unobserved unless supplied separately.",
+             *headline(data), "",
              "Per task (min): define / write / ci / review / merge_wait / unaccounted = total"
              " (ci and review overlap; the larger counts)"]
     for row in data["per_task"]:
@@ -1591,6 +1583,19 @@ def render(data: dict) -> str:
                      f" {row['pr'] or '-'}: {steps} / {dash(row.get('unaccounted'))}"
                      f" = {row['total'] if row['total'] is not None else 'open'}"
                      + (f"; missing: {missing}" if missing else ""))
+        lines.append(f"  Ready {row.get('ready_at') or 'unknown'},"
+                     f" environment {row.get('ready_environment') or 'unknown'},"
+                     f" request to ready {row.get('request_to_ready_minutes') if row.get('ready_at') else 'unknown'} min")
+        if row.get("integration_pr"):
+            lines.append(f"  Delivered by integration PR {row['integration_pr']} at {row['integration_head']}."
+                         f" Member PR {row['member_pr']} contributed {row['member_head']}.")
+    if data.get("shared_integrations"):
+        lines += ["", "Shared integration evidence, recorded once per batch.",
+                  "Member task totals measure delivery latency. Shared check and proof effort appears here."]
+        for integration in data["shared_integrations"]:
+            lines.append(f"- PR {integration['pr']} delivered {', '.join(integration['members'])}"
+                         f" at {integration['merged']}, local proof {dash(integration.get('proof_minutes'))} min,"
+                         f" checks {integration['checks']}.")
     if data["per_task"]:
         lines += ["", "Quality per task: findings critical / non-critical / filed; CI first pass (red runs);"
                       " fixed by; story coverage"]
@@ -1799,6 +1804,8 @@ def export(data: dict, fmt: str) -> str:
     buffer = io.StringIO()
     fields = ["task_id", "title", "size", "rigor", "pr", "requested_at",
               "approved_at", "pr_opened", "ci_green", "review", "merged", "total", *STEPS, *WAITS,
+              "member_pr", "member_head", "integration_pr", "integration_head", "timing_scope",
+              "ready_at", "request_to_ready_minutes", "ready_environment", "ready_revision", "ready_evidence_source",
               "agents", "output_tokens", "usd", "input_tokens", "cache_write_tokens", "cache_read_tokens",
               "spawns", "startup_context", "main_usd", *QUALITY_KEPT, "fixes", "fixed_by", "story",
               "story_coverage"]
@@ -1820,10 +1827,76 @@ def export(data: dict, fmt: str) -> str:
 
 
 def history(root: Path) -> list[dict]:
-    path = root / HISTORY
-    if not path.is_file():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    """Read legacy checkout history before the shared main-worktree history."""
+    anchor = project_paths.runtime_anchor(root.resolve())
+    paths = list(dict.fromkeys((root.resolve() / HISTORY, anchor / HISTORY)))
+    return [json.loads(line) for path in paths if path.is_file()
+            for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def append_history(root: Path, records: list[dict]) -> list[dict]:
+    """Append atomically under the shared lock, preserving an event's first receipt."""
+    anchor = project_paths.runtime_anchor(root.resolve())
+    path = anchor / HISTORY
+    atomic_file.real_directory(anchor, HISTORY.parent)
+    project_paths.safe_runtime_path(anchor, path, file_only=True)
+    lock = project_paths.safe_runtime_path(anchor, path.with_suffix(".lock"), file_only=True)
+    with lock.open("a+", newline="\n") as handle:
+        if not file_lock.acquire(handle.fileno(), timeout=3):
+            raise Refused("retrospective history is being updated by another worker")
+        existing = path.read_bytes() if path.exists() else b""
+        previous = [json.loads(line) for line in existing.decode("utf-8").splitlines() if line.strip()]
+        by_id = {item["event_id"]: item for item in previous if item.get("event_id")}
+        added, receipts = [], []
+        for record in records:
+            identity = record.get("event_id")
+            if identity and identity in by_id:
+                receipts.append(by_id[identity])
+                continue
+            added.append(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+            receipts.append(record)
+            if identity:
+                by_id[identity] = record
+        if added:
+            separator = b"\n" if existing and not existing.endswith(b"\n") else b""
+            atomic_file.replace_bytes(path, existing + separator + "".join(added).encode("utf-8"))
+        return receipts
+
+
+def attach_readiness(root: Path, rows: list[dict]) -> None:
+    """Attach the first valid recorded milestone, without asserting current health."""
+    events = [item for item in history(root) if item.get("type") == "task_ready"]
+    for row in rows:
+        row.update(ready_at=None, request_to_ready_minutes=None, ready_environment=None,
+                   ready_revision=None, ready_evidence_source=None)
+        valid = []
+        for event in events:
+            if event.get("task_id") != row["task_id"] or str(event.get("pr")) != str(row.get("pr")):
+                continue
+            try:
+                ready = parse_time(event["ready_at"])
+                merged = parse_time(event["merged_at"])
+                requested = parse_time(row["requested_at"])
+                same_merge = merged == parse_time(row["merged"])
+                safe_path = Path(event["evidence"])
+                shape = (event["evidence_source"] == "worker_report" and event["environment"].strip()
+                         and not safe_path.is_absolute() and ".." not in safe_path.parts
+                         and re.fullmatch(r"[0-9a-f]{64}", event["evidence_sha256"])
+                         and all(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", event[key])
+                                 for key in ("revision", "merge_commit")))
+                if (shape and same_merge and ready.utcoffset() == timezone.utc.utcoffset(ready)
+                        and requested.tzinfo is not None and merged.tzinfo is not None
+                        and requested <= merged <= ready):
+                    valid.append(event)
+            except (KeyError, ValueError, TypeError, AttributeError):
+                continue
+        if valid:
+            event = min(valid, key=lambda item: parse_time(item["ready_at"]))
+            row.update(ready_at=event["ready_at"],
+                       request_to_ready_minutes=round((parse_time(event["ready_at"])
+                                                       - parse_time(row["requested_at"])).total_seconds() / 60, 1),
+                       ready_environment=event["environment"], ready_revision=event["revision"],
+                       ready_evidence_source=event["evidence_source"])
 
 
 def previous_run(root: Path, scope: str) -> dict | None:
@@ -1855,9 +1928,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
     kept = {} if rescan else kept_costs(root)
     graded = {} if rescan else kept_quality(root)
     reworked = {} if rescan else kept_rework(root)
-    path = root / HISTORY
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
+    with io.StringIO() as handle:
         handle.write(json.dumps({"at": now(), "scope": data["scope"], "merged": data["merged"],
                                  "average": total["average"], "median": total["median"],
                                  "max": total["max"], "usd_per_task": spend.get("usd_per_task"),
@@ -1879,6 +1950,7 @@ def remember(root: Path, data: dict, rescan: bool = False) -> None:
                 handle.write(json.dumps({"type": "task_rework", "at": now(), "task_id": row["task_id"],
                                          **{key: row.get(key) for key in ("kind", "size", "requested_at", "merged", "total")},
                                          "events": row["rework_auto"]}) + "\n")
+        append_history(root, [json.loads(line) for line in handle.getvalue().splitlines()])
 
 
 def task_records(root: Path, snapshot: Path) -> list[Path]:
@@ -1913,9 +1985,26 @@ def gather(root: Path, args) -> dict:
     graded = {} if getattr(args, "rescan", False) else kept_quality(root)
     reworked = kept_rework(root)
     fresh_rework = {} if getattr(args, "rescan", False) else reworked
-    rows = [task_row(task, pr_times(root, prs[task["id"]]["number"], causes=causes,
-                                    runs=task["id"] not in graded or task["id"] not in fresh_rework)
-                     if task["id"] in prs else None) for task in chosen]
+    shared_integrations = {}
+    integrations = {str(integration["number"]): integration for task in chosen
+                    if (integration := prs.get(task["id"], {}).get("integration"))}
+    for number, integration in integrations.items():
+        timing = pr_times(root, number, causes=causes)
+        if timing.get("state") == "MERGED" and timing.get("merged") \
+                and timing.get("head") == integration["head"]:
+            shared_integrations[number] = {**timing, "members": integration["members"]}
+    rows = []
+    for task in chosen:
+        pr = prs.get(task["id"])
+        timing = None
+        if pr:
+            integration = shared_integrations.get(str(pr.get("integration", {}).get("number")))
+            linked = {"integration": integration, "member_head": pr["member_head"]} if integration else {}
+            timing = pr_times(root, pr["number"], causes=causes,
+                              runs=task["id"] not in graded or task["id"] not in fresh_rework,
+                              **linked)
+        rows.append(task_row(task, timing))
+    attach_readiness(root, rows)
     for row in rows:
         if row["total"] is not None and row["task_id"] in graded:
             row["quality"].update(graded[row["task_id"]]["quality"])
@@ -1939,7 +2028,7 @@ def gather(root: Path, args) -> dict:
             row.update(cost=kept[row["task_id"]]["cost"], waits=kept[row["task_id"]]["waits"])
     scope = f"since {args.since}" if args.since else f"latest {args.recent}"
     return {**report(rows, scope, previous_run(root, scope), unattributed, extra, causes),
-            "cost_method": cost_method(root)}
+            "cost_method": cost_method(root), "shared_integrations": list(shared_integrations.values())}
 
 
 def cost_method(root: Path) -> str | None:
@@ -2090,8 +2179,45 @@ def cmd_board(args, root: Path):
 
 # --- commands --------------------------------------------------------------
 
+def create_task_worktree(root: Path, tree: Path, branch: str, base: str) -> None:
+    """Own a new ref before adding its worktree. Preserve unknown partial results."""
+    ref = f"refs/heads/{branch}"
+    base_head = run("git", "rev-parse", base, cwd=root)
+    try:
+        run("git", "update-ref", ref, base_head, "0" * len(base_head), cwd=root)
+    except Refused as error:
+        raise Refused(f"{error}. Branch preserved. Reconcile reservation {branch} and destination {tree}") from error
+    try:
+        run("git", "worktree", "add", str(tree), branch, cwd=root)
+    except Refused as error:
+        recovery = "branch preserved"
+        try:
+            refs = run("git", "for-each-ref", "--format=%(refname) %(objectname)", ref, cwd=root).splitlines()
+            worktrees = run("git", "worktree", "list", "--porcelain", cwd=root).splitlines()
+            if f"{ref} {base_head}" in refs and f"branch {ref}" not in worktrees:
+                run("git", "update-ref", "-d", ref, base_head, cwd=root)
+                recovery = "new unchanged unattached branch removed"
+        except Refused as cleanup_error:
+            recovery = f"cleanup could not be verified. {cleanup_error}"
+        raise Refused(f"{error}. {recovery}. Reconcile {branch} and destination {tree} before retrying"
+                      " (destination contents were preserved)") from error
+
+
 def cmd_start(args, root: Path) -> dict:
-    requested_at = args.at or now()
+    common = Path(run("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=root))
+    lock_path = common / "agentrof" / "runtime" / "task-start.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", newline="\n") as handle:
+        if not file_lock.acquire(handle.fileno(), timeout=30):
+            raise Refused("another task is reserving its worktree; retry after its reservation finishes")
+        return _start_task(args, root)
+
+
+def _start_task(args, root: Path) -> dict:
+    issue = getattr(args, "issue", None)
+    if issue is not None and issue < 1:
+        raise Refused("--issue must be a positive project issue number")
+    requested_at = now()
     parse_time(requested_at)
     request = Path(args.request_file).read_text(encoding="utf-8") if args.request_file else args.request
     request = request or args.title
@@ -2116,17 +2242,17 @@ def cmd_start(args, root: Path) -> dict:
         raise Refused("--covers needs --source-story")
     kind = "knowledge" if args.knowledge else "build"
     # A documents-only task names risky words without touching them: no keyword rigor or risk flags.
-    rigor, reasons = proposed_rigor(f"{args.title}\n{request}") if kind == "build" else ("normal", [])
+    _, reasons = proposed_rigor(f"{args.title}\n{request}") if kind == "build" else ("normal", [])
     text, files = f"{args.title}\n{request}", named_files(request)
-    roles = route(role_rules(root), text, kind, args.size, files,
-                  routing_policy(root).get("pre_check_triggers", {}).get(args.size))
     triggers = task_triggers(root)
     flags = {rule["flag"] for rule in triggers["risk_flags"]}
     asked = set(getattr(args, "risk", None) or [])
     if asked - flags:
         raise Refused(f"--risk must be one of {', '.join(sorted(flags))}")
-    risks = sorted(asked | (set(triggered(triggers["risk_flags"], "flag", text, files)) if kind == "build" else set()))
-    skills = triggered(triggers["method_skills"], "skill", text, files)
+    risks = sorted(asked)
+    suggested_risks = triggered(triggers["risk_flags"], "flag", text, files) if kind == "build" else []
+    rigor = "high" if risks else "normal"
+    skills = required_methods(root, {"risks": risks}, files, text, triggers=triggers)
     run("git", "fetch", "--prune", "origin", cwd=root)
     task = next_id(taken_names(root, args.base))
     slug = slugify(args.title)
@@ -2136,7 +2262,7 @@ def cmd_start(args, root: Path) -> dict:
     else:
         # The caller's checkout and its uncommitted work stay as they are.
         tree = Path(getattr(args, "worktree_dir", None) or root.parent / f"{root.name}-{task.lower()}")
-        run("git", "worktree", "add", "-b", branch, str(tree), f"origin/{args.base}", cwd=root)
+        create_task_worktree(root, tree, branch, f"origin/{args.base}")
         root = tree
     path = root / TASKS / f"{task.lower()}-{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -2147,20 +2273,40 @@ def cmd_start(args, root: Path) -> dict:
                               rigor, epic, args.source_story or "", covers,
                               kind, args.size, getattr(args, "fixes", None) or "",
                               risks, skills, sources)).encode("utf-8"))
-    if roles:
-        set_field(path, "roles", roles_value(roles))
-    run("git", "push", "-u", "origin", "HEAD", cwd=root)
-    return {"task_id": task, "branch": branch, "worktree": str(root), "task": str(path.relative_to(root)),
-            "proposed_rigor": rigor, "rigor_reasons": reasons, "roles": roles, "spawn": spawn_roles(roles, root),
-            "risks": risks, "applied_skills": skills, "sources": sources}
+    if issue is not None:
+        set_field(path, "source_issue", str(issue))
+    head = run("git", "rev-parse", "HEAD", cwd=root)
+    push_reconciliation = None
+    try:
+        run("git", "push", "-u", "origin", "HEAD", cwd=root)
+    except Refused as error:
+        ref = f"refs/heads/{branch}"
+        try:
+            remote = run("git", "ls-remote", "--heads", "origin", ref, cwd=root)
+        except Refused:
+            remote = ""
+        if remote != f"{head}\t{ref}":
+            raise Refused(f"{error}. Remote reservation is unverified. Resume existing {task}"
+                          f" on {branch} in {root}. Task file {path} was preserved") from error
+        push_reconciliation = {"status": "remote_confirmed", "remote_head": head,
+                               "upstream_tracking": "unverified", "error": str(error)}
+    result = {"task_id": task, "branch": branch, "worktree": str(root), "task": str(path.relative_to(root)),
+              "proposed_rigor": rigor, "rigor_reasons": reasons, "suggested_risks": suggested_risks,
+              "risks": risks, "required_methods": skills, "sources": sources}
+    if push_reconciliation is not None:
+        result["push_reconciliation"] = push_reconciliation
+    import companion_routing
+    try:
+        result["companion_routing"] = companion_routing.apply(root)
+    except (OSError, ValueError) as error:
+        raise Refused(f"{error}. Resume existing {task} in {root} after reconciling its local catalog settings") from error
+    return result
 
 
 def cmd_lint(args, root: Path) -> dict:
     path = Path(args.file) if args.file else task_path(root, args.task)
     errors = lint(path, root)
-    _, missing = ([], []) if errors else routed_roles(root, path)
-    return {"ok": not errors, "task": str(path), "errors": errors,
-            "warnings": [missing_message(task_props(path).get("id", args.task), missing)] if missing else []}
+    return {"ok": not errors, "task": str(path), "errors": errors}
 
 
 def cmd_approve(args, root: Path) -> dict:
@@ -2169,18 +2315,214 @@ def cmd_approve(args, root: Path) -> dict:
     if errors:
         raise Refused("task lint failed: " + "; ".join(errors))
     if not task_props(path).get("approved_at"):
-        set_field(path, "approved_at", args.at or now())
+        set_field(path, "approved_at", now())
     # Sources added while the task was filled are hashed now, still at define time.
     sources = field_items(task_props(path), "sources")
     if sources != hashed_sources(root, sources):
         set_field(path, "sources", ", ".join(hashed_sources(root, sources)))
-    roles, missing = routed_roles(root, path)
-    if roles:
-        set_field(path, "roles", roles_value(roles))
     props = task_props(path)
     return {"ok": True, "task_id": args.task, "approved_at": props["approved_at"],
-            "rigor": props.get("rigor", "normal"), "roles": roles, "spawn": spawn_roles(roles, root),
-            "pending_roles": missing}
+            "rigor": props.get("rigor", "normal"),
+            "required_methods": field_items(props, "required_methods")}
+
+
+def methods_path(root: Path, task: str) -> Path:
+    if not ID_RE.fullmatch(task):
+        raise Refused("--task must be TK-<number>")
+    return root / REVIEWS / f"{task}.methods.json"
+
+
+def read_methods(root: Path, task: str) -> dict:
+    path = methods_path(root, task)
+    return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+
+
+def missing_methods(root: Path, task: str, methods: list[str]) -> list[str]:
+    records = read_methods(root, task)
+    missing = []
+    for name in sorted(set(methods)):
+        record = records.get(name, {})
+        skill = SKILLS / name / "SKILL.md"
+        evidence = record.get("evidence")
+        path = (root / evidence).resolve() if evidence else None
+        valid = (skill.is_file() and path is not None and path.is_relative_to(root.resolve())
+                 and path.is_file() and record.get("skill_sha256") == hashlib.sha256(skill.read_bytes()).hexdigest()
+                 and record.get("evidence_sha256") == hashlib.sha256(path.read_bytes()).hexdigest())
+        if not valid:
+            missing.append(name)
+    return missing
+
+
+def cmd_method(args, root: Path) -> dict:
+    task_path(root, args.task)
+    if not re.fullmatch(r"[a-z]+(?:-[a-z]+)*", args.name):
+        raise Refused("method name must be a packaged skill slug")
+    source = SKILLS / args.name / "SKILL.md"
+    if not source.is_file():
+        raise Refused("the package does not contain this method")
+    return {"task_id": args.task, "method": args.name,
+            **record_skill(root, args.task, args.name, source, getattr(args, "evidence", None), "method_tool")}
+
+
+def cmd_companion(args, root: Path) -> dict:
+    import review_execution
+    task_path(root, args.task)
+    catalog = json.loads((SKILLS / "setup/data/companions.json").read_text(encoding="utf-8"))
+    companion = next((item for item in catalog["companions"] if item["id"] == args.name), None)
+    policy = json.loads(TARGETS_FILE.with_name("companion-policy.json").read_text(encoding="utf-8"))
+    if companion is None or args.name not in {rule["id"] for rule in policy["companions"]}:
+        raise Refused("choose an active companion from the package catalog")
+    unavailable = getattr(args, "unavailable", None)
+    source = None
+    if unavailable is not None:
+        unavailable = unavailable.strip()
+        if not unavailable or not getattr(args, "evidence", None) or getattr(args, "source", None):
+            raise Refused("unavailable companions require a reason and core fallback evidence, without --source")
+    else:
+        if not getattr(args, "source", None) and args.name == "graphify":
+            import companion_routing
+            try:
+                source = companion_routing.source(getattr(args, "host", ""))
+            except ValueError as error:
+                raise Refused(str(error)) from error
+        else:
+            source = Path(getattr(args, "source", None) or "").expanduser()
+        if not source.is_absolute():
+            source = root / source
+        if source.name != "SKILL.md" or not source.is_file():
+            raise Refused("companion source must be an existing local SKILL.md file")
+    host = getattr(args, "host", None)
+    if host not in companion.get("hosts", {}):
+        raise Refused("companion evidence requires a host registered for this companion")
+    query = getattr(args, "query", None)
+    if query is not None and (args.name != "graphify" or unavailable is not None or not query.strip()):
+        raise Refused("query requires an available Graphify source and a nonempty question")
+    seed, context = getattr(args, "seed", None), getattr(args, "context", None)
+    if (seed is not None or context is not None) and query is None:
+        raise Refused("--seed and --context require a Graphify --query")
+    excerpt = review_execution.source_excerpt(source, args.name, sys.modules[__name__]) if source else None
+    result = record_skill(root, args.task, f"companion/{args.name}", source,
+                          getattr(args, "evidence", None), "companion_tool", unavailable=unavailable, host=host,
+                          source_scope=excerpt)
+    if "content" in result and excerpt is not None:
+        result.update(content=excerpt["content"], source_scope={key: value for key, value in excerpt.items() if key != "content"})
+    if query is not None:
+        action = review_execution.run_graph(root, args.task, query, getattr(args, "graph", None),
+                                            sys.modules[__name__], seed=seed, context=context)
+        result.update(action=action, ok=action["ok"])
+    return {"task_id": args.task, "companion": args.name, **result}
+
+
+def cmd_review(args, root: Path) -> dict:
+    import review_execution
+    return review_execution.execute(args, root, sys.modules[__name__])
+
+
+def review_problems(root: Path, members: list[dict], base: str) -> list[str]:
+    import review_execution
+    return review_execution.problems(root, members, base, sys.modules[__name__])
+
+
+def record_skill(root: Path, task: str, key: str, source: Path | None,
+                 evidence: str | None, load_source: str, *, unavailable: str | None = None,
+                 host: str | None = None, source_scope: dict | None = None) -> dict:
+    text, digest, source_skill = "", None, None
+    if source is not None:
+        source = source.resolve()
+        content = source.read_bytes()
+        text = content.decode("utf-8")
+        digest = hashlib.sha256(content).hexdigest()
+        if source_scope is not None and source_scope["sha256"] != digest:
+            raise Refused("companion source changed while its delivery scope was prepared")
+        if load_source == "companion_tool":
+            source_skill = parse_frontmatter(text)[0].get("name")
+            companion = key.removeprefix("companion/")
+            policy = json.loads(TARGETS_FILE.with_name("companion-policy.json").read_text(encoding="utf-8"))
+            allowed = next(rule["allowed_skills"] for rule in policy["companions"] if rule["id"] == companion)
+            if source_skill not in allowed:
+                raise Refused("companion source skill name does not match the selected companion")
+    evidence_head = run("git", "rev-parse", "HEAD", cwd=root) if host and evidence else None
+    if evidence_head is not None and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", evidence_head):
+        raise Refused("companion evidence requires a committed candidate")
+    path = methods_path(root, task)
+    atomic_file.real_directory(root, path.parent.relative_to(root))
+    if path.is_symlink() or path.with_suffix(".lock").is_symlink():
+        raise Refused("method evidence and lock must not be symbolic links")
+    with path.with_suffix(".lock").open("a+", newline="\n") as handle:
+        if not file_lock.acquire(handle.fileno(), timeout=3):
+            raise Refused("method evidence is being updated by another worker")
+        records = read_methods(root, task)
+        record = records.get(key, {}) if unavailable is None else {
+            "unavailable_reason": unavailable, "availability_source": "worker_report"}
+        if evidence:
+            if unavailable is None and (record.get("skill_sha256") != digest
+                    or record.get("source_path", str(source)) != str(source)
+                    or (host and record.get("host_context", {}).get("host") != host)):
+                raise Refused("load this version of the method before recording evidence")
+            target = (root / evidence).resolve()
+            if not target.is_relative_to(root.resolve()) or not target.is_file():
+                raise Refused("method evidence must be an existing file inside the project")
+            record.update(evidence=target.relative_to(root.resolve()).as_posix(),
+                          evidence_sha256=hashlib.sha256(target.read_bytes()).hexdigest(),
+                          recorded_at=now(), completion_source="worker_report")
+        else:
+            record = {"skill_sha256": digest, "loaded_at": now(), "load_source": load_source,
+                      "source_path": str(source)}
+            if source_scope is not None:
+                record["content_sha256"] = hashlib.sha256(source_scope["content"].encode("utf-8")).hexdigest()
+                record["source_scope"] = {key: value for key, value in source_scope.items() if key != "content"}
+        if host:
+            record["host_context"] = {"host": host, "source": "worker_report", "enabled": None}
+            if source_skill:
+                record["source_skill"] = source_skill
+            if evidence_head:
+                record["evidence_head"] = evidence_head
+        records[key] = record
+        atomic_file.replace_text(path, json.dumps(records, indent=2) + "\n")
+    return {**record, **({} if evidence else {"content": text})}
+
+
+def companion_evidence(root: Path, task: str, methods: list[str], props: dict | None = None,
+                       files: set[str] | None = None, *, head: str | None = None) -> list[dict]:
+    """Required capability evidence, with availability claims kept separate from source loads."""
+    props = task_props(task_path(root, task)) if props is None else props
+    policy = json.loads(TARGETS_FILE.with_name("companion-policy.json").read_text(encoding="utf-8"))
+    records, rows = read_methods(root, task), []
+    kind = "build" if any(not name.endswith(".md") for name in files or ()) else props.get("task_kind", "build")
+    for rule in policy["companions"]:
+        if not (kind in rule.get("kinds", [])
+                or set(methods) & set(rule.get("methods", []))
+                or props.get("rigor", "normal") in rule.get("rigors", [])
+                or (rule.get("on_any_risk") and field_items(props, "risks"))):
+            continue
+        record = records.get(f"companion/{rule['id']}", {})
+        evidence = (root / record.get("evidence", "")).resolve()
+        source = Path(record.get("source_path", ""))
+        identity = record.get("source_skill", "")
+        completed = (record.get("completion_source") == "worker_report"
+                     and evidence.is_relative_to(root.resolve()) and evidence.is_file()
+                     and record.get("evidence_sha256") == hashlib.sha256(evidence.read_bytes()).hexdigest())
+        if completed:
+            head = head or run("git", "rev-parse", "HEAD", cwd=root)
+            recorded_head = record.get("evidence_head")
+            completed = (isinstance(recorded_head, str) and bool(re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", recorded_head))
+                         and recorded_head == head)
+        loaded = (record.get("load_source") == "companion_tool" and bool(record.get("loaded_at"))
+                  and identity in rule["allowed_skills"]
+                  and source.is_file() and record.get("skill_sha256") == hashlib.sha256(source.read_bytes()).hexdigest())
+        unavailable = (bool(str(record.get("unavailable_reason", "")).strip())
+                       and record.get("availability_source") == "worker_report")
+        context = record.get("host_context", {})
+        valid_host = (isinstance(context.get("host"), str)
+                      and re.fullmatch(r"[a-z][a-z0-9-]*", context["host"])
+                      and context.get("source") == "worker_report")
+        ok = bool(completed and valid_host and (loaded or unavailable))
+        state = "unavailable" if unavailable else "reported_applied" if ok else "loaded" if loaded else "missing_or_changed"
+        rows.append({"companion": rule["id"], "ok": ok, "state": state,
+                     "host_context": context, "reason": record.get("unavailable_reason"),
+                     "evidence": record.get("evidence"), "evidence_head": record.get("evidence_head"),
+                     "completion_source": record.get("completion_source")})
+    return rows
 
 
 def cmd_review_inputs(args, root: Path) -> dict:
@@ -2190,34 +2532,27 @@ def cmd_review_inputs(args, root: Path) -> dict:
     props = task_props(path)
     files = changed_files(root, args.base)
     triggers = task_triggers(root)
-    skills = triggered(triggers["method_skills"], "skill", f"{props.get('title', '')}\n{task_body(path)}",
-                       named_files(task_body(path)) | files)
+    body = task_body(path)
+    skills = required_methods(root, props, named_files(body) | files, body, triggers=triggers)
     risks = field_items(props, "risks")
+    companions = companion_evidence(root, args.task, skills, props, files)
     reviewers = triggered(triggers["reviewers"], "role", "", files) + [
         rule["role"] for rule in triggers["reviewers"]
         if props.get("rigor", "normal") in rule.get("rigors", []) or (risks and rule.get("on_any_risk"))]
     diff = REVIEWS / f"{args.task.lower()}.diff"
     (root / diff).parent.mkdir(parents=True, exist_ok=True)
-    (root / diff).write_bytes(run("git", "diff", f"origin/{args.base}...HEAD", cwd=root).encode("utf-8"))
+    (root / diff).write_bytes(run("git", "diff", f"origin/{args.base}...HEAD", cwd=root,
+                                 strip_output=False).encode("utf-8"))
     return {"ok": True, "task_id": args.task, "reviewers": list(dict.fromkeys(reviewers)), "risks": risks,
             "diff_file": diff.as_posix(),
             "triggered_skills": skills,
-            "missing_skills": sorted(set(skills) - set(applied_skills(props))),
+            "missing_skills": missing_methods(root, args.task, skills),
+            "method_evidence": read_methods(root, args.task),
+            "companion_evidence": companions,
+            "missing_companions": [row["companion"] for row in companions if not row["ok"]],
             "changed_sources": changed_sources(root, field_items(props, "sources"))}
 
 
-def cmd_role_check(args, root: Path) -> dict:
-    """Record one role's verdict in the task's Role Checks section, with its time."""
-    path = task_path(root, args.task)
-    at = args.at or now()
-    parse_time(at)
-    line = f"- {at} {args.role} {args.verdict}: {' '.join((args.note or '-').split())}"
-    if not CHECK_RE.match(line):
-        raise Refused("--role must be a plugin agent id such as software-architect")
-    add_line(path, "Role Checks", line)
-    _, missing = routed_roles(root, path)
-    return {"ok": True, "task_id": args.task, "role": args.role, "verdict": args.verdict, "at": at,
-            "pending_roles": missing}
 
 
 def add_line(path: Path, title: str, line: str) -> None:
@@ -2310,9 +2645,9 @@ def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool 
 
 
 def head_state(root: Path) -> tuple[str, bool]:
-    """HEAD and whether no tracked file differs from it."""
+    """HEAD and whether the checkout has no tracked or untracked changes."""
     return (run("git", "rev-parse", "HEAD", cwd=root),
-            not run("git", "status", "--porcelain", "--untracked-files=no", cwd=root))
+            not run("git", "status", "--porcelain", cwd=root))
 
 
 def proof_path(root: Path, task: str) -> Path:
@@ -2321,13 +2656,172 @@ def proof_path(root: Path, task: str) -> Path:
     return root / PROOFS / f"{task}.json"
 
 
-def task_declares_risk(root: Path, task: str) -> bool:
-    """Whether the task record names a risk. A record that cannot be read or parsed counts as risky (fail closed)."""
+
+def stop_proof(process: subprocess.Popen) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    else:
+        stopped = subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                                 capture_output=True, timeout=10, check=False)
+        if stopped.returncode and process.poll() is None:
+            raise Refused("proof process-tree cleanup is unconfirmed; inspect it before retry")
+    process.wait(timeout=10)
+
+
+@contextlib.contextmanager
+def proof_admission(root: Path):
+    """Hold the shared proof resource through identity checks and execution."""
+    common = Path(run("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=root))
+    lock_path = common / "agentrof" / "runtime" / "proof.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", newline="\n") as handle:
+        queued = datetime.now(timezone.utc)
+        if not file_lock.acquire(handle.fileno(), timeout=1):
+            raise Refused("shared proof capacity is busy; keep independent work moving and retry later")
+        blocked = lock_path.with_suffix(".blocked.json")
+        if blocked.exists():
+            raise Refused(f"proof cleanup needs reconciliation; inspect {blocked} before clearing it")
+        yield blocked, (datetime.now(timezone.utc) - queued).total_seconds()
+
+
+def run_proof_commands(root: Path, commands: list[str], *, admission=None) -> list[dict]:
+    """Serialize shared-environment proof and bound each owned process tree."""
+    if admission is None:
+        with proof_admission(root) as admitted:
+            return run_proof_commands(root, commands, admission=admitted)
+    blocked, wait_seconds = admission
+    timeout = json.loads(TARGETS_FILE.read_text(encoding="utf-8"))["proof_timeout_seconds"]
+    results = []
+    deadline = time.monotonic() + timeout
+    for command in commands:
+        clock = datetime.now(timezone.utc)
+        timed_out = False
+        leftover_children = False
+        with tempfile.TemporaryFile() as output_file:
+            process = subprocess.Popen(proof_runner(root, command), shell=True, cwd=root,
+                                       stdout=output_file, stderr=subprocess.STDOUT,
+                                       start_new_session=os.name == "posix")
+            try:
+                process.wait(timeout=max(0.001, deadline - time.monotonic()))
+                if os.name == "posix":
+                    try:
+                        os.killpg(process.pid, 0)
+                        leftover_children = True
+                    except ProcessLookupError:
+                        pass
+                    if leftover_children:
+                        stop_proof(process)
+            except BaseException as error:
+                try:
+                    stop_proof(process)
+                except BaseException:
+                    atomic_file.replace_text(blocked, json.dumps({"pid": process.pid, "at": now(), "reason": "cleanup_unconfirmed"}) + "\n")
+                    raise
+                if isinstance(error, subprocess.TimeoutExpired):
+                    timed_out = True
+                else:
+                    raise
+            output_file.seek(0, os.SEEK_END)
+            output_file.seek(max(0, output_file.tell() - 200000))
+            output = output_file.read().decode("utf-8", errors="replace")
+        if leftover_children:
+            output += "\nProof left background processes running. Their process group was stopped."
+        code = process.returncode
+        if timed_out:
+            code = 124
+        elif leftover_children:
+            code = 125
+        results.append({"command": command, "exit_code": code,
+                        "started_at": clock.isoformat(), "finished_at": now(),
+                        "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 3),
+                        "queue_seconds": round(wait_seconds, 3), "timed_out": timed_out,
+                        "leftover_children": leftover_children,
+                        "tail": "" if code == 0 else proof_tail(output),
+                        "failed_tests": [] if code == 0 else failed_test_ids(output),
+                        "suites": [] if code == 0 else suite_results(output)})
+        wait_seconds = 0
+        if code:
+            break
+    return results
+
+
+def proof_inputs(root: Path, commands: list[str], base: str, scope: dict):
     try:
-        props, _, error = parse_frontmatter(task_path(root, task).read_text(encoding="utf-8"))
-    except (Refused, OSError, UnicodeDecodeError):
-        return True
-    return bool(error or field_items(props, "risks"))
+        config = json.loads((root / "workspace/config.json").read_text(encoding="utf-8"))
+        if not isinstance(config, dict) or not isinstance(config.get("proof_reuse"), dict):
+            return None
+        base_heads = run("git", "for-each-ref", "--format=%(refname) %(objectname)",
+                         f"refs/remotes/origin/{base}", f"refs/heads/{base}", cwd=root)
+    except (OSError, ValueError, Refused):
+        return None
+    runtime = [Path(__file__), Path(proof_cache.__file__), Path(atomic_file.__file__),
+               Path(file_lock.__file__), Path(__file__).with_name("proof_train.py"), TARGETS_FILE]
+    return proof_cache.snapshot(root, commands, config.get("proof_runner", ""),
+                                {"base": base, "base_refs": base_heads, **scope}, config, runtime)
+
+
+def cached_proof_problems(root: Path, record: dict, commands: list[str], *, base: str,
+                          scope: dict, path: Path | None = None) -> list[str]:
+    with proof_admission(root):
+        if path is not None:
+            try:
+                if json.loads(path.read_text(encoding="utf-8")) != record:
+                    return ["the proof record changed during validation; retry the gate"]
+            except (OSError, ValueError):
+                return ["the proof record is missing or invalid; run prove again"]
+        if record.get("proof_state") in ("running", "failed") or record.get("ok") is False:
+            return ["the latest proof attempt did not complete successfully; run prove again"]
+        if record.get("proof_inputs") is None:
+            return []
+        current = proof_inputs(root, commands, base, scope)
+        policy = project_setting(root, "proof_reuse", {})
+        age = policy.get("max_age_seconds", 86400) if isinstance(policy, dict) else 0
+        if not proof_cache.reusable(record, current, commands, age):
+            return ["proof inputs changed, expired or cannot be verified; run prove again"]
+    return []
+
+
+def cached_proof(root: Path, commands: list[str], *, base: str, scope: dict,
+                 path: Path, metadata: dict, expected_head: str | None = None) -> dict:
+    """Reuse a complete matching proof while holding the same admission as execution."""
+    with proof_admission(root) as admission:
+        head, clean = head_state(root)
+        if not clean or expected_head is not None and head != expected_head:
+            raise Refused("proof needs a clean committed candidate")
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+        except (ValueError, OSError):
+            previous = {}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {**metadata, "head": head, "tree_clean": True, "base": base,
+                  "proof_scope": scope, "proof_state": "running", "ok": False, "commands": []}
+        atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+        try:
+            inputs = proof_inputs(root, commands, base, scope)
+            policy = project_setting(root, "proof_reuse", {})
+            age = policy.get("max_age_seconds", 86400) if isinstance(policy, dict) else 0
+            if proof_cache.reusable(previous, inputs, commands, age):
+                atomic_file.replace_text(path, json.dumps(previous, indent=2) + "\n")
+                return {**previous, "reused": True}
+            results = run_proof_commands(root, commands, admission=admission) if commands else []
+            final_inputs = proof_inputs(root, commands, base, scope) if inputs is not None else None
+            final_head, final_clean = head_state(root)
+            stable = inputs is None or inputs == final_inputs
+            record.update(tree_clean=final_clean and final_head == head,
+                          proof_state="observed", commands=results, finished_at=now(),
+                          proof_inputs=inputs, inputs_stable=stable,
+                          ok=final_clean and final_head == head and stable
+                          and all(item["exit_code"] == 0 for item in results))
+            record = proof_cache.seal(record)
+            atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+            return {**record, "reused": False}
+        except BaseException:
+            record.update(proof_state="failed", ok=False, finished_at=now())
+            atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+            raise
 
 
 def cmd_prove(args, root: Path) -> dict:
@@ -2337,23 +2831,20 @@ def cmd_prove(args, root: Path) -> dict:
     head, clean = head_state(root)
     plan = {"selection": "deferred", "commands": [], "why": ["proof runs once on the merge train's integration HEAD"]} \
         if getattr(args, "deferred", False) \
-        else proof_plan(root, args.base, full=getattr(args, "full", False) or task_declares_risk(root, args.task))
-    results = []
-    for command in plan["commands"]:
-        started, clock = now(), datetime.now(timezone.utc)
-        done = subprocess.run(proof_runner(root, command), shell=True, cwd=root, capture_output=True, text=True)
-        results.append({"command": command, "exit_code": done.returncode,
-                        "seconds": round((datetime.now(timezone.utc) - clock).total_seconds(), 1),
-                        "started_at": started, "finished_at": now(),
-                        "tail": "" if done.returncode == 0 else proof_tail(done.stdout + done.stderr),
-                        "failed_tests": [] if done.returncode == 0 else failed_test_ids(done.stdout + done.stderr),
-                        "suites": [] if done.returncode == 0 else suite_results(done.stdout + done.stderr)})
+        else proof_plan(root, args.base, full=getattr(args, "full", False))
+    if not clean:
+        raise Refused("proof needs a clean committed candidate")
+    if plan["selection"] != "deferred":
+        record = cached_proof(root, plan["commands"], base=args.base,
+                              scope={"task": args.task, "selection": plan["selection"]}, path=path,
+                              metadata={"task": args.task, "selection": plan["selection"], "why": plan["why"]},
+                              expected_head=head)
+        return {**record, "record": str(path.relative_to(root))}
     record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
               "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
-              "ok": clean and all(item["exit_code"] == 0 for item in results), "commands": results}
+              "ok": None, "proof_state": "pending", "commands": []}
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(record, indent=2) + "\n")
+    atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
     return {**record, "record": str(path.relative_to(root))}
 
 
@@ -2388,10 +2879,17 @@ def proof_problems(root: Path, task: str) -> tuple[list[str], dict]:
                  for item in record.get("commands", []) if item.get("exit_code") != 0]
     if not record.get("commands") and record.get("selection") not in ("impact", "deferred", "train"):
         problems.append("the proof record holds no command")
+    if record.get("selection") not in ("deferred", "train"):
+        base = record.get("base", "main")
+        plan = proof_plan(root, base, full=record.get("selection") == "full")
+        problems += cached_proof_problems(root, record, plan["commands"], base=base,
+                                         scope={"task": task, "selection": plan["selection"]}, path=path)
     return problems, record
 
 
 def proof_section(record: dict) -> str:
+    if record.get("selection") == "deferred":
+        return "\n\n## Proof\n\nPending the atomic integration candidate's proof and review.\n"
     rows = "\n".join(f"| `{item['command']}` | pass | {item['seconds']} |" for item in record["commands"])
     finished = record.get("finished_at") or record["commands"][-1]["finished_at"]
     selection = record.get("selection", "full")
@@ -2410,12 +2908,17 @@ def proof_waived(root: Path, path: Path, base: str) -> bool:
 def cmd_open_pr(args, root: Path) -> dict:
     path = task_path(root, args.task)
     errors = lint(path, root)
-    if not task_props(path).get("approved_at"):
+    props = task_props(path)
+    if not props.get("approved_at"):
         errors.append("approved_at is missing; run approve first")
-    if not errors:
-        _, missing = routed_roles(root, path, changed_files(root, args.base))
-        if missing:
-            errors.append(missing_message(args.task, missing))
+    files = changed_files(root, args.base)
+    methods = required_methods(root, props, files, task_body(path))
+    missing = missing_methods(root, args.task, methods)
+    if missing:
+        errors.append("method evidence is missing or changed: " + ", ".join(missing))
+    missing_companions = [row["companion"] for row in companion_evidence(root, args.task, methods, files=files) if not row["ok"]]
+    if missing_companions:
+        errors.append("companion use or explicit fallback evidence is missing or changed: " + ", ".join(missing_companions))
     if errors:
         raise Refused("task is not ready: " + "; ".join(errors))
     record = None
@@ -2424,14 +2927,15 @@ def cmd_open_pr(args, root: Path) -> dict:
         problems, record = proof_problems(root, args.task)
         if problems:
             raise Refused("no local proof for this HEAD (pr_proof is local_record): " + "; ".join(problems))
-    if task_props(path).get("status") == "active":
-        set_field(path, "status", "delivered")
     run("git", "add", str(path), cwd=root)
     if run("git", "diff", "--cached", "--name-only", cwd=root):
-        run("git", "commit", "-m", f"docs: deliver task {args.task}", cwd=root)
+        run("git", "commit", "-m", f"docs: record task {args.task}", cwd=root)
     warnings = overlap(root, args.base)
     run("git", "push", "-u", "origin", "HEAD", cwd=root)
     body = path.read_text(encoding="utf-8").split("\n---\n", 1)[-1]
+    issue = task_props(path).get("source_issue")
+    if issue and str(issue).isdigit():
+        body += f"\n\nCloses #{issue}."
     if record:
         body += proof_section(record)
     if warnings:
@@ -2457,40 +2961,140 @@ def refresh_graph(root: Path, pr: str) -> None:
             pass
 
 
+def queue_retrospective(root: Path, event: dict | None = None) -> dict:
+    try:
+        import retrospective
+        result = retrospective.emit(root, event or {"kind": "completion", "operation": "delivery"})
+        error = result.get("error") or (result.get("error_category", "observation unavailable")
+                                        if result.get("queued") is False else None)
+        return {"retro_job": result.get("event_id"),
+                **({"retro_queue_error": error} if error else {})}
+    except Exception as error:
+        # Observation failures must not replace the delivery outcome.
+        return {"retro_queue_error": str(error)}
+
+
 def cmd_merge(args, root: Path) -> dict:
-    rigor = task_props(task_path(root, args.task)).get("rigor", "normal")
-    note = REVIEW_MARK + (f"\n\n{args.detail}" if args.detail else "")
+    head = getattr(args, "head", None)
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+        raise Refused("merge requires --head with the full commit reviewed and tested")
+    path = task_path(root, args.task)
+    props = task_props(path)
+    rigor = "high" if field_items(props, "risks") else props.get("rigor", "normal")
+    note = REVIEW_MARK + f"\n\nReviewed head: {head}" + (f"\n\n{args.detail}" if args.detail else "")
     counts = [getattr(args, key, None) for key in ("critical", "non_critical", "filed")]
     if any(count is not None and count < 0 for count in counts) or (counts[2] or 0) > (counts[1] or 0):
         raise Refused("finding counts are non-negative and --filed is at most --non-critical;"
                       " pass counts, never an issue number")
+    if counts[0] != 0:
+        raise Refused("merge requires --critical 0 after every blocking finding is resolved")
+    remote = json.loads(run("gh", "pr", "view", str(args.pr), "--json", "headRefOid,baseRefName,state", cwd=root))
+    if remote.get("headRefOid") != head:
+        raise Refused("the pull request changed after review; review and test its current head")
+    if remote.get("state") == "MERGED":
+        return {"task_id": args.task, "pr": args.pr, "head": head, "auto_merge": False, "merged": True,
+                **queue_retrospective(root, {"kind": "completion", "operation": "merge",
+                                            "task": args.task, "head": head})}
+    if remote.get("state") != "OPEN":
+        raise Refused("only an open pull request can merge")
+    local_head, clean = head_state(root)
+    if local_head != head or not clean:
+        raise Refused("merge must run from the clean reviewed candidate worktree")
+    base = remote.get("baseRefName")
+    if not isinstance(base, str) or not base:
+        raise Refused("the pull request target branch is missing")
+    files = changed_files(root, base)
+    methods = required_methods(root, props, files, task_body(path))
+    missing = missing_methods(root, args.task, methods)
+    if missing:
+        raise Refused("method evidence is missing or changed: " + ", ".join(missing))
+    missing_companions = [row["companion"] for row in companion_evidence(root, args.task, methods, files=files) if not row["ok"]]
+    if missing_companions:
+        raise Refused("companion use or explicit fallback evidence is missing or changed: " + ", ".join(missing_companions))
     if any(count is not None for count in counts):
         note += "\n\nfindings: critical {}, non-critical {}, filed {}".format(*(count or 0 for count in counts))
     owner_merges = rigor == "high" and not getattr(args, "delegated", False)
     if owner_merges:
         note += "\n\nRigor high: the owner merges this pull request."
     elif rigor == "high":
-        note += "\n\nRigor high: auto-merged under the owner's delegation."
-    run("gh", "pr", "comment", args.pr, "--body", note, cwd=root)
+        note += "\n\nRigor high: merged under the owner's delegation."
     if owner_merges:
         return {"task_id": args.task, "pr": args.pr, "auto_merge": False,
                 "next": "rigor high: the owner reviews and merges"}
-    try:
-        run("gh", "pr", "merge", args.pr, "--auto", f"--{args.style}", cwd=root)
-    except Refused as refused:
-        # GitHub refuses auto-merge once required checks are already green; merge now.
-        if "clean status" not in str(refused) and "protected branch rules" not in str(refused):
-            raise
-        run("gh", "pr", "merge", args.pr, f"--{args.style}", cwd=root)
-        refresh_graph(root, args.pr)
-        return {"task_id": args.task, "pr": args.pr, "auto_merge": False, "merged": True}
-    refresh_graph(root, args.pr)
-    return {"task_id": args.task, "pr": args.pr, "auto_merge": True}
+    missing_review = review_problems(root, [{"task": args.task, "root": str(root)}], base)
+    if missing_review:
+        raise Refused("; ".join(missing_review))
+    if pr_proof(root) == "local_record":
+        if not proof_waived(root, task_path(root, args.task), base):
+            problems, record = proof_problems(root, args.task)
+            if record.get("selection") in ("deferred", "train"):
+                problems.append("combined or deferred proof must merge through its atomic integration candidate")
+            if problems:
+                raise Refused("local proof does not cover the reviewed pull request head: " + "; ".join(problems))
+    else:
+        run("gh", "pr", "checks", str(args.pr), "--required", cwd=root)
+    run("gh", "pr", "comment", str(args.pr), "--body", note, cwd=root)
+    # Persistent auto-merge would also authorize a later, unreviewed push.
+    run("gh", "pr", "merge", str(args.pr), f"--{args.style}", "--match-head-commit", head, cwd=root)
+    observed = json.loads(run("gh", "pr", "view", str(args.pr), "--json", "headRefOid,state,mergedAt", cwd=root))
+    merged = observed.get("state") == "MERGED" and observed.get("headRefOid") == head
+    feedback = {}
+    if merged:
+        refresh_graph(root, str(args.pr))
+        feedback = queue_retrospective(root, {"kind": "completion", "operation": "merge",
+                                             "task": args.task, "head": head})
+    return {**feedback, "task_id": args.task, "pr": args.pr, "head": head, "auto_merge": False,
+            "merged": merged, "merged_at": observed.get("mergedAt"),
+            "next": "verify environment readiness" if merged else "observe the merge queue result"}
 
 
 def cmd_train(args, root: Path) -> dict:
     import proof_train
     return proof_train.cmd_train(args, root, sys.modules[__name__])
+
+
+def cmd_ready(args, root: Path) -> dict:
+    """Record a worker's readiness evidence for an integrated revision."""
+    if not ID_RE.fullmatch(args.task):
+        raise Refused("--task must be TK-<number>")
+    task = task_props(task_path(root, args.task))
+    if not str(args.pr).isdigit() or int(args.pr) < 1:
+        raise Refused("--pr must be a positive pull request number")
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", args.revision):
+        raise Refused("--revision must be the full integrated or deployed commit")
+    environment = args.environment.strip()
+    if not environment or any(ord(character) < 32 for character in environment):
+        raise Refused("--environment must name one environment on a single line")
+    relative = Path(args.evidence)
+    evidence = (root / relative).resolve()
+    if relative.is_absolute() or not evidence.is_relative_to(root.resolve()) or not evidence.is_file():
+        raise Refused("--evidence must be an existing project-relative file inside the project")
+    remote = json.loads(run("gh", "pr", "view", str(args.pr), "--json",
+                            "number,state,mergedAt,mergeCommit", cwd=root))
+    merge_commit = (remote.get("mergeCommit") or {}).get("oid")
+    if (remote.get("state") != "MERGED" or str(remote.get("number")) != str(int(args.pr))
+            or not remote.get("mergedAt") or not isinstance(merge_commit, str)
+            or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", merge_commit)):
+        raise Refused("ready requires a merged pull request with its merge commit")
+    revision = run("git", "rev-parse", "--verify", f"{args.revision}^{{commit}}", cwd=root)
+    run("git", "merge-base", "--is-ancestor", merge_commit, revision, cwd=root)
+    ready_at = now()
+    merged_at = parse_time(remote["mergedAt"])
+    if merged_at.tzinfo is None or merged_at > parse_time(ready_at):
+        raise Refused("the pull request merge time must precede readiness")
+    event = {"type": "task_ready", "task_id": args.task, "pr": str(int(args.pr)),
+             "revision": revision, "merge_commit": merge_commit, "environment": environment,
+             "evidence": evidence.relative_to(root.resolve()).as_posix(),
+             "evidence_sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+             "evidence_worktree": str(root.resolve()), "evidence_source": "worker_report"}
+    event["event_id"] = hashlib.sha256(json.dumps(event, sort_keys=True).encode("utf-8")).hexdigest()
+    event.update(ready_at=ready_at, merged_at=remote["mergedAt"])
+    receipt = append_history(root, [event])[0]
+    return {**receipt, **queue_retrospective(root, {
+        "kind": "completion", "operation": "ready", "task": args.task, "head": revision,
+        "requested_at": task.get("requested_at"), "approved_at": task.get("approved_at"),
+        "merged_at": receipt["merged_at"], "ready_at": receipt["ready_at"],
+        "receipt_sha256": hashlib.sha256(json.dumps(receipt, sort_keys=True).encode()).hexdigest()})}
 
 
 def cmd_report(args, root: Path):
@@ -2574,10 +3178,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     start = sub.add_parser("start")
     start.add_argument("--title", required=True)
+    start.add_argument("--issue", type=int, help="source issue in this project repository")
     start.add_argument("--request")
     start.add_argument("--request-file")
     start.add_argument("--base", default="main")
-    start.add_argument("--at")
     start.add_argument("--epic", help="the epic the task belongs to, such as EP-003")
     start.add_argument("--source-story", help="the backlog story the task delivers part of, such as ST-012")
     start.add_argument("--covers", help="comma-separated criterion numbers of the source story")
@@ -2602,17 +3206,32 @@ def main(argv: list[str] | None = None) -> int:
     check.add_argument("--task")
     approve = sub.add_parser("approve")
     approve.add_argument("--task", required=True)
-    approve.add_argument("--at")
-    checked = sub.add_parser("role-check", help="record a routed role's verdict on the task")
-    checked.add_argument("--task", required=True)
-    checked.add_argument("--role", required=True, help="the plugin agent id, such as software-architect")
-    checked.add_argument("--verdict", choices=VERDICTS, required=True)
-    checked.add_argument("--note", help="the reasons, one line")
-    checked.add_argument("--at")
+    method = sub.add_parser("method", help="load a method or record its concrete evidence")
+    method.add_argument("--task", required=True)
+    method.add_argument("--name", required=True)
+    method.add_argument("--evidence", help="project-relative evidence file produced by the method")
+    companion = sub.add_parser("companion", help="load a selected local companion skill or record its evidence")
+    companion.add_argument("--task", required=True)
+    companion.add_argument("--name", required=True, help="active companion ID from the package catalog")
+    companion.add_argument("--host", required=True, help="registered companion host, reported by the worker")
+    capability = companion.add_mutually_exclusive_group()
+    capability.add_argument("--source", help="actual local SKILL.md path")
+    capability.add_argument("--unavailable", help="reason unavailable, disabled or unverified; requires fallback evidence")
+    companion.add_argument("--evidence", help="project-relative evidence file produced using the companion")
+    companion.add_argument("--query", help="run and record a bounded native Graphify query")
+    companion.add_argument("--graph", help="existing graph.json for the Graphify query")
+    companion.add_argument("--seed", help="native Graphify query seed")
+    companion.add_argument("--context", help="native Graphify query context")
     sub.add_parser("overlap").add_argument("--base", default="main")
     reviewed = sub.add_parser("review-inputs", help="reviewers, the diff file, missing triggered skills and changed sources")
     reviewed.add_argument("--task", required=True)
     reviewed.add_argument("--base", default="main")
+    review = sub.add_parser("review", help="run a candidate-bound native read-only review")
+    review_scope = review.add_mutually_exclusive_group(required=True)
+    review_scope.add_argument("--task")
+    review_scope.add_argument("--batch", type=int)
+    review.add_argument("--host", required=True, help="registered host for the installed native review adapter")
+    review.add_argument("--base", default="main")
     opened = sub.add_parser("open-pr")
     opened.add_argument("--task", required=True)
     opened.add_argument("--base", default="main")
@@ -2622,9 +3241,10 @@ def main(argv: list[str] | None = None) -> int:
     proved.add_argument("--full", action="store_true", help="ignore local_proof_map and run every local_proof command")
     proved.add_argument("--deferred", action="store_true", help="the merge train proves this change; run nothing now")
     train = sub.add_parser("train", help="merge train: one integration proof for the ready pull requests")
-    train.add_argument("verb", choices=("add", "remove", "status", "prove", "merge", "bisect"))
+    train.add_argument("verb", choices=("add", "remove", "status", "prove", "publish", "merge", "bisect"))
     train.add_argument("--task")
     train.add_argument("--pr")
+    train.add_argument("--head", help="reviewed integration commit")
     train.add_argument("--batch", type=int)
     train.add_argument("--base", default="main")
     train.add_argument("--dry-run", action="store_true", help="build the integration branch, run and merge nothing")
@@ -2636,6 +3256,7 @@ def main(argv: list[str] | None = None) -> int:
     merge = sub.add_parser("merge")
     merge.add_argument("--task", required=True)
     merge.add_argument("--pr", required=True)
+    merge.add_argument("--head", required=True, help="full commit reviewed and tested")
     merge.add_argument("--style", choices=("merge", "squash", "rebase"), default="merge")
     merge.add_argument("--detail")
     merge.add_argument("--delegated", action="store_true",
@@ -2643,6 +3264,12 @@ def main(argv: list[str] | None = None) -> int:
     for key in ("critical", "non-critical", "filed"):
         merge.add_argument(f"--{key}", type=int, help=f"the review's {key} finding count"
                            if key != "filed" else "the non-critical findings filed as issues")
+    ready = sub.add_parser("ready", help="record readiness evidence after integration")
+    ready.add_argument("--task", required=True)
+    ready.add_argument("--pr", required=True)
+    ready.add_argument("--revision", required=True, help="full integrated or deployed commit")
+    ready.add_argument("--environment", required=True)
+    ready.add_argument("--evidence", required=True, help="project-relative readiness evidence file")
     retro = sub.add_parser("report")
     retro.add_argument("--json", action="store_true")
     retro.add_argument("--export", choices=("csv", "json"))
@@ -2668,16 +3295,32 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     handlers = {"start": cmd_start, "lint": cmd_lint, "approve": cmd_approve,
                 "overlap": cmd_overlap, "train": cmd_train, "open-pr": cmd_open_pr, "prove": cmd_prove, "merge": cmd_merge,
-                "report": cmd_report, "file-issues": cmd_file_issues,
+                "report": cmd_report, "ready": cmd_ready, "file-issues": cmd_file_issues,
                 "criteria": cmd_criteria, "board": cmd_board,
-                "role-check": cmd_role_check, "rework": cmd_rework, "review-inputs": cmd_review_inputs}
+                "method": cmd_method, "companion": cmd_companion, "review": cmd_review,
+                "rework": cmd_rework, "review-inputs": cmd_review_inputs}
+    root = None
+    started = time.monotonic()
     try:
+        root = project_root(args.project)
         if args.command == "lint" and not (args.file or args.task):
             raise Refused("lint needs --file or --task")
-        result = handlers[args.command](args, project_root(args.project))
+        result = handlers[args.command](args, root)
     except (Refused, OSError, ValueError) as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}))
-        return 1
+        result = {"ok": False, "error": str(exc), "error_category": type(exc).__name__}
+    if root is not None and args.command not in {"report", "file-issues"} \
+            and isinstance(result, dict) and result.get("ok") is False:
+        event = {"kind": "failure", "operation": args.command,
+                 "source_id": f"{os.getpid()}-{time.time_ns()}",
+                 "seconds": round(time.monotonic() - started, 6),
+                 "error_category": result.get("error_category", result.get("status", "failed"))}
+        if getattr(args, "task", None):
+            event["task"] = args.task
+        if result.get("head"):
+            event["head"] = result["head"]
+        if isinstance(result.get("record"), str):
+            event["receipt_path"] = str(root / result["record"])
+        result.update(queue_retrospective(root, event))
     print(result if isinstance(result, str) else json.dumps(result, indent=2))
     return 1 if isinstance(result, dict) and result.get("ok") is False else 0
 

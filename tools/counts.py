@@ -110,9 +110,6 @@ def render_companions(root: Path) -> str:
         for spec in [*companion.get("steps", []), *companion["hosts"].values()]:
             for text in (spec.get("requires", {}).get("hint"), spec.get("note")):
                 lines += ["", text] if text else []
-        if companion.get("blocked_skills"):
-            names = ", ".join(f"`{name}`" for name in companion["blocked_skills"])
-            lines += ["", f"Blocked: {names}. {companion['blocked_reason']}"]
         if companion.get("env"):
             env = ", ".join(f"`{item['name']}={item['value']}`" for item in companion["env"])
             lines += ["", f"Environment: {env}."]

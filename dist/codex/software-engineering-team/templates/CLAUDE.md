@@ -5,9 +5,10 @@
 - The project root is the Git checkout and `workspace/` is the only project
   workspace for this team. Durable truth is kept in tracked project files;
   `.agentrof/agent-marketplace/.runtime/` is disposable local scratch.
-- User decisions are explicit: a workflow pauses at its named gate, recommended
-  option first. Do exactly what was asked; a need found on the way is named and
-  asked, never built silently.
+- Work within the current explicit authority and agreed outcome. Resolve material
+  uncertainty before dependent work. Carry data integrity, confidentiality,
+  environment access and destructive-action limits into every worker brief.
+  Additional scope requires an explicit decision.
 - Authored Markdown body prose follows `output_language`; project terminology
   follows `terminology_language`. Machine keys, ids, paths and CLI output stay
   English. User-facing conversation may use the user's language.
@@ -21,52 +22,43 @@
 
 # Software Engineering Team
 
-## Team workspace
-
-- `{{workspace}}/config.json`: project declaration, changed only through the
-  configure entry.
-- `{{workspace}}/docs/`: the project documents. A role reads the sources its
-  task file lists and greps this tree for anything missing.
-- `{{workspace}}/apps/`: one folder per application with its own Dockerfile,
-  lock file, a README stating its contract, and its tests and migrations.
-- `{{workspace}}/tests/`, or the folder `tests_root` names: shared environment
-  and harness suites.
-- `{{workspace}}/experience-design/`: `DESIGN.md` and one
-  `<feature-slug>/design.md` with `exports/` per designed feature.
-- `{{workspace}}/project/<name>/`: project-specific data. A hook refuses any
-  top-level folder under `{{workspace}}/` or `{{workspace}}/docs/` that
-  `workspace_layout` in the config does not allow.
-- `{{workspace}}/memory/`, all loaded below: `current-plan.md` is read first
-  and updated at every step (done, next step, open decisions; history is
-  archived out of it); `product-decisions.md` holds the owner's binding
-  decisions, read before product work, and overrides the docs; `me.md` and
-  `profile.md` hold the owner's own working rules.
-- `{{workspace}}/docs/backlog/tasks/`: tracked fast-lane task records.
-
-Work runs through the `deliver` entry: task, branch, pull request, review and
-merge. Release Management is out of scope for this package.
+- Start project work through `deliver`. One owner coordinates task records,
+  isolated writers, conditional methods, proof, independent review and readiness.
+- `{{workspace}}/config.json` holds the closed project contract. Change it through
+  `configure` or its reviewed migration writer.
+- `{{workspace}}/docs/backlog/tasks/` holds durable task outcomes and evidence.
+  Read the active task and affected source files first. Use an existing graph
+  to find dependencies, then verify findings against source.
+- Read `{{workspace}}/memory/current-plan.md` when resuming or coordinating work.
+  Read relevant `product-decisions.md` entries before changing product behavior.
+  Update these files when the plan or a binding decision changes, and reconcile
+  affected documentation with the delivered code.
+- Owner rules in `{{workspace}}/memory/me.md`, `profile.md` and the user companion
+  remain binding. Every worker brief carries applicable authority, data safety,
+  environment constraints, write ownership and its stopping condition. Native
+  launches use the delivery flow's `SWE_WORKER_BRIEF` format. The launch hook
+  supplies current rule sources and rejects missing or oversized context.
+- Application files follow the project's accepted layout. `tests_root` locates
+  shared tests. `workspace_layout` declares permitted workspace folders.
+  Feature design records live under `{{workspace}}/experience-design/`.
+- Finish only after the merged revision is ready in its intended environment
+  and required live checks pass. Pending proof, review or readiness stays pending.
 
 ## Companion skills
 
-The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.
+The team flow owns tasks, write allocation, proof, review and merge decisions. Use each companion for its relevant work when installed and enabled. Setup checks availability without installing, uninstalling or changing global packages. Missing or unverified companions require a recorded fallback.
 
 | Step | Role | Skill | When |
 |---|---|---|---|
-| Write code, test fails or bug task | developer roles | superpowers:systematic-debugging | a failure whose cause is not obvious |
-| Self-check before handoff | developer roles | superpowers:verification-before-completion | always before reporting done |
-| Fix pass | same writer | superpowers:receiving-code-review | applying review findings |
-| Team skill authoring | plugin maintainers | superpowers:writing-skills | writing or changing a skill |
-| PR body, docs, README, upstream issue | writer, deliver | humanizer, embedded mode | prose deliverables; not commit messages |
-| Review, high rigor | security-reviewer | security-audit guidance mode | auth, tenant data, secrets, money, deletion |
-| Full security audit | owner request only | security-audit full mode | explicit audit request, reports outside the repo |
-| Architecture change | software-architect | diagram-design (architecture, architecture-delta, sequence, ER) | a structural change to system-architecture |
-| Write UI | frontend-developer | impeccable (craft, polish, harden, adapt) | the task touches UI |
-| Review, UI | code-reviewer | impeccable detect and critique, read-only | the change touches UI |
-| Find context | all roles | graphify query, path, explain | `.agentrof/graphify` holds a graph |
-| Docs graph refresh | deliver | graphify_refresh.py in the background | a merged task changed Markdown under workspace/docs |
-| Write code | developer roles | ponytail, level full | always |
-| Review | code-reviewer | /ponytail-review | inside its single review pass |
-| Retrospective | retrospective | /ponytail-debt | report the shortcut debt ledger |
+| Write code | task owner or coding worker | ponytail, level full | required for implementation when installed and enabled |
+| Review | reviewer | ponytail-review | required within the existing code review when installed and enabled |
+| Retrospective | retrospective | ponytail-debt | a shortcut debt report is requested and the companion is available |
+| Find context | task owner or worker | graphify query, path, explain | required for codebase discovery when installed and enabled; verify results against current source |
+| Docs graph refresh | deliver | graphify_refresh.py in the background | an ordinary merged task changes Markdown under workspace/docs and a docs graph already exists |
+| Design and write UI | task owner or coding worker | impeccable | required for user interface work when installed and enabled |
+| Review UI | reviewer | impeccable critique | required within the existing UI review when installed and enabled |
+| Security-sensitive work | task owner or reviewer | security-audit guidance mode | required for authorization, tenant isolation, secrets, money, deletion or security review when installed and enabled |
+| Full security audit | owner request only | security-audit full mode | explicit full audit request within its authorized scope |
 
 Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph, `--graph .agentrof/graphify/docs/graph.json`, exists only after its first build; without it use the default graph); otherwise read the task file's sources and grep.
 
@@ -74,8 +66,6 @@ Finding context: when `.agentrof/graphify` holds a graph, query it first with `g
 
 @CLAUDE.user.md
 @{{workspace}}/memory/agent-marketplace.md
-@{{workspace}}/memory/current-plan.md
-@{{workspace}}/memory/product-decisions.md
 @{{workspace}}/memory/me.md
 @{{workspace}}/memory/profile.md
 

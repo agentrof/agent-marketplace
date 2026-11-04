@@ -1,38 +1,41 @@
 ---
 name: configure
-description: The single change gate for project configuration and durable workflow settings.
+description: Change explicit project settings, execution profiles or proof commands through their owning writer.
 exposure: entry
 ---
 
 # Configure
 
-## When to Use
+## Outcome
 
-- Changing language or the pull request proof (`pr_proof`).
-- Changing a purpose class's model or reasoning effort, or the class a role runs on,
-  in this project (`models`).
-- Repairing a local workspace contract after an intentional user change.
+A minimal validated setting change with its effect visible.
 
-## Procedure
+## When to use
 
-1. Read `workspace/config.json`. If missing, route to setup. Never hand-edit
-   machine-managed keys.
-   Read `references/role-models.md` for `models`.
-2. Read `references/config-contract.md`. Identify the owning document or
-   compiler before proposing a change. Stack, database and component method
-   choices belong to accepted Solution Design decisions, never config.
-   Invoke every machine-owned writer with the active host runtime's exact
-   absolute Python executable and the installed package script's absolute
-   path. Never use a bare Python command name, `/usr/bin/env` indirection or
-   direct shebang execution for these writes; shell aliases and functions make
-   those forms unverifiable and therefore guard-only.
-3. For language and `pr_proof`, use `project_config.py set --dry-run --json`.
-   For `models`, use `project_config.py classes`, `set-class` and
-   `set-role-class`.
-4. For a language or `pr_proof` change, run `project_config.py set --dry-run --json` and
-   present only the config delta. Existing authored titles are not translated
-   or rewritten by a config change.
-5. On approval, run the owning writer and `project_config.py check`. On
-   rejection, write nothing.
-6. Confirm the exact Git diff. Configuration changes update only their
-   declared project-local surfaces.
+Use when the user requests a project configuration or model-profile change.
+
+## Inputs and authority
+
+Read `workspace/config.json`, the host contract and the requested change. Keep
+technology decisions in project design records. Use the host's absolute Python
+and installed script paths for machine-owned writes.
+
+## Method
+
+1. Inspect the effective setting and its source. Use `project_config.py classes`
+   for the execution profiles. Explain availability and capability limitations.
+2. Preview ordinary settings with `project_config.py set --dry-run --json`.
+   Change a compute profile with `set-class`. Resolve material cost, permission
+   or behavioral changes under the user's existing authority.
+3. Apply through the owning writer, run `project_config.py check`, and reconcile
+   only the affected host projection. Never change global preferences silently.
+
+## Evidence and completion
+
+Show the setting delta and validation result. Record requested and resolved model
+settings separately from host-observed execution.
+
+## Conditional references
+
+- [Configuration contract](references/config-contract.md) defines owned settings.
+- [Execution profiles](references/role-models.md) explains model selection.

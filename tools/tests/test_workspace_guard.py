@@ -74,5 +74,57 @@ class WorkspaceGuardTests(unittest.TestCase):
                         "ls workspace > /dev/null"):
             self.assertEqual(self.shell(command).returncode, 0, command)
 
+    def test_procedure_output_is_direct_on_both_host_payloads(self):
+        retrieval = 'python3 /package/scripts/task_lane.py companion --task TK-001 --name graphify --host test --query "callers | callees"'
+        environment = dict(os.environ, PYTHONPATH=str(SCRIPTS))
+        for field in ("command", "cmd"):
+            for command, expected in (
+                    (retrieval, 0),
+                    (f'cd "{self.root}" && {retrieval}', 0),
+                    (retrieval + " | cut -c1-600 | head -14", 2),
+                    (retrieval + " > /dev/null", 2),
+                    (retrieval + " --evidence proof.md | tail -4", 2),
+                    ('S=/package/scripts; $PY $S/task_lane.py method --task TK-001 --name data-design | head -8', 2),
+                    ('python3 /package/scripts/task_lane.py method --task TK-001 --name data-design --evidence proof.md | head -8', 0),
+                    ('python3 /package/scripts/task_lane.py companion --help | head -30', 0)):
+                with self.subTest(field=field, command=command):
+                    payload = {"tool_name": "Bash", "cwd": str(self.root), "tool_input": {field: command}}
+                    result = python_entry.run([LAUNCHER, HOOK], input=json.dumps(payload), env=environment)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+        payload = {"tool_name": "PowerShell", "cwd": str(self.root),
+                   "tool_input": {"command": '& "python3" "/package/scripts/task_lane.py" method --task TK-001 --name data-design'}}
+        result = python_entry.run([LAUNCHER, HOOK], input=json.dumps(payload), env=environment)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_procedure_output_capacity_rejects_small_explicit_limits(self):
+        command = 'python3 /package/scripts/task_lane.py --project "/project path" method --task TK-001 --name data-design'
+        environment = dict(os.environ, PYTHONPATH=str(SCRIPTS))
+        for limit, expected in ((1024, 2), (8192, 0), (16384, 0)):
+            payload = {"tool_name": "Bash", "cwd": str(self.root),
+                       "tool_input": {"cmd": command, "max_output_tokens": limit}}
+            with self.subTest(limit=limit):
+                result = python_entry.run([LAUNCHER, HOOK], input=json.dumps(payload), env=environment)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                if expected:
+                    self.assertIn("8192", result.stderr)
+
+    def test_static_shell_aliases_cannot_hide_filtered_procedure_loads(self):
+        environment = dict(os.environ, PYTHONPATH=str(SCRIPTS))
+        prefix = 'P=python3; S="/package path/scripts/task_lane.py"; '
+        for field in ("command", "cmd"):
+            for command, expected in (
+                    (prefix + '$P "$S" companion --task TK-001 --name impeccable --host test | head -c 1500', 2),
+                    (prefix + 'ls /skills | head -30; ${P} "${S}" companion --task TK-001 --name ponytail --host test | head -c 1500', 2),
+                    ('P=python3\nD=/package/scripts\nS=$D/task_lane.py\n$P $S method --task TK-001 --name data-design | cut -c1-600', 2),
+                    (prefix + '$P "$S" companion --task TK-001 --name graphify --host test --query "callers | callees" --evidence proof.md | head', 2),
+                    (prefix + '$P "$S" companion --task TK-001 --name ponytail --host test --evidence proof.md | head', 0),
+                    (prefix + '$P "$S" companion --help | head', 0),
+                    (prefix + 'printf "%s" "$S"', 0),
+                    ('python3 /package/task_lane.py companion --task TK-001 --name graphify --host test --query "callers | callees"', 0)):
+                with self.subTest(field=field, command=command):
+                    payload = {"tool_name": "Bash", "cwd": str(self.root), "tool_input": {field: command}}
+                    result = python_entry.run([LAUNCHER, HOOK], input=json.dumps(payload), env=environment)
+                    self.assertEqual(result.returncode, expected, result.stderr)
+
 if __name__ == "__main__":
     unittest.main()

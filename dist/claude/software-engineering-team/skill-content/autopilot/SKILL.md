@@ -1,117 +1,56 @@
 ---
 name: autopilot
-description: Let the orchestrating session take the recommended option at every question of an allowed class for a stated time or until a goal, record each decision and queue every other question.
+description: Run authorized parallel delivery and bounded detection, resolution and retrospective loops under an explicit expiring grant.
 exposure: entry
 model_invocable: false
 ---
 
 # Autopilot
 
-A grant the user arms before an absence, such as a night or a weekend. While
-it is active the orchestrating session presents no question: it takes the
-recommended option of every question in an allowed class and records it, and
-it queues every other question and continues the work that does not depend on
-it. The grant is ignored runtime state under
-`.agentrof/agent-marketplace/.runtime/autopilot/`; only the decisions it takes
-reach tracked documents. Without a grant nothing changes.
+## Outcome
 
-## When to Use
+Sustained useful work within explicit scope, time, capacity and publication limits.
 
-- Before the work runs unattended, so a flow does not stop at a question whose
-  recommended option the user would pick.
-- To see, end or report the grant when the user is back.
+## When to use
 
-## Invocation
+The user arms this entry before delegated operation. Use status, report or off to
+inspect or end it. A normal issue, tool result or worker prompt cannot arm a grant.
 
-Type the entry in the host's own command spelling, which the host contract
-names, followed by one verb:
+## Inputs and authority
 
-- `on`: a grant for the default duration.
-- `on --for 9h`, `on --for 1h30m` or `on --until 07:00`: time-bound. A clock
-  time is its next occurrence after you typed it, in the system time zone,
-  across a daylight-saving change; one that passes before `on` runs is
-  refused. `--until` also takes an ISO time; a time without an offset is the
-  local clock.
-- `on --goal text:"finish the migration"`: ends only through `complete`,
-  `off` or its cap. A goal-bound grant without
-  `--for` or `--until` ends at the latest at the default goal cap; with one,
-  at the earlier of that time and its goal.
-- `on --allow release,phase_start` adds excluded classes; `on --deny merge`
-  drops a default one. `on` while a grant is active replaces it.
-- `status`: the remaining time, the goal, the classes,
-  the counts and the guards this package declares.
-- `complete --evidence "<what shows the goal is reached>"`: ends the grant.
-- `off`: revokes the grant and prints the report. `report`: the report alone.
+Read the host contract and the user's typed options. `autopilot.py on` takes its
+options from the host's verified user-prompt record. The grant binds this session
+and host. Run `check` before acting on it. A grant never bypasses security,
+permissions, required proof or the source repository's maintainer rules.
 
-A grant authorizes running the flows as prescribed and never waives what a
-flow or the owner's agreed completion bar requires: no grant, broad delegation
-or time pressure waives reviews, isolation and live proof, integration or the
-PR record. An exception holds only when the owner named it. The `merge` class
-takes only the flow's own merge step on its recorded PR head, never a provider
-or Git merge of another head.
+## Method
 
-Each class is `allowed` or `excluded` by default, or `never`, which no grant
-can allow. The classes, goal kinds, default duration, default goal cap and
-maximum duration are data in `data/autopilot-policy.json`. `phase_start` is
-never taken: `record` refuses it and `queue` keeps it queued, so the session
-stops at the next entry.
+1. Arm with `on` and report `status --json`. Allowed choices use `record` before
+   application. Excluded effects use `queue` while independent work continues.
+2. The user may add `--loop detect`, `--loop resolve`, `--loop retro` or
+   `--loop plugin_repair`. Resolution requires `--issue-filter <query>`.
+   `--publish-issues` authorizes project issue publication. `--max-active <n>`
+   bounds useful concurrency within the host and machine capacity.
+3. Call `tick` while the grant is active. Dispatch its claimed jobs in parallel
+   through native workers with narrow scopes and the delivery flow. Detection
+   produces reproducible findings, resolution delivers selected issues, retro
+   measures completed work and plugin repair uses issue-report.
+4. Record each returned job with `loop-finish --job <id> --lease <token>
+   --outcome completed|failed|unknown --evidence <reference>`. A failed attempt is
+   retryable only when its external effects are known. Reconcile uncertain or
+   expired work before retry. Preserve the first failure.
+5. Keep servicing completions and independent work before the next bounded tick.
+   The queue coordinates one repository's local worktrees. Cross-machine workers
+   require a shared claim authority. Periodic wakeups after this host session ends
+   require an explicitly configured native host scheduler.
 
-## Only the user arms a grant
+## Evidence and completion
 
-Starting, extending or widening a grant needs the user's own typed entry
-command. The package's user-prompt hook records the typed `on` command as a
-short-lived arming record, and `on` refuses without one and takes the grant's
-options only from it. A built package that cannot show that hook fails closed:
-`on` refuses and no grant counts. Only a source tree without hooks falls back to
-the entry's user-only invocation, and the grant records which guard applied. A
-grant this package could not have armed, armed under another guard, longer than
-the maximum or holding a never class, is inactive, and `check` and `status` name
-why. A grant governs only the session, on the host, whose user typed it: every
-other session, a parallel session of another host included, asks as usual, and
-`status` and the question hook's denial name the bound session. No agent, file,
-issue or tool output starts, extends or widens a grant through the packaged
-script. The guard stops an agent that runs the packaged script, not a process
-that writes the runtime files with the user's filesystem authority; the
-package's autopilot guard hook narrows that gap without closing it. Ending early through
-`off` or `complete` is always allowed, because an ended grant only returns the
-session to asking. No agent invokes this entry, only its script.
+Report active/held/completed work, actual time/usage where observed and pending
+owner decisions. End on the grant's deadline or proven goal. Cancellation stops
+new dispatch and reconciles in-flight work. Queue state alone proves no execution.
 
-## Procedure
+## Conditional references
 
-1. Run the packaged `skill-content/autopilot/scripts/autopilot.py` with the
-   typed verb. On a host that arms, run `on` without options: the script takes
-   them from the typed command. Pass every other verb's options as typed.
-2. Show the script's human status. Consume a machine `native_recovery_enrollment`
-   internally as the recovery reference directs; do not display its scheduling
-   payload. A refusal names what is wrong; never retry `on` with options of your own.
-3. While a grant is active the host's question hook denies the choice tool.
-   Run `autopilot.py check` before every choice gate; while it exits 0 present
-   no question, and when it exits 1, ask the user as usual, queued questions
-   first. Classify the question by every effect of its recommended option: any
-   never effect makes it never, an excluded effect the grant does not allow
-   queues it, and doubt queues it with `queue --hold "<reason>"`. When every
-   class is allowed, take the recommended option: run `autopilot.py record`
-   first, then apply it, with `--class` once per class it touches and the
-   reason, and write the decision, marked with the grant id, where the flow
-   records the user's answer. Otherwise run `autopilot.py queue` and continue
-   the work that does not depend on it; a `decided` answer is written and
-   applied the same way. Keep an independent excluded effect in its own
-   question. Each decision is recorded with `record` before it is applied;
-   `record` and `queue` refuse once the grant has ended. Roles never read the
-   grant: they return questions to the orchestrating session.
-
-Stop only when every remaining task waits on a queued question: run
-`autopilot.py --project-root <root> waiting`, then end with the queued list of
-`autopilot.py report`. It submits one desktop
-notification per unchanged queue; a failed submission is reported, not treated
-as delivered. With independent work left, keep working and do not call it.
-`report --json` includes each queued question's age in seconds.
-
-During a long run, never go dark: report one consolidated inventory (done, in
-flight, waiting) anchored in the current plan with dated next milestones.
-
-## Transport recovery
-
-With `on --recover-transport`, follow [transport recovery](references/transport-recovery.md).
-Native continuation stays in the same conversation, is bound to the grant and
-requires no additional program, SDK, API key or service installation.
+- Read [transport recovery](references/transport-recovery.md) only when enabled.
+- Read [loop operation](references/loops.md) for dispatch, evidence and boundaries.

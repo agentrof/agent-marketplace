@@ -1,5 +1,10 @@
 # Product decisions
 
-User-owned after setup; the team seeds it only when absent. Record the owner's
-binding product decisions here, each with its date. Where the docs disagree,
-this file wins.
+User-owned after setup. Keep active decisions concise and link deeper design
+records. Each decision records its date, owner/source, scope, rationale and
+status. Superseded decisions link their replacement. Conflicts require an owner
+decision before dependent work.
+
+## Active decisions
+
+## Superseded decisions

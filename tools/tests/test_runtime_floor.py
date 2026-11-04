@@ -181,7 +181,11 @@ class RuntimeFloorTests(unittest.TestCase):
                 with self.subTest(host=host, event=event, matcher=matcher):
                     payload = dict(payloads[event], hook_event_name=event, cwd=str(project))
                     result = run(argv, payload, project, BELOW)
-                    self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+                    if "scripts/worker_context.py" in argv:
+                        self.assertEqual(result.returncode, 0)
+                        self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+                    else:
+                        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
     def test_below_the_floor_only_the_autopilot_entry_prompt_is_blocked(self):
         block = {"decision": "block", "reason": self.message()}

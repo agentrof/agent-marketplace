@@ -1,14 +1,26 @@
 {
   "schema_version": 2,
-  "description": "Purpose classes pick the model and effort of every spawn on every host. A class that escalates runs one level up for a task of size l, at rigor high or on a risk flag; a fixed class never moves.",
+  "description": "Explicit compute profiles select model and effort independently of task size. Access is selected separately through the host launch registry.",
   "model_classes": {
-    "mechanical": {"escalates": true},
-    "routine_authoring": {"escalates": true},
-    "complex_authoring": {"escalates": true},
-    "routine_review": {"escalates": true},
-    "critical_decision": {"escalates": true},
-    "security_review": {"escalates": false},
-    "orchestration": {"escalates": false}
+    "light": {
+      "escalates": false
+    },
+    "work": {
+      "escalates": false
+    },
+    "review": {
+      "escalates": false
+    },
+    "critical": {
+      "escalates": false
+    }
   },
-  "risk_flags": ["auth", "secrets", "data_placement", "migration", "money", "irreversible"]
+  "risk_flags": [
+    "auth",
+    "secrets",
+    "data_placement",
+    "migration",
+    "money",
+    "irreversible"
+  ]
 }

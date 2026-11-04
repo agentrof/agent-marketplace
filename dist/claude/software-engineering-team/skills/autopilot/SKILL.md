@@ -1,6 +1,6 @@
 ---
 name: autopilot
-description: Let the orchestrating session take the recommended option at every question of an allowed class for a stated time or until a goal, record each decision and queue every other question.
+description: Run authorized parallel delivery and bounded detection, resolution and retrospective loops under an explicit expiring grant.
 disable-model-invocation: true
 ---
 

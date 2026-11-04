@@ -1,136 +1,254 @@
 # Agent Marketplace
 
-Agent Marketplace ships one standalone, host-neutral Software Engineering Team
-for Claude Code and Codex. The team turns each request into one task, one
-branch and one pull request, verified by the project's CI and one reviewer.
+[![Validation](https://github.com/agentrof/agent-marketplace/actions/workflows/validate.yml/badge.svg)](https://github.com/agentrof/agent-marketplace/actions/workflows/validate.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
-## Catalog
+A Software Engineering Team plugin for **Claude Code and Codex**. Turn a request
+into tracked tasks, implementation, risk-based testing, independent review and
+verified delivery. Portable skills define the engineering methods. Host adapters
+provide native workers, hooks and permissions.
 
-<!-- counts:start -->
-| Plugins | Agents | Entry skills | Knowledge skills |
-|---|---|---|---|
-| 1 | 11 | 7 | 10 |
-<!-- counts:end -->
+The team works with your project's language, stack, repository and existing
+commands. It keeps decisions and tasks in project-owned files, loads detailed
+procedures when needed and coordinates parallel work within available capacity.
 
-Counts are maintained by `make counts`.
+[Quick start](#quick-start) · [Capabilities](#capabilities) ·
+[How delivery works](#how-delivery-works) · [Documentation](#documentation) ·
+[Contributing](#contributing)
 
-## Install
+## Quick start
+
+### 1. Prepare your environment
+
+- A Git repository for the project you want to work on.
+- Claude Code or Codex with plugin support and access to the configured models.
+- Python **3.14** available as `python3` on the host's PATH.
+- GitHub CLI (`gh`) authenticated when using GitHub issue and pull request flows.
+- Your project's own build, test and development dependencies.
+
+CI tests Linux, macOS and native Windows behavior. The exact host CLI versions
+used by the installation checks are recorded in the
+[host version policy](tools/data/host-cli-versions.json). Host features and model
+availability still depend on your installed version and account.
+
+### 2. Install the stable package
+
+**Claude Code**. Run in the Claude Code command interface.
 
 ```text
 /plugin marketplace add https://github.com/agentrof/agent-marketplace.git#stable
 /plugin install software-engineering-team
 ```
 
-```text
+**Codex**. Run in your terminal.
+
+```sh
 codex plugin marketplace add agentrof/agent-marketplace@stable
 codex plugin add software-engineering-team@agent-marketplace
 ```
 
-The hooks run `python3` from PATH and need Python 3.14 (macOS: `brew install python3`).
+`stable` tracks published releases. This README on `main` can describe changes
+that are awaiting publication. Check the [release notes](https://github.com/agentrof/agent-marketplace/releases)
+for your installed version.
 
-Start `software-engineering-team:setup` in the project. The setup entry uses
-`scripts/setup_project.py inspect|apply|check` to converge the workspace,
-closed configuration and the managed ignore and checkout-attribute blocks.
-Claude Code and Codex use the same canonical workflows and project-local files.
+### 3. Set up the project
 
-## Companions
+Open the project in your host and invoke **`software-engineering-team:setup`**
+through its skill picker or command interface.
 
-Codex checks the selected catalog, enabled installation and required skills through the host loader. Remote skills must also return readable content; an unavailable host check fails verification instead of treating files on disk as proof.
+Setup inspects existing configuration, asks about consequential conflicts and
+creates the missing project workspace. It refreshes managed instructions and
+local worker definitions while preserving authored memory and decisions. It
+also checks companion availability. Installing companions requires explicit
+authorization. Complete any reported host reload and hook trust steps.
 
-Setup can add optional third-party skills through their own official install
-paths; none is copied into the package and none is required. Run
-`scripts/setup_project.py companions check --project-root <root>` for a status
-table and `companions apply` to install, write the deny rules, environment and
-marker files, and print any command the owner must run by hand. Blocked
-skills become `Skill(<plugin>:<skill>)` deny rules in `.claude/settings.json`
-and `[[skills.config]]` entries with `enabled = false` in the user Codex
-config; the environment is written to the Claude project settings.
+### 4. Deliver a change
 
-### Setup
+Invoke **`software-engineering-team:deliver`** with an outcome and acceptance
+criteria. For example, ask it to fix a pagination error, keep the response
+contract compatible and prove the behavior with the relevant test.
 
-1. Run `scripts/setup_project.py companions apply --project-root <root>`
-   (add `--host claude` or `--host codex` for one host). It installs every
-   missing companion: the Claude plugins and project skills, the Codex
-   plugins and skills when the `codex` CLI is present, the graphify CLI
-   through `uv`, its skill for each host and its git hooks.
-2. Run what it prints. `RUN` lines are install commands that did not
-   succeed; `APP` lines are steps for the owner, once: without the `codex`
-   CLI, add the listed plugins in the Codex app via `/plugins`, and install
-   `uv` if it is missing. `NOTE` lines are one-time owner steps the check
-   cannot see, such as trusting the ponytail hooks in Codex `/hooks`.
-3. Run `scripts/setup_project.py companions check --project-root <root>`.
-   It exits 0 when every row reads `yes` or `-` and nothing is printed below
-   the table.
+For parallel work, provide a set of independent outcomes in the same request.
+The team separates ownership, identifies shared dependencies and chooses
+individual delivery or an authorized integration batch. You can inspect the
+tasks, evidence and proposed changes as work progresses.
 
-The table has one row per companion and host: its type (plugin, skill, cli,
-hook), `installed`, `enabled` for plugins, and `skills_loaded`, the count of its
-skills that a fresh host session lists (Claude from its init event, Codex
-through its app server). A short count or an `ERROR` line fails the check.
+## Capabilities
 
-### Uninstall
+### User-facing skills
 
-`scripts/setup_project.py companions uninstall --project-root <root>` (the
-`/companions-uninstall` entry skill) removes every companion from both hosts,
-or one with `--host`: plugins, skills, the graphify CLI and git hooks, and the
-deny rules, environment and Codex disable block that `apply` wrote. The team
-plugin, project marker files and graphify output stay. It prints a table with
-`removed` per row and exits 1 unless every row reads `yes`.
+| Skill | Use it to |
+| --- | --- |
+| `setup` | Integrate a project or explicitly migrate its managed configuration and instructions. |
+| `configure` | Change project settings, workflow policy and model overrides. |
+| `deliver` | Take a request through tasks, implementation, proof, review and delivery readiness. |
+| `autopilot` | Authorize bounded delegated work, including issue detection and resolution. |
+| `retrospective` | Inspect timing, usage, repeated failures and evidence-based improvement proposals. |
+| `issue-report` | Diagnose a plugin problem, verify a local repair candidate and prepare an anonymized upstream report. |
+| `companions-uninstall` | Remove supported companions under explicit removal authority. |
 
-The docs graph is built once by the owner
-(`GRAPHIFY_OUT=.agentrof/graphify/docs graphify extract workspace/docs --backend claude-cli`);
-after that, deliver refreshes it in the background for each merged task
-that changed Markdown under `workspace/docs`, logging to
-`.agentrof/graphify/refresh.log`.
+### Engineering methods
+
+Delivery loads these internal methods according to the task's uncertainty and
+consequences. A method can run in the current session or an appropriately scoped
+worker.
+
+| Method | Focus |
+| --- | --- |
+| `analyze` | Understand the request, challenge assumptions and establish acceptance criteria. |
+| `solution-design` | Define boundaries, dependencies, service behavior and implementation tradeoffs. |
+| `data-design` | Establish data meaning, ownership, relationships, constraints, tenancy and migration compatibility. |
+| `experience-design` | Define interactions, states, accessibility and interface behavior. |
+| `verify` | Select sufficient tests and environment checks, then bind proof to the candidate. |
+| `review` | Independently assess correctness, security and applicable design contracts. |
+
+<details>
+<summary>Generated package inventory</summary>
+
+<!-- counts:start -->
+| Plugins | Agents | Entry skills | Knowledge skills |
+|---|---|---|---|
+| 1 | 0 | 7 | 6 |
+<!-- counts:end -->
+
+The agent count refers to canonical persona files. Native technical worker
+definitions are generated by the host adapters. Inventory is maintained by
+`make counts`.
+
+</details>
+
+## How delivery works
+
+```text
+Request → tasks and acceptance criteria → applicable design methods
+        → implementation → proof and independent review → merge → readiness
+```
+
+- **One owner per task.** Tasks record outcomes, risks and evidence under
+  `workspace/docs/backlog/tasks/`. Independent writers use disjoint allocations
+  or isolated worktrees.
+- **Parallelism with resource limits.** Independent tasks run concurrently.
+  Proof and review can overlap on an immutable candidate. Shared environments
+  have explicit ownership and capacity so parallel work does not create
+  competing test environments by default.
+- **Depth follows risk.** Small changes take a short path. Persisted data,
+  security boundaries and irreversible effects receive their applicable checks
+  regardless of the line count.
+- **Proof follows the actual change.** Tests cover affected behavior and existing
+  data compatibility. An authorized batch can use one atomic integration PR and
+  proof for its combined candidate.
+- **Completion includes readiness.** Valid proof and independent review cover the
+  exact candidate, with blocking findings resolved. Merge follows the applicable
+  authority. Delivery completes when the merged revision is ready in its
+  intended environment.
+
+Project testing and the marketplace's own CI have separate contracts. Delivery
+uses the project's configured checks. Marketplace contributions follow the
+repository's local and remote validation gates. [Delivery procedure](plugins/software-engineering-team/flows/fast-lane.md)
+
+### Avoiding repeated tests
+
+`prove` and `train prove` reuse successful evidence when their recorded inputs
+remain valid and the project supplies `proof_reuse.identity_command`. That probe
+identifies relevant external environment state. Changes to code, tests,
+dependencies, commands or environment identity require fresh proof. Failed,
+interrupted, expired or unverifiable evidence is rerun. Reuse retains the original
+execution timestamps. [Proof configuration and limits](plugins/software-engineering-team/skill-content/deliver/references/local-proof.md)
+
+### Workers, models and context
+
+The compute profiles `light`, `work`, `review` and `critical` map to host-supported
+models and effort. Access is a separate choice. Generated launch definitions
+provide `light-worker`, `worker`, `reviewer`, `critical-worker` and
+`critical-reviewer`. Project overrides live in `class_models.<host>.<profile>`.
+Exact defaults belong to the [Claude profile map](platforms/claude/execution-profiles.json)
+and [Codex profile map](platforms/codex/execution-profiles.json).
+
+Covered native launches require a structured worker brief. The launch hook
+supplies current project rules, memory, task and applicable methods, rejecting
+missing or oversized context. Receipts distinguish prepared source delivery,
+method loading, reported application and verified results. Requested model
+settings are recorded separately from host-observed execution.
+
+Hooks must be loaded and trusted to enforce their covered operations. Review
+requires the host's verified read-only boundary. Source delivery cannot prove
+semantic compliance by a model. The [host contracts](#documentation) document
+those boundaries and the supported invocation paths.
+
+## Background work and retrospectives
+
+A bounded local observer collects completion, failure and session events into
+retrospective reports. It runs separately from delivery workers, with no model
+calls, test execution or remote requests. Reports use available timing, token,
+cost and skill-use evidence, and identify missing or ambiguous measurements.
+
+For active background work, `autopilot` requires a scoped grant. Its shared queue
+coordinates detection (`detect`), issue resolution (`resolve`), deeper
+retrospectives (`retro`) and plugin repair (`plugin_repair`). Attempts, capacity
+and publication authority remain bounded. The session controller dispatches
+workers. Continued execution after a session closes needs an explicitly
+configured native scheduler or recovery mechanism.
+
+Plugin repairs are verified against an isolated local candidate before an
+upstream report or PR is published under authorization. Marketplace maintainer
+work starts only from explicit user selection. [Orchestration and loop boundaries](docs/orchestration.md)
+
+## Companion integrations
+
+| Companion | Applied when |
+| --- | --- |
+| Ponytail | Implementing or reviewing the smallest complete change. |
+| Graphify | Discovering relevant relationships through an available project graph, then verifying against source. |
+| Impeccable | Designing or reviewing a user interface. |
+| security-audit | Assessing security-sensitive behavior and boundaries. |
+
+Applicable installed and enabled companions are mandatory in the team flow.
+Availability, source loading and application are recorded separately. Missing
+capabilities require a reason and sufficient core-method fallback evidence.
+Graph creation and maintenance require project authorization.
+
+Setup checks all companions together. Package updates preserve independently
+installed integrations. The catalog below contains installation scope, checks
+and project-file effects.
+
+<details>
+<summary>Companion installation and verification reference</summary>
 
 <!-- companions:start -->
 
-The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.
+The team flow owns tasks, write allocation, proof, review and merge decisions. Use each companion for its relevant work when installed and enabled. Setup checks availability without installing, uninstalling or changing global packages. Missing or unverified companions require a recorded fallback.
 
-### superpowers
+### ponytail
 
-Debugging, self-verification, review intake and skill-writing disciplines. Four skills add method the team lacks; the rest duplicate the deliver flow and stay blocked. [https://github.com/obra/superpowers](https://github.com/obra/superpowers), MIT.
-
-| Host | Scope | Install | Verify |
-|---|---|---|---|
-| claude | user | `claude plugin marketplace add obra/superpowers-marketplace`<br>`claude plugin install superpowers@superpowers-marketplace --scope user` | `claude plugin list --json` lists `superpowers@superpowers-marketplace` |
-| codex | user | `codex plugin add superpowers@openai-curated-remote` | `codex plugin list --json` lists `superpowers@openai-curated-remote` |
-
-Blocked: `brainstorming`, `writing-plans`, `executing-plans`, `subagent-driven-development`, `using-git-worktrees`, `finishing-a-development-branch`, `test-driven-development`, `dispatching-parallel-agents`, `requesting-code-review`, `diagnosing-superpowers`. They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.
-
-Environment: `SUPERPOWERS_DISABLE_TELEMETRY=1`.
-
-### humanizer
-
-Removes AI-writing tells from prose. Pull request bodies, documents and issues read as written by the team, without changing what they say. [https://github.com/blader/humanizer](https://github.com/blader/humanizer), MIT.
+Smallest complete change, plain-language review and a shortcut debt ledger. Implementation and review use its scoped method without introducing another delivery loop. [https://github.com/DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail), MIT.
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | user | `claude plugin marketplace add blader/humanizer`<br>`claude plugin install humanizer@humanizer --scope user` | `claude plugin list --json` lists `humanizer@humanizer` |
-| codex | user | `npx skills add blader/humanizer --agent codex -g -y` | `.agents/skills/humanizer/SKILL.md` exists in the home directory |
+| claude | user | `claude plugin marketplace add DietrichGebert/ponytail`<br>`claude plugin install ponytail@ponytail --scope user` | `claude plugin list --json` lists `ponytail@ponytail` |
+| codex | user | `codex plugin marketplace add DietrichGebert/ponytail`<br>`codex plugin add ponytail@ponytail` | `codex plugin list --json` lists `ponytail@ponytail` |
 
-### security-audit
+Load Ponytail explicitly for the current implementation or review. Existing hook settings remain user-owned; installation alone does not establish hook execution or skill use.
 
-Security review lens with a tenant data isolation reference. High-rigor reviews get a security method; guidance mode writes nothing. [https://github.com/cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill), MIT.
+### graphify
 
-| Host | Scope | Install | Verify |
-|---|---|---|---|
-| claude | user | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -g -y` | `.claude/skills/security-audit/SKILL.md` exists in the home directory |
-| codex | user | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -g -y` | `.agents/skills/security-audit/SKILL.md` exists in the home directory |
-
-### diagram-design
-
-Architecture, delta, sequence and ER diagrams. Structural architecture changes get a drawn delta; no telemetry. [https://github.com/cathrynlavery/diagram-design](https://github.com/cathrynlavery/diagram-design), MIT.
+Knowledge graph of the project's code and documents. Queries locate relevant relationships before source verification. Existing docs graphs can refresh after ordinary task merges when project Markdown changed. [https://github.com/Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify), Apache-2.0.
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | user | `claude plugin marketplace add cathrynlavery/diagram-design`<br>`claude plugin install diagram-design@diagram-design --scope user` | `claude plugin list --json` lists `diagram-design@diagram-design` |
-| codex | user | `codex plugin marketplace add cathrynlavery/diagram-design`<br>`codex plugin add diagram-design@diagram-design` | `codex plugin list --json` lists `diagram-design@diagram-design` |
+| cli | user | `uv tool install graphifyy` | `graphify --version` succeeds |
+| git-hook | project | `graphify hook install` | `graphify hook status` succeeds and prints `post-commit: installed` |
+| claude | user | `graphify install --platform claude` | `.claude/skills/graphify/SKILL.md` exists in the home directory |
+| codex | user | `graphify install --platform codex` | `.codex/skills/graphify/SKILL.md` exists in the home directory |
 
-Setup writes `.diagram-design`.
+uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply --companion graphify.
+
+Environment: `GRAPHIFY_OUT=.agentrof/graphify`.
+
+Setup writes `.agentrof/graphify/.gitignore`.
 
 ### impeccable
 
-Frontend design craft and read-only UI critique. Closes the frontend design quality gap; installed without hooks and with telemetry off. [https://github.com/pbakaus/impeccable](https://github.com/pbakaus/impeccable), Apache-2.0.
+Frontend design craft and read-only UI critique. Interface work uses its design and review method. Explicit installation keeps hooks disabled and telemetry off. [https://github.com/pbakaus/impeccable](https://github.com/pbakaus/impeccable), Apache-2.0.
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
@@ -143,88 +261,110 @@ Setup writes `.impeccable/config.json`.
 
 Check fails on `DESIGN.md`, `PRODUCT.md`, `docs/DESIGN.md`, `docs/PRODUCT.md`. DESIGN.md and PRODUCT.md live only in workspace/experience-design.
 
-### graphify
+### security-audit
 
-Knowledge graph of the project's code and documents. Roles find context with a graph query instead of reading many files; the code graph refreshes through git hooks on commit, checkout and merge, the docs graph in the background after deliver merges a task. [https://github.com/Graphify-Labs/graphify](https://github.com/Graphify-Labs/graphify), Apache-2.0.
-
-| Host | Scope | Install | Verify |
-|---|---|---|---|
-| cli | user | `uv tool install graphifyy` | `graphify --version` succeeds |
-| git-hook | project | `graphify hook install` | `graphify hook status` succeeds and prints `post-commit: installed` |
-| claude | user | `graphify install --platform claude` | `.claude/skills/graphify/SKILL.md` exists in the home directory |
-| codex | user | `graphify install --platform codex` | `.codex/skills/graphify/SKILL.md` exists in the home directory |
-
-uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply.
-
-Environment: `GRAPHIFY_OUT=.agentrof/graphify`.
-
-Setup writes `.agentrof/graphify/.gitignore`.
-
-### ponytail
-
-Smallest complete change, plain-language review and a shortcut debt ledger. Developer roles write less code without dropping callers, tests or safety; review and retrospective get its review and debt reports. [https://github.com/DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail), MIT.
+Security review lens with a tenant data isolation reference. Security-sensitive work uses guidance within the existing task and review. A full audit needs its own authorized scope. [https://github.com/cloudflare/security-audit-skill](https://github.com/cloudflare/security-audit-skill), MIT.
 
 | Host | Scope | Install | Verify |
 |---|---|---|---|
-| claude | user | `claude plugin marketplace add DietrichGebert/ponytail`<br>`claude plugin install ponytail@ponytail --scope user` | `claude plugin list --json` lists `ponytail@ponytail` |
-| codex | user | `codex plugin marketplace add DietrichGebert/ponytail`<br>`codex plugin add ponytail@ponytail` | `codex plugin list --json` lists `ponytail@ponytail` |
-
-Codex runs the ponytail hooks only after the owner trusts them once in /hooks.
-
-Environment: `PONYTAIL_DEFAULT_MODE=full`, `PONYTAIL_SUBAGENT_MATCHER=^software-engineering-team(:|-)(backend-developer|frontend-developer|devops-engineer)(-mechanical)?$`.
+| claude | user | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -g -y` | `.claude/skills/security-audit/SKILL.md` exists in the home directory |
+| codex | user | `npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -g -y` | `.agents/skills/security-audit/SKILL.md` exists in the home directory |
 
 <!-- companions:end -->
 
-## Fast lane
+</details>
+
+## Project files and upgrades
+
+| Location in your project | Purpose |
+| --- | --- |
+| `workspace/config.json` | Validated workflow settings and model overrides. |
+| `workspace/docs/` | Project documentation, tasks and their evidence references. |
+| `workspace/experience-design/` | Design rules and feature design artifacts. |
+| `workspace/memory/me.md` | Explicit user rules and authority boundaries. |
+| `workspace/memory/profile.md` | Learned preferences, separated from binding rules. |
+| `workspace/memory/current-plan.md` | Active outcomes, work and open decisions. |
+| `workspace/memory/product-decisions.md` | Accepted decisions with their sources and rationale. |
+| `workspace/memory/agent-marketplace.md` | Managed team integration instructions. |
+| `.agentrof/agent-marketplace/.runtime/` | Ignored local runtime records, proof caches and observations. |
+
+Project instructions and host-local worker definitions are generated during
+setup. Runtime state is reconstructible, but losing it requires reconciliation
+of active work and external effects before retrying operations.
+
+A package update does not automatically migrate every project. Use full setup
+for first integration or changes requiring managed instructions and memory to
+be reconciled. Its host generator runs `inspect`, `apply` and `check` with
+`--scope all --seed-user-files`. Missing memory is created and existing authored
+content is preserved.
+
+For compatible projects with only worker-definition or model drift, refresh the
+affected host's local projection. `--scope local` leaves tracked instructions
+and memory outside that operation. A package version change alone does not
+require setup. Each host refreshes its own local definitions. Complete the
+reported reload before relying on updated skills or hooks. [Upgrade procedure](docs/upgrade-protocol.md)
+
+## Documentation
+
+| You want to… | Read |
+| --- | --- |
+| Understand ownership, parallel work and loops | [Orchestration](docs/orchestration.md) |
+| Follow the detailed delivery procedure | [Delivery flow](plugins/software-engineering-team/flows/fast-lane.md) |
+| Configure workflow and models | [Configuration contract](plugins/software-engineering-team/skill-content/configure/references/config-contract.md) |
+| Install, refresh or migrate project integration | [Upgrade protocol](docs/upgrade-protocol.md) |
+| Understand Claude-specific behavior | [Claude Code host contract](platforms/claude/software-engineering-team/host-contract.md) |
+| Understand Codex-specific behavior | [Codex host contract](platforms/codex/software-engineering-team/host-contract.md) |
+| Understand design boundaries | [Architecture](docs/architecture.md) |
+| Author or change a skill | [Authoring guide](docs/authoring.md) |
+| Understand test selection and evidence reuse | [CI and validation](docs/ci.md) |
+| Maintain issues or publish a release | [Maintainer operations](docs/maintainer-operations-protocol.md) |
+
+## Repository layout
 
 ```text
-/setup -> /deliver -> task -> branch -> pull request -> review -> merge
+plugins/software-engineering-team/   Canonical skills, flows, scripts and templates
+platforms/shared/                   Shared host integration and launch definitions
+platforms/claude/                   Claude Code adapter, contracts and model policy
+platforms/codex/                    Codex adapter, contracts and model policy
+dist/                              Generated host packages
+tools/                             Scaffolding, builds, validation and release tooling
+docs/                              Architecture, authoring and operational guides
+.changes/                          Pending release-impact declarations
+.github/                           CI workflows and contribution forms
 ```
 
-`/deliver` turns a request into one task under
-`workspace/docs/backlog/tasks/` with its acceptance criteria and tests, the
-owner approves it, and the owning developer role writes the change on its own
-branch. The project's CI and the routed reviewers verify the pull request,
-with the read-only `security-reviewer` in parallel on a risky change; it
-merges with 0 critical and 0 major findings. The flow is defined in
-`plugins/software-engineering-team/flows/fast-lane.md`.
+Edit canonical sources and regenerate registered host distributions. `dist/`
+is build output. [Authoring and generation](docs/authoring.md)
 
-Start each `/deliver` task, parallel ones included, in its own fresh session
-on Sonnet: Claude `claude --model sonnet` (or `/model` in the app), Codex
-`codex -m gpt-6.1-sol -c model_reasoning_effort=medium`.
+## Contributing
 
-`/issue-report` is a stateless support path for Agent Marketplace defects and
-improvements. It previews the exact GitHub payload in chat, files only after
-explicit approval and never stores issue state in the consuming project.
+Start with the [contribution guide](CONTRIBUTING.md) for source ownership,
+changesets, test scope and review expectations. With Python 3.14 available,
+build and validate your complete candidate before committing.
 
-## Local state and upgrades
-
-The only project runtime is
-`<git-root>/.agentrof/agent-marketplace/.runtime/`; it is ignored,
-disposable scratch/cache state. Durable truth is tracked Markdown and JSON
-under the project workspace. The Software Engineering Team installs as one
-standalone plugin.
-
-Marketplace package upgrades inspect one deterministic refresh plan, apply it
-with closing-gate rollback, then prove that no operation remains. Authored
-files and unknown project configuration are preserved; the package-owned
-surfaces converge before the tracked diff is committed. Release Management is deliberately a later scope.
-
-## Quality
-
-```text
-make check
+```sh
+python3 tools/build_distributions.py
+make counts
+git add <complete-candidate-paths>
+make check-local
+make verify-local
 ```
 
-runs validation, deterministic distribution generation, counts, release
-surface checks and focused tests.
+After committing, run `make check-pr` before pushing. Local gates check the
+staged candidate and its selected unit tests. Pull request CI runs the full
+Linux suite, required macOS and Windows tests, static gates, CodeQL and applicable
+native host lifecycle checks. Merge and release follow the maintainer protocol.
 
-## Security
+## Support and security
 
-Report vulnerabilities only through the repository's
-[private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new).
-Do not include security details in public issues, pull requests or commit
-messages. See [SECURITY.md](SECURITY.md) for scope and disclosure guidance.
+For reproducible defects, workflow questions and improvement proposals, use the
+[issue forms](https://github.com/agentrof/agent-marketplace/issues/new/choose)
+and follow the [support guide](SUPPORT.md). Include a minimal anonymized
+reproduction. Community participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+Report vulnerabilities through the [private vulnerability reporting form](https://github.com/agentrof/agent-marketplace/security/advisories/new).
+Keep credentials, private project data and security-sensitive details out of
+public issues, pull requests and commits. [Security policy](SECURITY.md)
 
 ## License
 

@@ -47,5 +47,4 @@ public-release-smoke:
 scaffold:
 	@echo "usage:"
 	@echo "  $(PY) tools/scaffold.py new-plugin --name <kebab>"
-	@echo "  $(PY) tools/scaffold.py new-agent  --plugin <plugin> --name <role>"
 	@echo "  $(PY) tools/scaffold.py new-skill  --plugin <plugin> --name <skill> --kind entry|hidden"

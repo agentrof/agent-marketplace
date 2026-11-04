@@ -14,52 +14,34 @@
       "bc5e5ffd58e656c315fc4230e335b1acaaeba4b3a6871fc57e84144035567474"
     ,
     ".codex-plugin/plugin.json":
-      "1fdafa05437c0565dfbbcce425c17f17ee428537bed4d5b2bf20723047f6d2e0"
+      "88209e7ea264f1b8e1a148f0b3d45e86e9a2782f0e46d5fe9571b03ffb05bd54"
     ,
-    "agents/analysis-challenger.md":
-      "0d8d82f149aec756b184d55b571a79a32421004bf1ab9bf954ed9b95ca97a55c"
+    "agents/critical-reviewer.md":
+      "7e0f238aa6d8478ec68f974190a22178cc6914fa67247b41bfe1188ca97f657e"
     ,
-    "agents/backend-developer.md":
-      "56d34a315265f5f09ed2d363fc6152584c7a735864ea328bc41ec78e9062b0f3"
+    "agents/critical-worker.md":
+      "792fbb1b66e67dc6c3b47428bc5cc1c80e3fe6f48c0334c5188f145e11d66e5c"
     ,
-    "agents/business-analyst.md":
-      "b73be73c6b0102820680309c14f545ab374aa4ba27be1d5c1f9b9d448f4a76a9"
+    "agents/light-worker.md":
+      "e4ced122b9e05f209eb2845151d8efd68cb51146f6bc3e3e1698ba31fb7d6754"
     ,
-    "agents/code-reviewer.md":
-      "f074bf54dd7ef5dd0e03fb47eee6b688c5518d48ae1485b6292cfbd6b2383bf9"
+    "agents/reviewer.md":
+      "b64cb4b46a5666fcb2beebf0caa41341dc1133a74b04a1c37039b2cf6a819e53"
     ,
-    "agents/devops-engineer.md":
-      "23d810eadb47bcdbc422b7042d388010f23ac4d4450cb50741b75e4b885309b3"
-    ,
-    "agents/frontend-developer.md":
-      "c9cdcdb08b32ca426d0aadfca2c01e5144818ab99abe6ca6fcb41a2fa9545cc3"
-    ,
-    "agents/qa-engineer.md":
-      "2490aba4d1d42fdf7ea8cda14550d33402800390ada8d808c509b3c39b5c4a38"
-    ,
-    "agents/security-reviewer.md":
-      "4fcdb3d19f6245b457634eed3e70d2b1bb28cb8c285bb2f0e43ee2ea82f775d1"
-    ,
-    "agents/software-architect.md":
-      "e75c7d49429e2e1796fa752004e009c2062d870888861b44e7c75b1125dc7d1a"
-    ,
-    "agents/solution-architect.md":
-      "5029ffb57b08670e8786c97bab9d061fda4a9312a0e917e5c6890af6ec5be2ce"
-    ,
-    "agents/solution-reviewer.md":
-      "ba3a4f1c5581618b1a90cc761fcc7df2edb21f4f39925bea0ed60915669017fc"
+    "agents/worker.md":
+      "cf315f4db2272b114f0cb2f8b5d34bdb41ecfef101fabbdab7445e0f8e0b73a0"
     ,
     "constitution.md":
-      "404146fbf483271d0628613ea187105de7796b1d01b12a2f509ade55bef59fa3"
+      "0bb3fe6438a0f38e2d72099671bed6b08d77277d0b41fa8b59abf56954dcffdc"
     ,
     "flows/fast-lane.md":
-      "1a0155266b3c8e6d7caacc93cfcb8c2425d2a46de7e56a9534e5997499b4e8ac"
+      "6a794f726e92585883d58b5a62f4f8994198c91aa5f5db0838edafacacd826b3"
     ,
     "hooks/hooks.json":
-      "e30483a24936acd1e67ad83bcb4e34a282c3c72243e5d581abf52e2fbbe04bce"
+      "6b8f870b819d51aefffa29e0f648b9560b1b3a7d3284378d905eb869b13efa55"
     ,
     "host-contract.md":
-      "c3d7d40d6a18b6d359aeb2a1658a052615a452373ac78e4d3bbad98d625d645b"
+      "cdfd44cf94cec44ee74b52046ced9872625b8675f1d57b23767126b7023c22cd"
     ,
     "product.json":
       "16202a292f9cf80ddbfc1eb1c74a9e7d8f37e96089808d323613405c50d2155c"
@@ -76,6 +58,9 @@
     "scripts/await_outputs.py":
       "d82184a2c9bb1f7529c2042aa2fd030bec9dc8b2f2cb49c7daa364f2375e643f"
     ,
+    "scripts/companion_routing.py":
+      "cf03fa34a7548573f2791af3a7eceb4e8cf88ee6655cb7d07852d2fbe61b756b"
+    ,
     "scripts/file_issue.py":
       "99bb5ce4c91560911d0155f8ac34cc75ca05943bb0b2de3b41c5e035d6e1d28b"
     ,
@@ -83,16 +68,19 @@
       "c1ea21c439be664099cfba1779d9b98d1fbed9944d899f7fecd54fef57b5fc3b"
     ,
     "scripts/generate_codex_project.py":
-      "c39e886cfb8c82dc1b271815fac4b679c28297de662ae419dbf8e86769877faf"
+      "44fdbfed5ea0b0c7feb9b93215f2515bdffc749cab91657bb30ae27deca295e3"
+    ,
+    "scripts/graph_evidence.py":
+      "4b19d5b9b4461edfa461309f0682552f22aa66cac3457e97a1b58ba088a06b2a"
     ,
     "scripts/graphify_refresh.py":
       "f5fcab070a80cb4bee1a3d07c039cf3249eb7eb364e3b128f40276b7cd36458f"
     ,
     "scripts/hook_launcher.py":
-      "f5dfa03e324467e05754048c0edac9751f1f8e76844b026fce151668cbf761fc"
+      "4502ef8c0188ac9fd87b589f139c2f6a962355b3d957c23652efae4195f4ccb9"
     ,
     "scripts/host_listing.py":
-      "508f6ad2e048594e5228c736647fd273588f080430d74c637e3e13dfef5a94c3"
+      "2c07d38e28fb7bc3762d96ac99b0b333bf452add10c537e2deeca604066fa526"
     ,
     "scripts/host_models.py":
       "0055612b763ed5d5549432f86d2b978d6d3ff5af243e18e8b6d558f6d8d1f659"
@@ -101,13 +89,13 @@
       "612e835bb2c91fab9509282dd4ecbce55c9b62a35ff59b3f22e7e6c05e2fbd79"
     ,
     "scripts/model_class.py":
-      "e725ad4d93cbfc751ac180794e10b0baa4d8e4584c024109bdba4f154df45c13"
+      "45b9cfb06b6f162dd4e014f07b9a169af8931832267a19fa72bd9f36cc4c7397"
     ,
     "scripts/owner_notification.py":
       "5c11fd6d1bc1f5228e734580fff0cc9979fa53aebb052aa65c4a1eb9cecf91e2"
     ,
     "scripts/project_config.py":
-      "75fd567092fbaf724297b4ac716642880c5413a4036450120a5a9a86bddff0a3"
+      "ed9e7480c6b1b628262bf080dce9f4e18cc9f5995dec65da81eef0c50c441c51"
     ,
     "scripts/project_instructions.py":
       "9d47c7f43701efbf02710852b459e7cbf8680372afa58d10b88c460960ad8bd7"
@@ -115,50 +103,83 @@
     "scripts/project_paths.py":
       "40891b6797eb8c6437e4be9173571d451512d9af85fc47aba19db60e09c1f0b8"
     ,
+    "scripts/proof_cache.py":
+      "86f11fa7ecb95bc8a6f4972a0210adc2f30db60d5ed96800baad94b4b1833882"
+    ,
     "scripts/proof_train.py":
-      "2d60577efca94174dc65b59ee5f0e9b5c9c37beb21c4e5d7f51a61d9075ebcea"
+      "f5e2185ac2d802ccdde83b78aaa08b7f1fbd51adf5d8cbaac30d0923396cf61d"
+    ,
+    "scripts/retrospective.py":
+      "f2d31fef53823990aae11c42848549b740287fc705e61ac60ca2ad36da73ac5d"
+    ,
+    "scripts/retrospective_hook.py":
+      "e6107bdb6971bcb507827fa62443177785d516c284786cf6bd2d7efc60a8dce9"
+    ,
+    "scripts/review_execution.py":
+      "d70ecfd255d54ebecb95d5b79aadd252f2b45d0d794012126323f08bfb448956"
+    ,
+    "scripts/review_host.py":
+      "fcd07b14e8db5c8bc96a200e7daa4fea4be4b9fb36bac180d836c6a7b2591f54"
     ,
     "scripts/role_settings.py":
-      "475aca567d9cdd762ce51b60c47b6bcf7a9dfce64f062bc4d96212c4fb144526"
+      "0fb4e4e69c9911d0319b874a5b05d3cc3ffe0c9e0c96142f43128edfac78d66b"
     ,
     "scripts/runtime_floor.py":
       "511eaa656636b33440f7eb752c960934fc516d81deeeb06b1f009268128ce283"
     ,
     "scripts/session_cost.py":
-      "f74e2d25c85755bf59f1764a20a951f00b775ff463ecc52b068c562267e54a8a"
+      "cd00b46f602b10e4f197d2a664caaa35927d23e018f183a6f3a52a1b5f3ad54e"
     ,
     "scripts/setup_check.py":
       "45165c3aa0e864396eb2a04ae8b9fb4595dbfdda9fa06a24d042c2ba399ce4e4"
     ,
     "scripts/setup_companions.py":
-      "d5bbdad32e1543e565c77d48f2a26d4a679169faa00a689b59a380abbc655cbd"
+      "5ca50c78da0ede4577c5bd099354cebe842c82dc469c23a8d7fb73ca76724abd"
     ,
     "scripts/setup_project.py":
-      "681b9fa94f6a55f5fdab66ffe49cf49915f79eaf0f2bc2eb7984f647175464a8"
+      "d5cf071e13078c7ba7c24eb1a3b16ed044fcb96acddefc7ea40a7e84969e6c9a"
     ,
     "scripts/task_lane.py":
-      "82c1510ad389f5252695b3c8379cd536cd73bddacb178c57ebb53c88041be417"
+      "5857ede9967fe3fd7fd443b459c9b7618e2443677f5f200495a4a877354c4f34"
     ,
     "scripts/team_guard.py":
-      "40a894f555efe538e0df44b6e6f735719217a9ce64f1d688b9ed2c1774cb8eb7"
+      "e01524c3b89612457b06033d69fc3e881385dc707a42d5aece7f501de46e9868"
     ,
     "scripts/vault_markdown.py":
       "c71a5914a8849507e5101d593305904e4ef658b5430d2fa328cc7b320defc745"
     ,
+    "scripts/work_queue.py":
+      "fc3677777b68251c11023ca54b3898981e00000fc441cd9b377eaf9812a79ac9"
+    ,
+    "scripts/worker_context.py":
+      "5363cf455006aee750b4b817cde2854419cc23452c1f2cf8744ddef9ff1d7c54"
+    ,
+    "scripts/worker_context_host.py":
+      "d39f8bf3579bd9ab8cff3878b17fd2e112943b0a5cb967f98a60a8884ae04c7b"
+    ,
     "scripts/workspace_guard.py":
-      "f29df7f1ba48fb3c20fda18f517be7dc8812ef50a0621a1b111cfa6543627f59"
+      "87dd2bfe35db542f3ffc37ec7519d6ddeff01d6008fce5c60858108899779969"
+    ,
+    "skill-content/analyze/SKILL.md":
+      "9c2e06d1f225a535b01983cb47f65d5b31fee1e2f66f0f74b442096c314b4722"
+    ,
+    "skill-content/analyze/references/discovery.md":
+      "1df5260998bc1974f401d08fa9dd929ce7c7b5636f6867c9e12a9fdc880efeb5"
     ,
     "skill-content/autopilot/SKILL.md":
-      "105521b32e2daade22d465217e626654cb95df371a8b70a7c547f8afd833df09"
+      "8245a7401c9da0745359848e4ce66d1db11aef01d504b4d0d44dca1825ed9068"
     ,
     "skill-content/autopilot/data/autopilot-policy.json":
-      "cde9d72c1ae4a029e2afce76fc4cdfd4939582537e38a36d8e05c91e11f66a18"
+      "31781da9d30e7c2005f92a31205cd494ad2d7e6a1e93639f2a1d6f7a3d63c745"
+    ,
+    "skill-content/autopilot/references/loops.md":
+      "9faac6d56fe3c7f2ac6bd6d0e42c8138ba15bc84b158f2d471bd5097c34be6c9"
     ,
     "skill-content/autopilot/references/transport-recovery.md":
       "7a3ea3f0b5b5235315d2532f8c44427e27d3f30790491330d24246c1421b87b2"
     ,
     "skill-content/autopilot/scripts/autopilot.py":
-      "f1e7a392e0b521045efc07ccd49a81ac654f24e8af228b626ff4aa9a22e125b5"
+      "61e74dc09db168df3316b4080af1a85f216f7ab8db612296fae35040bc223e89"
     ,
     "skill-content/autopilot/scripts/autopilot_recovery.py":
       "80f96c50339cf002d9ca9d3ef5c9a7d0d9d6806c1950f61ddb793acf917b3e56"
@@ -169,146 +190,65 @@
     "skill-content/autopilot/scripts/transport_recovery_host.py":
       "05b57df14c4d46d311129887b9a4537c68dfcc5ee96f26e54f5862cf01b8946e"
     ,
-    "skill-content/business-analysis/SKILL.md":
-      "e8850e9eaaf1dce44dba1375d1a95aacc6cf29e61f0c1572dee38c87def74256"
-    ,
-    "skill-content/code-review/SKILL.md":
-      "5e3f4f4c079003b761faed184cb2efaa3b23455e3dafbf2aeb3c8dc10eff11aa"
-    ,
-    "skill-content/code-review/references/passes.md":
-      "fd7bfc3fa2eaa4dff1c046585357cad22cdeaccf7a0830213c61c679da5e3a6e"
-    ,
-    "skill-content/code-review/references/pitfalls.md":
-      "594084b63be2a81011a3de9ba88c7ae55edad21d04c682ad38c4e24e4d72a933"
-    ,
-    "skill-content/code-review/references/smells.md":
-      "83febb50fbca82cbe6915a3e005ec647b34b374e376deaff403897d38e579c92"
-    ,
     "skill-content/companions-uninstall/SKILL.md":
-      "64ade489d5401ad3a2b187b03457d66634f06000cb8d05cd76e0532025638bdb"
+      "4298643b993ce382f6f994e71df8aade151c1aea02cb5306976e74f6a7b285f6"
     ,
     "skill-content/configure/SKILL.md":
-      "4435393479e488e9e3b3231ea21f21d95237f0b189a1b044478c8a560d1816b1"
+      "d39d94a0071024c42463e83e5e2b2b5b8ddc5cf59a45dd5791e66315d52efb77"
     ,
     "skill-content/configure/references/config-contract.md":
-      "fc04b0af2cb58d3bc061bfc5fc052761939e7138a07f8f1b4a276d1df6cc0126"
+      "63774ce74c64f18d66382e7546917fd412f377eefaffc1b230f0817f42f2a976"
     ,
     "skill-content/configure/references/role-models.md":
-      "7c904397329f185bf9cd9791e46c1d9c852bb06de4f398737ea3477ab2dabb48"
+      "301fc8e3345f4ded1ded841991d0239de54f329a5c8eaf41aa7015985437f9e7"
     ,
-    "skill-content/container-environment/SKILL.md":
-      "363a73b7f8fb20d62e58e9660fad61180edac4ff1ef2571758a908c6f19f81ec"
+    "skill-content/data-design/SKILL.md":
+      "fe9dfc49fc8f9a45fed752ed9c1d56159131081783e7019afaed173324bbac14"
     ,
-    "skill-content/container-environment/references/cluster-patterns.md":
-      "ed93f25faf248e1538aee2de165cbb4d07c705b3229125c80c931e12a6df25a9"
+    "skill-content/data-design/references/evolution.md":
+      "fff7c1415ad4b34289b865a2e261028c2c789e6455489d57f442df03b295e4ac"
     ,
-    "skill-content/container-environment/references/compose-patterns.md":
-      "26b99ad6550a5049129ac25aed49c686962ca8e6b08fc9b79d73777ed33be073"
+    "skill-content/data-design/references/isolation.md":
+      "9d8fda5cfab0438377cd99ddff251580493326d92206d8189319db74a2bc143c"
     ,
-    "skill-content/container-environment/references/image-build.md":
-      "5111fa50883dda4494679d2572afbcc09ca394b77cbb4181dd9a483ecd0e1a48"
-    ,
-    "skill-content/container-environment/references/qa-checklist.md":
-      "acb390d812b303bbdafff02a5826b7da64743333e16c4ff0a2cfa411cfc1656f"
-    ,
-    "skill-content/container-environment/references/review-checklist.md":
-      "56a18e8395698988e469f93234888dcf8858e98947043f9f6a2427b13b6b4e70"
-    ,
-    "skill-content/container-environment/references/seed-scenarios.md":
-      "695931bd10a84eae5652455e9ba798856b1d340d56de3de0409c2fc86556b106"
+    "skill-content/data-design/references/modeling.md":
+      "5df40512595c3cda5f55ed61307d3eed44a146f6e65bd75d3a5b210bd46e02b1"
     ,
     "skill-content/deliver/SKILL.md":
-      "3b9a6b5efe96adef9d77f10753fd62e209590aa3e884e1823ed23cf8a54e7019"
+      "baa77cd4cfa36278f371e4694c762990427d974f5f04aa22a4caca0d2560449a"
     ,
-    "skill-content/deliver/data/role-routing.json":
-      "bda2e9917d40f41a0f0a76682e69c88ffa40d14c414fae29c8890ce2f5a9776f"
+    "skill-content/deliver/data/companion-policy.json":
+      "0182c29fb4627376785b5037373a2c49ab34b3d9a3977a34523b3018bf6ebff5"
     ,
     "skill-content/deliver/data/targets.json":
-      "6463bc53cb9595254e0cad2f3439c6f2104f328dcfc58ca57f9f2c8bf16f9898"
+      "bbcf40c755e0b77c9f2ffba476cfcf8331b251cf4befceb1f5f8e0f1266b9ca4"
     ,
     "skill-content/deliver/data/task-triggers.json":
-      "188ce72a070921732e38afedcd6ca1a89da533163314ff501a4ad59a7a5847ff"
+      "f6d41e89d00a5e5bb31440dabd2fce291b1fcfffeb38d41022b7fc169dec386b"
     ,
     "skill-content/deliver/references/fast-lane.md":
-      "e0b94f47206e0b7d7b05017fc7798dd2041fa038ef14084daa992c19f18ecaf0"
+      "1db850034de2beb719e8111c85f3e192bcddcbbcb24db38460c2c2b46e19b1c3"
     ,
     "skill-content/deliver/references/local-proof.md":
-      "cde4ae4ca91472516683d6065dcc2c0c5540bb86d0afb7b25c95a5ff1d02d45b"
+      "fa9e04ba021e4b5c50cc9659859c2061f45ad8458b623739ce4ed0e00cd18d3b"
+    ,
+    "skill-content/experience-design/SKILL.md":
+      "06c0d75650c30dcb02dabcf23b54feb5ba12c0143abb473fbb2e6b5858fdc42d"
+    ,
+    "skill-content/experience-design/references/interface.md":
+      "e4cf62dec94d885b1505a42eac180032f26431b51f2959d5c60370e41c4d9e9f"
     ,
     "skill-content/issue-report/SKILL.md":
-      "884de7d8c8a4b05673233475839a320fb705e50b7b6c230774720045e9e97abc"
+      "aa20b78ce04523fe8af4c817fa19bacc579a3e2897e36e2beb37636365d9b9be"
     ,
-    "skill-content/nosql-database-design/SKILL.md":
-      "8511eaa8b61b0ff9cc661e4d9ce216f1e5089e2b13fa98838527af0b525daa4d"
-    ,
-    "skill-content/nosql-database-design/references/aggregation.md":
-      "b71d0d487664fb93a9be3989666aade9d90e47c0e59a6903df2060e90141ac41"
-    ,
-    "skill-content/nosql-database-design/references/data-types.md":
-      "78957c3a8bbeaf0f4beec0b21e32a30aa330d9bf82c7d67ba3d949c88ef405cc"
-    ,
-    "skill-content/nosql-database-design/references/indexing.md":
-      "c747d2e8cf51fa5728d7eeb79fc5977545fc17f6f699a6d509314031615b12d4"
-    ,
-    "skill-content/nosql-database-design/references/performance.md":
-      "19b702d9e0d8e947ce24862f2632d7ec97042edf2c29d25a43ceae996839c7c9"
-    ,
-    "skill-content/nosql-database-design/references/qa-checklist.md":
-      "0e31c3e53eea8790844f3d0cad4547dccc5beaab21201edb5dfd35e65c96e6c4"
-    ,
-    "skill-content/nosql-database-design/references/review-checklist.md":
-      "841e08f2b1afe09e23c1818197235a52b525b17dfd7426691109b2c0d3307d72"
-    ,
-    "skill-content/nosql-database-design/references/scaling-consistency.md":
-      "64005a574e0123a606257e0de6086c4086a6486327035b86449698823fed1e66"
-    ,
-    "skill-content/nosql-database-design/references/schema-patterns.md":
-      "ca2773d7964e43649926d0afe1dcc330f3d47a9a7f77eee19726995b3fe4fc81"
-    ,
-    "skill-content/nosql-database-design/references/schema-validation.md":
-      "4ebfa5db83ff108d0352bca68e8ea13d2c7c860f13d876bd0f1a49d03db0802e"
-    ,
-    "skill-content/python-fastapi/SKILL.md":
-      "a4e03edf64df13eb569d5b3cf6b42b2b1d7d3e782f02f279a70b2706b318b078"
-    ,
-    "skill-content/python-fastapi/references/patterns.md":
-      "352007b984f1b4596e85a2c85ab7d343c7d80f5abbae49e4cd44526fc03d49ff"
-    ,
-    "skill-content/python-fastapi/references/qa-checklist.md":
-      "d1ee3c235e62d50261b4ef409a547b7030de215929e974d8c1f582f4eef67205"
-    ,
-    "skill-content/python-fastapi/references/review-checklist.md":
-      "cf3e72e400119cb400830138fd10ea64e7a337777d839ec49ce0e1c09ca5f753"
-    ,
-    "skill-content/react-typescript/SKILL.md":
-      "9978c100ef1605524a7b09ae6fd9279294c17f0b1c110312759248ead61acc16"
-    ,
-    "skill-content/react-typescript/references/accessibility.md":
-      "bae66259020b2b669c23530bbe110171e3fef27148032fb0a1ffe3d7f4a7fe09"
-    ,
-    "skill-content/react-typescript/references/conditional-capabilities.md":
-      "418840327651026bb82d5b2a73ef56fd4f87b72e33cf94a042900eed5dc92ad9"
-    ,
-    "skill-content/react-typescript/references/patterns.md":
-      "79013fcfc4dffe851bf1b4f0d30a742627e1d890b5e25bacecd112a8b3f7b562"
-    ,
-    "skill-content/react-typescript/references/performance.md":
-      "c1f04f2bc1b85311aa4b000db81bf0efc3561c1ce3544257875135a6e87901aa"
-    ,
-    "skill-content/react-typescript/references/qa-checklist.md":
-      "b50e11c0d3ed0874040ac632cbea225c4e3806a7e1e0bb3e7e9ae0593f21a5a8"
-    ,
-    "skill-content/react-typescript/references/review-checklist.md":
-      "144f8cb24b0fabc7915b16e3342eea08116acde5f39f8102933ee7ab851bc609"
-    ,
-    "skill-content/react-typescript/references/testing.md":
-      "3fc1be0e89bd61b6aff4f0f7abc3174b2aeabb048765038566e96b2ea7ed0792"
-    ,
-    "skill-content/react-typescript/references/tokens.md":
-      "2d81af38678d1e5701ea3f3144c8261f06cf05accfb97474c087e25df245035a"
+    "skill-content/issue-report/references/local-repair.md":
+      "5487b348ef47b0c4007f2999a81726a49f0d977abf4347402aeb42135c4034ea"
     ,
     "skill-content/retrospective/SKILL.md":
-      "a437d5abc2737fa2720ccbff283888607862477706fd8ab7357a77089dcc6ae3"
+      "b4167fe2bde240357fc0e807814ae9fd919f2a5f0ede5d92aaefbefe17cd7c5e"
+    ,
+    "skill-content/retrospective/data/automatic-policy.json":
+      "4604d46c02b25422bba6c62e1b5b6af6207fb58707ec679fd661755bae2f9590"
     ,
     "skill-content/retrospective/data/pricing.json":
       "3d61674ce01f69ba1d49818034e9cdff82e9e2259348120d7085a3aba601e0f6"
@@ -319,11 +259,23 @@
     "skill-content/retrospective/references/rework.md":
       "616b6b3720b930306653e393590a2f41ec882745ce81db826905d05d526f8066"
     ,
+    "skill-content/review/SKILL.md":
+      "1159458cce381ecdcae0b15bc1f83f6047cef7b8423f8378eae7a51160445bf5"
+    ,
+    "skill-content/review/data/review-policy.json":
+      "82a7d486cacb07505ee29c2ccb9be457042a6dedeb6971dbb409fe5c9f701806"
+    ,
+    "skill-content/review/references/findings.md":
+      "93980558fded97dba9dae55355e45306c04597351d7e6cd311abb30948293ff2"
+    ,
+    "skill-content/review/references/security.md":
+      "d8bce934fdd169a10da675e8a1d00f656d8cbf86ea14cb6ce669bbdedcb1e3a6"
+    ,
     "skill-content/setup/SKILL.md":
-      "a943c897c98fa7b7923571c8111bb0e52b7d8e1e3176732d677675946ad195c2"
+      "723e3917cc0d58502403a77861c71d5b2596b218b23ffc1ab708fcfbc2703658"
     ,
     "skill-content/setup/data/companions.json":
-      "b5df2b9a150ab07a322f8a19799348e914c7bb6fbe3924e9b9fb771243d1d3d5"
+      "e0bb41742b2c9a7be02cbcf118e40ea88cc054211d12dd5c8651803b107ac049"
     ,
     "skill-content/setup/references/ci-bootstrap.md":
       "d1a8d26ff998f886f46a7d776118fba73ccee242b1d817e89dfee6afc1cc51d8"
@@ -331,131 +283,77 @@
     "skill-content/setup/references/windows-long-paths.md":
       "bc73c5b81da276b332fba05681869b48537e530f1dd01387aa9fbf4db1241fa2"
     ,
-    "skill-content/software-architecture/SKILL.md":
-      "28775e20c06b8ec69cb6fdb186aa0a2574bb1de692ae29e27632551f41696064"
-    ,
-    "skill-content/software-architecture/references/api-design.md":
-      "b9d5f25154fd170da480ae40151db662edaa17b43afc07bc164f86f29c8c5055"
-    ,
-    "skill-content/software-architecture/references/architecture-styles.md":
-      "583383be9341f49ffd5dad6a017fed5e0ce6a09831107e7a5245c06bf4d677d5"
-    ,
-    "skill-content/software-architecture/references/cross-cutting.md":
-      "348999b6d70c5584b43b5cee533082b5b70913e46b1a6edb13ab5e54c1c6fcb2"
-    ,
-    "skill-content/software-architecture/references/decision-records.md":
-      "c7a58d15cff6bb27ca100573de7930d186366a827a2429c9ac63f6971c80d044"
-    ,
-    "skill-content/software-architecture/references/design-qualities.md":
-      "53fd052b982c7085c089dfee7ad7c31ec660d3b790881fb16c0848e7423287bb"
-    ,
-    "skill-content/software-architecture/references/nfr-budgets.md":
-      "1c61dcee6970555a40c968988f98c074d10260ff8c9285533bae34e9c83e56a3"
-    ,
-    "skill-content/software-architecture/references/service-boundaries.md":
-      "c632f7958e1040b917fc5a1ea9fb3c426b51b7b3b5390535778eeee0bbf88054"
-    ,
     "skill-content/solution-design/SKILL.md":
-      "e720170ae35e091781dbb7c76e5d285390520f55e14fb729e912ebb03f09dbab"
+      "ff52ed889f0ffbaee0b96e36410d2135dbdd723305142370a096d485c4026536"
     ,
-    "skill-content/sql-database-design/SKILL.md":
-      "72ca136089235023889a3ffbe9e5a11806805b1f822305a22cc6ce350961d8f5"
+    "skill-content/solution-design/references/architecture.md":
+      "c980a087f758d7cc7dc1df48a72f0bba0e95b914f1f7226db52813cfbac02051"
     ,
-    "skill-content/sql-database-design/references/advanced-patterns.md":
-      "71fbcb129c1b1ac94f154352ef579e8f7f80db8d9ede1c202fe552f4ac54c8f0"
+    "skill-content/solution-design/references/implementation.md":
+      "b288859e2db4f3258b9436f3f4e6463c9c9c7ebed74c550e1c33cf6d9531cdec"
     ,
-    "skill-content/sql-database-design/references/data-types.md":
-      "278ec401fd5117573c5b4c0f7cf1df7abced3978b4cc32098df5d0b2f66b54ce"
+    "skill-content/verify/SKILL.md":
+      "cd6f28c6736ec379c31fa20df83b2e755b6d47b61c6da54a2abca481234f03a7"
     ,
-    "skill-content/sql-database-design/references/examples.md":
-      "e6b6c7b9e9ea72235e9664173865e8d766d7c4ae62d03ed58ddb5743f41730ca"
+    "skill-content/verify/references/environments.md":
+      "2e31e8ac2b65fac7c4029e412fd6fb5a7d69e0c157f9576cab6d8e7d15e6b0ea"
     ,
-    "skill-content/sql-database-design/references/indexing.md":
-      "cb189199fc19f4286daa329c6e05a8255130de2b6b8183decc62fd5413afaeed"
-    ,
-    "skill-content/sql-database-design/references/multi-tenancy.md":
-      "34f5c148f0c1f1dcfc4dda2b22b95128e9460c354603326fee493c3165c7b866"
-    ,
-    "skill-content/sql-database-design/references/normalization.md":
-      "25ca0ee856ff8a0c3e21a03f260f349afc0f852638630ac93aac6da7c5a9e7d7"
-    ,
-    "skill-content/sql-database-design/references/partitioning.md":
-      "e41b3b0d8ec1caf94159244ab7b138e3ea96dd95ab288afc15c75cbccb9c36f1"
-    ,
-    "skill-content/sql-database-design/references/performance.md":
-      "cd06c298470e5e7e2cb6a146cf33d752c335f7e75aeff367ddad6ac2df121caa"
-    ,
-    "skill-content/sql-database-design/references/qa-checklist.md":
-      "325ce7b1d1493e000b4fd6d192587689d50f5fd6da0d4a0635689284a424551f"
-    ,
-    "skill-content/sql-database-design/references/review-checklist.md":
-      "6440ab63c364f68fc58bd7ee4e0aa7530380d5773da863d11f46307651937e78"
-    ,
-    "skill-content/ui-ux-design/SKILL.md":
-      "72c6936575954f2ce962efb268062f47a6fd342a0160677368e81abce4b35244"
-    ,
-    "skill-content/ui-ux-design/references/design-rationale-method.md":
-      "45afbb79a359f5f2d30320503d999d03404a4acf8eb5c9fd327a08aa8ed58f6a"
-    ,
-    "skill-content/ui-ux-design/references/recipes.md":
-      "41c78e4e7f74edaadcf8f027572a138c527457d7632035b300d66d7eba340d74"
-    ,
-    "skill-content/ui-ux-design/references/token-architecture.md":
-      "93d7f2d8cf242123528866c258441281a9e970f9184b8fc948da97df9e0a038b"
-    ,
-    "skill-content/ui-ux-design/references/ux-quick-reference.md":
-      "7d7ffaf6b4d0577cc557ce4d49201416809b5515d3551687c90ed2c494f443ee"
+    "skill-content/verify/references/test-selection.md":
+      "831786292742e6411e1df7150fa4007fa080f4ca7f07a2a568bbee88a97f90b7"
     ,
     "skills/autopilot/SKILL.md":
-      "76e901f4591b4d61c54b81ed9a20f90c29b63d0b772f606a66c6b0fc1adee332"
+      "31d67fd546618d6afa887f615a448dd1045780975c411f61f2b5520495daacc0"
     ,
     "skills/autopilot/agents/openai.yaml":
       "0f2bc579c6d541b0a3744be0898a672006bbc9e82c7e41d14c6b77c608b562e7"
     ,
     "skills/companions-uninstall/SKILL.md":
-      "d701bd1efb9b9bc2b24268b07e0215bfaf18e5d87ea0c9cbf20420b8b9bd7c18"
+      "e2ddfc178da12d9a3cbdc8f147b2fb676e3e4fb3a9831c8cffc0b31b34b0bc88"
     ,
     "skills/companions-uninstall/agents/openai.yaml":
       "7f8c2a519c2aee2f7bb79a871c02067f7a5beb0ac4950abdef0e2a63496965dd"
     ,
     "skills/configure/SKILL.md":
-      "4ac5c2a5e96145e5b8dd26088847b8750262c22cddc0d4ee0f23e28015449372"
+      "30c096df548326c0dc490a1464d7b000fd18a777a61a751897ca73228f3f851b"
     ,
     "skills/configure/agents/openai.yaml":
       "e626f2c092c01183211b91c185a69762c2af0ed847ae34e131beb87826178100"
     ,
     "skills/deliver/SKILL.md":
-      "dce3dde4f861c26d8208096ac57c50392773bccc63a1ff0ff6b80112faf6b6bf"
+      "9fa11a1e9c4df9aa93b8346200303a9f7b48686cb017eb6fb77410a6f043bbf5"
     ,
     "skills/deliver/agents/openai.yaml":
       "4130db751c6120762a5383b11716fb7c01763610add6f57067f067cc1f60c806"
     ,
     "skills/issue-report/SKILL.md":
-      "9209e4719a09c23d113119a42605fd1490d8720a928ac3d4d1eb4eb393ca729f"
+      "8ac1eb6b42991ad32635a945b49244a951582ab9db4e5e6d86066a0bf099f3a7"
     ,
     "skills/issue-report/agents/openai.yaml":
       "b2be16cb33aafcf6f6857dad2cb6679b649ee83f6bf0c8bc0980d1cfab5ead08"
     ,
     "skills/retrospective/SKILL.md":
-      "76a832f57a3cd6dcde484006793601963d9e0cf7222ef986a63b8af2ad232fec"
+      "4f02b48501e3621e8f4787ec5c11245bfe507350b5367929d33e01b5bce3a107"
     ,
     "skills/retrospective/agents/openai.yaml":
       "f75b12f84921d3cbeefad89f4c21e2225d23851bbafe1ceecc9e6e6cb4c91186"
     ,
     "skills/setup/SKILL.md":
-      "27afa663afa8af4a41330f5924a0829465b9b862baa1c2a7070c3c6f34eba889"
+      "d8db78cb1a3d3412cebb584adddeb70dca30da6498150fdf0be5d8f060cc6bf2"
     ,
     "skills/setup/agents/openai.yaml":
       "7c533d07a527237a4ac3e25af85734213f458daa1c3f9eda901d5b37846ad62f"
     ,
     "templates/AGENTS.override.md":
-      "5e94a4d3a58a3f4dc4ea61f1628e13a2d9d2f09cdff01d9f0a3d0e8be16be30f"
+      "a042c0061ac34ccc13a14d73589c2fe230ae537a43a248e2ec16b6e0624b43ba"
     ,
     "templates/CLAUDE.md":
-      "245e36625b244a2310531aaa71965557ac00d30f9f0f47688f9367c4a21535ee"
+      "d5b0aa9a3464054e91207b68bf24b09ca8113215f2e68080dd83149efd725d97"
     ,
     "templates/ci-tests.yml":
       "1e6c663045ba2a1fdd79cbc1e3efa47bba670a42bcb527cd2d57f2078465bfaf"
+    ,
+    "templates/companion-routing.json":
+      "86420b43d7149fa73b122fec5d1136ed18c15873258db92c6ed0368250806758"
     ,
     "templates/experience-design/DESIGN.md":
       "885cb216894a11d88cd303eec6e247dcff795f197a49c08f6fbb74da162e4a9b"
@@ -470,38 +368,38 @@
       "682fdb71b913a3eed47868304164ad1c7fc086e497a4e78e064cd59d111d5702"
     ,
     "templates/memory/current-plan.md":
-      "de6ca3265cfca0cdd929c9cfa4832e58a214047775fd5ac65d8801d38a2c2ecb"
+      "bd1e6c658d7b28717b0916220231b362a244ea5469a23a7c12d1533c692c68ea"
     ,
     "templates/memory/me.md":
-      "c1b1e79b6ced071bab76cde3a98f557e4c08c15969136f14b3fbadc726905125"
+      "02e734f2356d5c956fb0ba76afc1c92c4eba20a75cb6adb59c3b5b8d342e0d40"
     ,
     "templates/memory/product-decisions.md":
-      "3eaaa34a5b38431c81614902bbd8297f19da374a41da88468667904d3335a887"
+      "0b39aebfbfd331e949ee861856016089238be5f3fc1ac012111582101d1e06e9"
     ,
     "templates/memory/profile.md":
-      "b830be1df67cf93730e457cd3bf683923ed60aa2e78a098fa8de0d94cd334bd0"
+      "9695c63bb6c9fa7ebed3cb3125c4d7ce1d7620b630c515d6227fbab0c9cc94ad"
     ,
     "templates/model-classes.json":
-      "e86b24a60470eb0d1b7eb9d92e066417a481f1dd8630d4d8e2619b519f87333c"
+      "8c0eb0f986dd7a9032610f90544ac4e361cb9e34c8475296749aa92882d6336a"
     ,
     "templates/project-instruction-surfaces.json":
       "900d4090d24fe045f14ebfcfd68fbf053e465ebea1a6a985987580cb5e35664c"
     ,
     "templates/project-instructions/common.md":
-      "5dbdb11d8145574e8781f5db9b7a1c26ec20335b78217ae3faa1a48e27318d97"
+      "0b1c288466437a16f4816e21304245590d87fde4bfa0959ff497d0319c10681d"
     ,
     "templates/project-instructions/host.md":
       "d55ce54edd57f3d01df2dd9c130a19bd40cc21846c8e07e3a7c6235dc740a170"
     ,
     "templates/project-instructions/team.md":
-      "4278176e43946065277ef36f7436a40039a16dc3a57fc3d4f2ff0e27d1c39995"
+      "3a2209f56f027252e4af75b6fc67d48e23f71c23ddda3555a907df18ccf83e9e"
     ,
     "templates/project-instructions/user-context.json":
-      "1948e5b9c4992a9bce42ce83b41d99488d07ee990ffe5413f5ab5f2e191d6212"
+      "4994906812745e192fadfac1aa80202b1fbce87cd56b3d36846974c4b6c72181"
   },
   "host": "codex",
-  "marketplace_release": "2026.11.1",
+  "marketplace_release": "2026.11.2",
   "runtime_contracts": [],
   "schema_version": 4,
-  "version": "2026.11.1"
+  "version": "2026.11.2"
 }

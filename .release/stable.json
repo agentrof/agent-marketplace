@@ -1,31 +1,13 @@
 {
   "schema_version": 2,
-  "version": "2026.11.1",
-  "build_id": "snapshot.8aeb2b47003783560a0dc43886d24149f539bfa8a581f7074cf10d24d390a4d4",
+  "version": "2026.11.2",
+  "build_id": "snapshot.bf7804f96510f348711f792e9c70cc387590a82d1a2f304447953adaa64b0afb",
   "impacts": {
-    "software-engineering-team": "minor"
+    "software-engineering-team": "major",
+    "agent-marketplace": "patch"
   },
   "summaries": [
-    "train merge now honors its own --delegated flag. Before, the batch merge read only the flag stored when each member was added, so a rigor-high member added without --delegated was left for a person to merge even when the merge verb was given --delegated. The merge now delegates a member when the stored flag or the verb's flag is set, as the single pull request merge does.",
-    "The retrospective report no longer aborts on a role check stamped with a date and no time. Such a check still counts in the task's role check total and adds no minutes; only checks with a time are ordered and measured.",
-    "Setup's companion step no longer writes a docs-folder graphify ignore file. The file only limited the docs graph to Markdown files, a small gain, and graphify already skips the paths setup keeps out of Git (the managed .gitignore block lists the local runtime folder), so the extra file duplicated a rule the project already had and appeared as an untracked or tracked change after every companions apply. A project that already has the file keeps it.",
-    "The graphify line the team writes into a project's agent instructions no longer sends agents to a docs graph path that does not exist yet. It now says the docs graph exists only after its first build and that the default graph is used until then.",
-    "At pr_proof local_record, open-pr no longer demands a local proof record for a knowledge task whose whole diff is Markdown, since no test can observe such a change. A knowledge task that touches any other file, and every build task, still needs the proof.",
-    "A project can map changed paths to the local proof commands a change needs, queue proof commands through a runner, and prove ready pull requests once on a merge train integration branch.",
-    "A failed local proof keeps the end of its output, where test runners print their summary, and names pytest collection errors and node:test failures among its failing tests.",
-    "A red local proof record now lists each suite of a multi-suite test run with its status, failing test count and first failing test id. Before, the record kept only the end of the output and a flat list of failing test ids, so the name of a failed suite was lost.",
-    "The retrospective report reads task records from origin/main, not from the working tree, so a checkout that has not pulled the default branch still counts every merged task. A checkout with no origin/main reads its working tree as before.",
-    "A task whose record declares a risk, or whose record cannot be read, now runs the whole local proof even when every changed file matches a local_proof_map rule. Before, the map alone chose the commands, so a risky task could pass with only its narrow commands run.",
-    "The retrospective report no longer aborts on a role check, approval or request stamped without an offset or with a date and no time. A stamp without an offset reads as UTC, and a date alone has no start point, so it adds no minutes.",
-    "A project can set the acceptance criteria range of a build task. The task lane hard-coded 3 to 8 numbered criteria, so a task whose criteria are each one verifiable property could not be approved past 8. The optional `task_criteria_range` field of `workspace/config.json` takes `[min, max]` positive integers, `lint`, `approve` and `open-pr` read it, and the default stays 3 to 8.",
-    "task_lane.py start now creates the task branch in its own git worktree and no longer switches the current checkout, so a team running many agents from one shared checkout keeps that checkout on its branch, dirty files included. The result names the worktree; --worktree-dir picks its place and --switch keeps the old behaviour.",
-    "train add turns off a GitHub auto-merge that merge armed earlier on the pull request, so the pull request can no longer merge on its own, outside the batch proof, while its batch is being proved.",
-    "train add --dry-run no longer joins a batch. It runs every check of the add and reports the batch the pull request would join, and the train state stays as it was, so the real add that follows is no longer refused as already in a batch.",
-    "train add finds the proof record of the pull request's own worktree whatever directory it runs from, so a batch script that runs it from another worktree no longer refuses a pull request whose passing proof exists.",
-    "The merge train no longer records a batch as merged while one of its pull requests is still open. Before each member it asks GitHub for the pull request state and skips a member already merged, so a merge cut short earlier resumes. A rigor-high member without delegation waits for its owner and the batch stays green. After the merge call it asks GitHub again, and only a member shown as merged counts; otherwise the batch stays green.",
-    "train merge --dry-run no longer merges. It runs the merge checks (the batch is green and its base has not moved) and lists the members it would merge, without merging any pull request or changing the train state.",
-    "train merge now resumes a batch that merged some of its members before stopping. Before, the members already merged moved the base branch, so the retry was refused with \"moved since the batch was proved\" and the whole batch had to be proved again. The base now counts as unmoved when every first-parent commit since the proved head is the merge commit of a member of the same batch; any other commit still requires a new proof.",
-    "The merge train gains a remove verb: task_lane.py train remove takes a member that does not merge onto the others out of an open or red batch, so the rest of the batch can be proved and merged without editing the train state by hand.",
-    "A green merge train batch whose base branch moved before it merged can be proved again. Merge refuses such a batch and asks for a new proof, but prove refused every green batch, so the batch could neither merge nor be proved and stayed stuck."
+    "The constitution's sources rule tells every role to query the graphify graph first when one exists, and says how a role without a shell gets the graph answer.",
+    "Replace persona-driven delivery with thirteen scoped methods, explicit execution profiles, four context-required companions, bounded background work and exact-candidate delivery gates. Inject bounded rule context before native worker launches and clarify project memory ownership. Preserve existing settings through reviewed one-time migration. Reuse complete proof only for unchanged, identifiable inputs in standalone and batch delivery. Align platform CI coverage and native installation checks, share validation setup and track exact release dispatches."
   ]
 }

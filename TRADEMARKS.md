@@ -13,7 +13,8 @@ work and reproducing the content of [NOTICE](NOTICE).
 - Stating factually that a product or project is built on or uses this work,
   for example "Built on Agentrof Agent Marketplace" or "Uses Agentrof Agent
   Marketplace".
-- Showing the "Built with Agentrof Agent Marketplace" badge from the README.
+- Showing the optional "Built with Agentrof Agent Marketplace" badge from the
+  [README](README.md#built-with-agentrof-agent-marketplace).
 - Referring to Agentrof Agent Marketplace by name in articles, reviews and
   comparisons.
 
@@ -29,5 +30,6 @@ work and reproducing the content of [NOTICE](NOTICE).
 
 ## Contact
 
-For any use not covered here, open a discussion or issue in this repository
+For any use not covered here, open a request through the repository's
+[issue forms](https://github.com/agentrof/agent-marketplace/issues/new/choose)
 before using the marks.

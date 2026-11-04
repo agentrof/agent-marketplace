@@ -107,7 +107,6 @@ GENERATED_TEXT_SUFFIXES = {
 }
 GENERATED_TEXT_NAMES = {"LICENSE", "gitignore"}
 CANONICAL_COMPONENTS = {
-    "agents",
     "constitution.md",
     "flows",
     "hooks",
@@ -132,7 +131,6 @@ REPOSITORY_DIRECTORIES = {
     "plugins",
     "tools",
 }
-SOURCE_IGNORES = {"agents"}
 PYTHON_CACHE_SUFFIXES = {".pyc", ".pyo"}
 
 
@@ -420,13 +418,10 @@ def skill_metadata(path: Path) -> tuple[str, str, str, str, dict]:
 
 
 def copy_canonical(source: Path, target: Path) -> None:
-    def ignore(directory: str, names: list[str]) -> set[str]:
-        ignored = ignore_python_cache(directory, names)
-        if Path(directory) == source:
-            ignored.update(name for name in names if name in SOURCE_IGNORES)
-        return ignored
-
-    shutil.copytree(source, target, ignore=ignore)
+    agents = source / "agents"
+    if agents.exists() or agents.is_symlink():
+        raise ValueError(f"{agents}: canonical agents are retired; use the shared platform launch registry")
+    shutil.copytree(source, target, ignore=ignore_python_cache)
 
 
 def copy_overlay(root: Path, target: Path) -> None:
@@ -862,11 +857,37 @@ def model_id_shape(adapter: HostAdapter, catalog: dict) -> str:
     return shape
 
 
+def launch_registry(source: Path) -> dict:
+    """Technical host launch definitions, separate from canonical methods."""
+    path = source.parents[1] / "platforms" / "shared" / source.name / "launch-profiles.json"
+    if not path.exists():
+        return {"profiles": {}, "instructions": ""}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("schema_version") != 1 \
+            or not isinstance(value.get("instructions"), str) or not value["instructions"].strip() \
+            or not isinstance(value.get("profiles"), dict) or not value["profiles"]:
+        raise ValueError(f"{path}: invalid launch registry")
+    classes = load_model_classes(source.parents[1])["model_classes"]
+    pairs = set()
+    for name, spec in value["profiles"].items():
+        if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is None \
+                or not isinstance(spec, dict) \
+                or set(spec) != {"profile", "access", "description"} \
+                or not isinstance(spec.get("profile"), str) or spec["profile"] not in classes \
+                or not isinstance(spec.get("access"), str) or spec["access"] not in {"read", "write"} \
+                or not isinstance(spec.get("description"), str) \
+                or not spec["description"].strip() or "\n" in spec["description"]:
+            raise ValueError(f"{path}: invalid launch definition {name!r}")
+        pair = (spec["profile"], spec["access"])
+        if pair in pairs:
+            raise ValueError(f"{path}: duplicate profile/access pair {pair}")
+        pairs.add(pair)
+    return value
+
+
 def package_roles(source: Path) -> dict[str, str]:
-    """Every agent every host renders, with its class."""
-    agents = source / "agents"
-    return {path.stem: parse_frontmatter(path)[0]["model_class"]
-            for path in (sorted(agents.glob("*.md")) if agents.is_dir() else ())}
+    """Every technical agent every host renders, with its compute profile."""
+    return {name: spec["profile"] for name, spec in launch_registry(source)["profiles"].items()}
 
 
 def class_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dict:
@@ -899,6 +920,10 @@ def class_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dic
                 slots[slot]["effort"] = setting["effort"]
         hosts[host] = {
             "spawn_model": getattr(adapter.module, "SPAWN_MODEL", None),
+            "read_access": getattr(adapter.module, "READ_ACCESS", {
+                "definition_restricts_tools": False,
+                "note": "Read-only launch enforcement is unverified on this host.",
+            }),
             "classes": slots,
             "models": {model_id: {"family": entry["family"],
                                   "efforts": list(entry["efforts"]),
@@ -913,6 +938,7 @@ def class_map(root: Path, source: Path, adapters: dict[str, HostAdapter]) -> dic
         "model_classes": classes,
         "risk_flags": list(declaration["risk_flags"]),
         "roles": {name: sorted(names) for name, names in roles.items()},
+        "launch_profiles": launch_registry(source)["profiles"],
         "hosts": hosts,
     }
 
@@ -931,15 +957,13 @@ def generate_agents(
     root: Path, source: Path, target: Path, adapter: HostAdapter,
     execution_profile: dict[str, dict[str, str]],
 ) -> None:
-    agents = source / "agents"
-    if not agents.is_dir():
-        return
+    registry = launch_registry(source)
     context = {
-        "parse_frontmatter": parse_frontmatter,
         "execution_profile": execution_profile,
+        "instructions": registry["instructions"],
     }
-    for path in sorted(agents.glob("*.md")):
-        write_artifacts(target, adapter.module.agent_artifacts(context, path))
+    for name, spec in sorted(registry["profiles"].items()):
+        write_artifacts(target, adapter.module.agent_artifacts(context, name, spec))
 
 
 def user_context_files(root: Path) -> list[str]:
@@ -1423,7 +1447,11 @@ def validate_canonical(root: Path) -> None:
         for child in sorted(source.iterdir()):
             if is_python_cache(child):
                 continue
-            if child.name not in CANONICAL_COMPONENTS:
+            if child.name == "agents":
+                problems.append(
+                    f"{child}: canonical agents are retired; use the shared platform launch registry"
+                )
+            elif child.name not in CANONICAL_COMPONENTS:
                 problems.append(
                     f"{child}: unsupported canonical top-level entry; "
                     "move host adapters under platforms/ or use a canonical component"
@@ -1433,19 +1461,6 @@ def validate_canonical(root: Path) -> None:
                 skill_metadata(skill)
             except ValueError as exc:
                 problems.append(str(exc))
-        try:
-            classes = set(load_model_classes(root)["model_classes"])
-        except ValueError as exc:
-            problems.append(str(exc))
-            classes = set()
-        for agent in sorted((source / "agents").glob("*.md")):
-            fields, _ = parse_frontmatter(agent)
-            if fields.get("model_class") not in classes:
-                problems.append(
-                    f"{agent}: model_class must be one of {', '.join(sorted(classes))}"
-                )
-            if "model" in fields:
-                problems.append(f"{agent}: canonical agents use model_class, not model")
         for path in sorted(
             candidate for candidate in source.rglob("*")
             if candidate.is_file() and not candidate.is_symlink()

@@ -1,50 +1,76 @@
 # Host Contract
 
-- One Software Engineering Team owns a project. Packaged scripts resolve
-  beneath `${CLAUDE_PLUGIN_ROOT}`. An entry with `project_scope: external`
-  needs no setup, workspace config or Git repository.
-- At session start `team_guard.py` reports the absolute Python and scripts
-  binding and any rendered role whose stamp no longer matches the installed
-  plugin or `workspace/config.json`; it never blocks. Every hook runs through
-  `hook_launcher.py`; when the context reports `AGENT_MARKETPLACE_PYTHON:
-  unsupported`, stop the entry and give the user the stated fix.
-- Choice gates use `AskUserQuestion`: at most four questions per call, two to
-  four options each, recommendation first; it adds `Other` itself.
-- `spawn` uses the project's rendered `software-engineering-team-<agent-id>`
-  when the session lists it, else the plugin's
-  `software-engineering-team:<agent-id>`; while `team_guard.py` reports a stale
-  stamp, use the plugin identity for every role. On any other fallback tell the
-  user once why project model settings are off: no rendered file means setup
-  has not run; a file that is not listed needs a restart, or a managed
-  `strictPluginOnlyCustomization` blocks project agents. Wait for every
-  required agent; never run overlapping writers.
-- A background agent's completion notice reaches only the top session. A role
-  running as a subagent spawns its readers in the foreground, a whole wave in
-  one message; background only work that writes a file, then wait with
-  `await_outputs.py --file <output>` in the foreground (Bash `timeout`
-  300000), repeating while pending. Never end a turn to wait for a notice.
-- Setup and refresh regenerate the host projection, run the
-  generated project check and preserve authored files. The generator owns only the instruction
-  roots, local memory and the header-stamped
-  `.claude/agents/software-engineering-team-<agent-id>.md` files; other files
-  stay, and a header-stamped user copy is listed under `kept`. The first render
-  creates `.claude/agents/`, which loads only at session start, so setup asks
-  for a restart.
-- Workhorse model: `deliver` runs in a fresh session per task started with
-  `claude --model sonnet` (or `/model` in the app); a skill's `model:` does
-  not switch the session model.
-- Models: every spawn passes the `model` alias and `effort` that
-  `model_class.py resolve` returns; the pinned models need Claude Code 2.1.293
-  or later. `/configure models` records
-  `class_models` and `role_classes` overrides and renders the role files
-  again; never edit them by hand. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` runs
-  every role on the main model and `CLAUDE_CODE_EFFORT_LEVEL` pins every
-  effort, for every subagent in the session. Rendered roles set
-  `omitClaudeMd: true` and the `disallowedTools` of
-  `platforms/claude/agent-tools.json`.
-- A spawn whose pinned model errors as unavailable is spawned once more on
-  this session's family alias only if it changed nothing; tell the user which
-  role and model, and stop if it fails again.
+- One Software Engineering Team owns one project. Resolve scripts beneath `${CLAUDE_PLUGIN_ROOT}`.
+  External entries require no project setup. `team_guard.py` reports the
+  Python/scripts binding and stale managed launch definitions. A Python
+  `unsupported` marker blocks entry with its stated fix.
+- Present genuine decision gates through `AskUserQuestion`, at most four
+  questions with two to four choices each and the recommendation first.
+- Resolve each native worker through `model_class.py resolve --profile
+  <light|work|review|critical> --access <read|write> --host claude`. Prefer the
+  current project identity `software-engineering-team-<agent-id>`. Use the
+  plugin identity `software-engineering-team:<agent-id>` only after confirming
+  its settings match the request. A stale or unavailable project definition
+  must not silently discard project overrides. Refresh or report pending.
+- Allocate isolated write workspaces before launch. The parent owns all
+  delegation and waits for required work. Workers cannot launch other agents.
+- Launch definitions pin full model IDs and effort. Pass no spawn-time model
+  alias, which would override the pin. The models need Claude Code 2.1.293 or
+  later. Record requested and host-observed model/effort separately. `/tasks`
+  can expose observations. Missing observations remain unverified.
+- Read profiles allow only `Read`, `Grep` and `Glob`. Confirm the host loaded
+  that definition before accepting independent review. Worker profiles retain
+  task-scoped authoring and preview-browser capability. `omitClaudeMd: true`
+  keeps the inherited instruction load bounded. The worker launch hook supplies
+  current project rules and applicable methods from `SWE_WORKER_BRIEF`. The
+  parent includes current user restrictions that are not yet in project files.
+- The main-session default is `claude-sonnet-5-5` at `medium`. This is a launch
+  recommendation and changes no global configuration. `/configure models`
+  manages project `class_models` overrides for the four compute profiles.
+  An explicit `session` override uses `inherit` and retains profile effort.
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_EFFORT_LEVEL` can override
+  requested settings. Check their effect through host observations.
+- Setup and refresh run the generated project check. Setup owns stamped project launch definitions and generated instruction
+  roots, preserves authored files and reports collisions. Replaced owned
+  definitions participate in its rollback-capable transaction. Restart when
+  the host has not loaded a new or changed definition.
+- An unavailable model keeps its pin. After a failed launch with no changes,
+  allow one retry using a separately resolved, authorized fallback profile for
+  that attempt. Record the first failure and changed request. Never rewrite
+  shared project settings for a single retry.
+
+- With a compatible workspace config, stale launch source, model or renderer
+  needs only `generate_claude_project.py apply --scope local`, followed by
+  `generate_claude_project.py check --scope local`, from this package's scripts.
+  This refresh changes owned launch files and preserves project documents.
+  Use full setup for missing bootstrap or a reviewed config migration. Confirm
+  host reload before relying on a refreshed launch identity.
+
+## Initial setup and project migration
+
+After the setup entry's core apply/check, run `generate_claude_project.py`
+with `inspect`, `apply` and `check`, each using `--project-root <root>
+--scope all --seed-user-files`. Resolve any reported ownership choices before
+apply. The full scope refreshes portable instruction roots and this host's local
+launch files. Seeding creates missing user files and preserves existing content.
+A local-only refresh does not update tracked instructions or seed memory.
+Use the other host's generator when its local launch definitions also need refresh.
+Reload the host and complete its required hook trust flow before relying on the
+new launch guard.
+
+## Local candidate loading
+
+Build every host distribution from canonical source, then start the test
+session with `claude --plugin-dir <candidate-root>/dist/claude/software-engineering-team`.
+Rebuild after edits and run `/reload-plugins`, or start a fresh test session.
+Use `/plugin` to inspect discovered components and load errors. Confirm the
+actual package path, package digest, loaded skill and hook binding before
+accepting a regression result. Confirm any project launch projections match
+the candidate, since their model settings can override the plugin identity.
+Keep versioned release caches immutable. Restore the intended stable package
+selection after the candidate test. Managed settings may restrict local
+loading, so an unavailable candidate leaves validation pending.
+[Claude local plugin development](https://code.claude.com/docs/en/plugins/create)
 
 ## Autopilot
 

@@ -1,37 +1,34 @@
 #!/usr/bin/env python3
-"""Check or apply the optional third-party companion skills.
+"""Inspect or explicitly install/remove the four workflow companions.
 
-``check`` is read-only and exits non-zero when a selected companion is not
-installed, not enabled, not loaded by the host or its project settings are
-missing. ``apply`` installs missing companions through their official CLIs,
-then writes Claude deny rules and environment into ``.claude/settings.json``,
-the Codex skill disable block into the user Codex config and each companion's
-project files. ``uninstall`` removes every companion from the selected hosts
-and the managed settings, then proves each is gone. Each action ends with a
-table. Command output is never echoed, so a CLI that prints a token cannot
-leak it here.
+An unselected check lists the catalog. Select --all or --companion ID for
+bounded installation metadata checks. --verify-load asks supported metadata-only
+host loaders. The default never starts a model-capable session. Unknown loader
+state remains unverified. Apply and uninstall require explicit selection and
+never run as a side effect of check. Command output is kept private.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import queue
 import threading
+import tempfile
 import time
 import shlex
 import shutil
 import subprocess
-import tomllib
 from pathlib import Path
 
 import atomic_file
+import companion_routing
 
 REGISTRY = Path(__file__).resolve().parents[1] / "skill-content" / "setup" / "data" / "companions.json"
 HOSTS = ("claude", "codex")
-CODEX_START = "# agent-marketplace:software-engineering-team:companions:start"
-CODEX_END = "# agent-marketplace:software-engineering-team:companions:end"
+PROBE_TIMEOUT = 15
 
 
 def find_codex_cli() -> None:
@@ -59,23 +56,18 @@ def read_json(path: Path) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def codex_config_path() -> Path:
-    return Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "config.toml"
-
-
-def blocked_names(companion: dict) -> list[str]:
-    namespace = companion.get("skill_namespace", companion["id"])
-    return [f"{namespace}:{skill}" for skill in companion.get("blocked_skills", [])]
-
-
-def plugin_state(verify: dict, root: Path) -> tuple[bool, bool]:
+def plugin_state(verify: dict, root: Path) -> tuple[bool | None, bool | None]:
     """(present, enabled) of the plugin record; Claude counts only a user-scoped record with its folder."""
     argv = shlex.split(verify["command"])
     if shutil.which(argv[0]) is None:
-        return False, False
-    result = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
+        return None, None
+    try:
+        result = subprocess.run(argv, cwd=root, capture_output=True, text=True,
+                                check=False, timeout=PROBE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None, None
     if result.returncode != 0:
-        return False, False
+        return None, None
     try:
         listing = json.loads(result.stdout)
         if argv[0] == "codex":
@@ -84,25 +76,30 @@ def plugin_state(verify: dict, root: Path) -> tuple[bool, bool]:
         else:
             items = [item for item in listing if isinstance(item, dict) and item.get("id") == verify["plugin_id"]
                      and item.get("scope") == "user" and Path(item.get("installPath", "")).is_dir()]
-    except (json.JSONDecodeError, AttributeError):
-        return False, False
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        return None, None
     return bool(items), any(item.get("enabled") is True for item in items)
 
 
-def installed(verify: dict, root: Path) -> bool:
+def installed(verify: dict, root: Path) -> bool | None:
     if verify["kind"] == "path_exists":
         base = Path.home() if verify.get("base") == "home" else root
         return (base / verify["path"]).is_file()
     if verify["kind"] == "plugin_list":
-        return all(plugin_state(verify, root))
+        state = plugin_state(verify, root)
+        return False if False in state else (True if all(state) else None)
     argv = shlex.split(verify["command"])
     if shutil.which(argv[0]) is None:
         return False
-    result = subprocess.run(argv, cwd=root, capture_output=True, text=True, check=False)
+    try:
+        result = subprocess.run(argv, cwd=root, capture_output=True, text=True,
+                                check=False, timeout=PROBE_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return None
     return result.returncode == 0 and verify.get("contains", "") in result.stdout
 
 
-def present(verify: dict, root: Path) -> bool:
+def present(verify: dict, root: Path) -> bool | None:
     """Any trace of the companion; a disabled plugin record still counts."""
     return plugin_state(verify, root)[0] if verify["kind"] == "plugin_list" else installed(verify, root)
 
@@ -138,25 +135,8 @@ def stop(process) -> None:
 
 
 def claude_skills(root: Path) -> tuple[set[str] | None, list[str]]:
-    """Skills a fresh Claude session loads, from its init event; stopped before any model turn."""
-    process = None
-    try:
-        process = subprocess.Popen(["claude", "-p", "x", "--output-format", "stream-json", "--verbose", "--max-turns", "1"],
-                                   cwd=root, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                   stderr=subprocess.DEVNULL, text=True, encoding="utf-8")
-        replies, deadline = lines_from(process), time.monotonic() + 90
-        while True:
-            line = replies.get(timeout=max(0, deadline - time.monotonic()))
-            if line is None:
-                raise ValueError("host closed before its init event")
-            event = json.loads(line)
-            if isinstance(event, dict) and event.get("subtype") == "init":
-                return set(event["skills"]), []
-    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, queue.Empty):
-        return None, ["claude: could not verify skills through the host loader; availability is unverified"]
-    finally:
-        if process is not None:
-            stop(process)
+    """A prompt-capable session is outside a read-only availability check."""
+    return None, ["claude: loader state requires evidence from the active host session; availability is unverified"]
 
 
 def codex_skills(registry: dict, root: Path) -> tuple[dict[str, bool], list[str]]:
@@ -223,16 +203,6 @@ def codex_skills(registry: dict, root: Path) -> tuple[dict[str, bool], list[str]
     return available, findings
 
 
-def codex_disabled() -> set[str]:
-    try:
-        config = tomllib.loads(codex_config_path().read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError):
-        return set()
-    entries = config.get("skills", {}).get("config", [])
-    return {entry.get("name") for entry in entries
-            if isinstance(entry, dict) and entry.get("enabled") is False}
-
-
 def file_present(path: Path, content, if_missing: bool = False) -> bool:
     if if_missing:
         return path.is_file()
@@ -248,7 +218,7 @@ def hook_files(step: dict, root: Path) -> list[Path]:
     if not spec or shutil.which("git") is None:
         return []
     result = subprocess.run(["git", "rev-parse", "--git-path", "hooks"], cwd=root,
-                            capture_output=True, text=True, check=False)
+                            capture_output=True, text=True, check=False, timeout=PROBE_TIMEOUT)
     if result.returncode != 0:
         return []
     hooks = root / result.stdout.strip()
@@ -279,17 +249,17 @@ def loaded(names: list[str], available) -> tuple[bool | None, str | None]:
     return have == len(names), f"{have}/{len(names)}"
 
 
-def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dict], list[str]]:
+def status(registry: dict, root: Path, hosts: tuple[str, ...], *,
+           verify_load: bool = False) -> tuple[list[dict], list[str]]:
     settings = read_json(root / ".claude" / "settings.json")
-    deny = set(settings.get("permissions", {}).get("deny", []))
     env = settings.get("env", {})
-    disabled = codex_disabled() if "codex" in hosts else set()
     rows, findings = [], []
-    codex_loaded, codex_findings = codex_skills(registry, root) if "codex" in hosts else ({}, [])
-    claude_loaded, claude_findings = claude_skills(root) if "claude" in hosts else (set(), [])
+    codex_loaded, codex_findings = codex_skills(registry, root) if verify_load and "codex" in hosts else (None, [])
+    claude_loaded, claude_findings = claude_skills(root) if verify_load and "claude" in hosts else (None, [])
     findings.extend(codex_findings + claude_findings)
+    if codex_findings:
+        codex_loaded = None
     for companion in registry["companions"]:
-        names = blocked_names(companion)
         files_ok = all(file_present(root / item["path"], item["content"], item.get("if_missing", False))
                        for item in companion.get("files", []))
         for step in companion.get("steps", []):
@@ -298,65 +268,66 @@ def status(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[dic
                          "blocked_rules_present": None, "env_present": None, "files_present": None, "skills_available": None})
             for path in hook_missing(step, root):
                 findings.append(f"{companion['id']}: hook {path.name} lacks `{step['hook_env']['line']}`;"
-                                " rerun companions apply")
+                                " rerun companions apply --companion graphify")
         for path in companion.get("forbidden_paths", []):
             if (root / path).exists():
                 findings.append(f"{companion['id']}: {path} must not exist; {companion['forbidden_reason']}")
         for host in hosts:
             spec = companion["hosts"][host]
-            if host == "claude":
-                blocked = all(f"Skill({name})" in deny for name in names) if names else None
-                env_ok = all(env.get(item["name"]) == item["value"] for item in companion["env"]) \
-                    if companion.get("env") else None
-                available = claude_loaded
-            else:
-                blocked = set(names) <= disabled if names else None
-                env_ok = None
-                available = codex_loaded
-            # A Claude skill list has no per-host names; the Codex spec carries the same skill names.
+            env_ok = all(env.get(item["name"]) == item["value"] for item in companion.get("env", [])) \
+                if host == "claude" and companion.get("env") else None
+            available = claude_loaded if host == "claude" else codex_loaded
             wanted = spec["verify"].get("skills") or companion["hosts"]["codex"]["verify"].get("skills", [])
-            ok, count = loaded(wanted, available if available is not None else set())
-            if available is None:
-                ok, count = False, "unverified"
+            ok, count = loaded(wanted, available) if available is not None else (None, "unverified")
             plugin = spec["verify"]["kind"] == "plugin_list"
             present_, enabled = plugin_state(spec["verify"], root) if plugin else (installed(spec["verify"], root), None)
+            if not plugin and ok is True:
+                enabled = True
+            state, reason = "unverified", "host_loader_not_queried" if not verify_load else "host_loader_unavailable"
+            if present_ is False or enabled is False:
+                state, reason = "unavailable", "not_installed" if present_ is False else "disabled"
+            elif ok is not None:
+                state, reason = ("available", "host_loader_observed") if ok else ("unavailable", "not_exposed_by_host")
+            if present_ is None:
+                state, reason = "unverified", "installation_metadata_unavailable"
+                findings.append(f"{companion['id']}: {host} installation metadata is unverified")
+            routing = {}
+            if companion["id"] == "graphify":
+                try:
+                    routed = companion_routing.active(root, host)
+                except (OSError, ValueError) as error:
+                    routed = False
+                    findings.append(f"graphify: {host} project routing requires reconciliation: {error}")
+                if routed and present_ is True:
+                    capability = shutil.which("graphify") is not None
+                    state = "available" if capability else "unavailable"
+                    reason = "project_scoped_cli_route" if capability else "cli_unavailable"
+                    ok, enabled = None, None
+                    routing = {"native_catalog_state": "suppression_configured",
+                               "capability_available": capability,
+                               "verification": "local_routing_config_and_executable"}
             rows.append({
                 "id": companion["id"], "type": component_type(spec, host), "host": host,
                 "installed": present_, "enabled": enabled, "skills_loaded": count,
-                "blocked_rules_present": blocked, "env_present": env_ok,
+                "blocked_rules_present": None, "env_present": env_ok,
                 "files_present": files_ok if companion.get("files") else None,
-                "skills_available": ok,
+                "skills_available": ok, "availability_state": state, "availability_reason": reason,
+                "verification": "host_loader" if verify_load else "installation_metadata",
+                **routing,
             })
     return rows, findings
 
 
 def write_claude_settings(registry: dict, root: Path) -> None:
+    if not any(item.get("env") for item in registry["companions"]):
+        return
     path = root / ".claude" / "settings.json"
     settings = read_json(path)
-    deny = settings.setdefault("permissions", {}).setdefault("deny", [])
     env = settings.setdefault("env", {})
     for companion in registry["companions"]:
-        deny.extend(rule for rule in (f"Skill({name})" for name in blocked_names(companion))
-                    if rule not in deny)
         env.update((item["name"], item["value"]) for item in companion.get("env", []))
     text = json.dumps(settings, indent=2) + "\n"
     if not path.is_file() or path.read_text(encoding="utf-8") != text:
-        atomic_file.replace_text(path, text)
-
-
-def write_codex_config(registry: dict) -> None:
-    path = codex_config_path()
-    current = path.read_text(encoding="utf-8") if path.is_file() else ""
-    block = "\n".join([CODEX_START, *(
-        f'[[skills.config]]\nname = "{name}"\nenabled = false'
-        for companion in registry["companions"] for name in blocked_names(companion)
-    ), CODEX_END])
-    if CODEX_START in current and CODEX_END in current:
-        head, rest = current.split(CODEX_START, 1)
-        text = head + block + rest.split(CODEX_END, 1)[1]
-    else:
-        text = current + ("\n" if current and not current.endswith("\n") else "") + block + "\n"
-    if text != current:
         atomic_file.replace_text(path, text)
 
 
@@ -379,7 +350,11 @@ def install(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[st
         # Host-independent steps (a CLI the host skills need, a git hook) run first.
         for host, spec in [*((step["name"], step) for step in companion.get("steps", [])),
                            *((host, companion["hosts"][host]) for host in hosts)]:
-            if installed(spec["verify"], root):
+            initial = installed(spec["verify"], root)
+            if initial is True:
+                continue
+            if initial is None:
+                notes.append(f"{companion['id']}: {host} installation state is unverified; inspect before installing")
                 continue
             # Exit codes are not trusted: a repeated "marketplace add" fails
             # on some CLI versions, so the verify step alone decides success.
@@ -404,31 +379,23 @@ def install(registry: dict, root: Path, hosts: tuple[str, ...]) -> tuple[list[st
 
 
 def remove_claude_settings(registry: dict, root: Path) -> None:
+    if not any(item.get("env") or item.get("legacy_env") for item in registry["companions"]):
+        return
     path = root / ".claude" / "settings.json"
     if not path.is_file():
         return
     settings = read_json(path)
-    rules = {f"Skill({name})" for companion in registry["companions"] for name in blocked_names(companion)}
-    permissions, env = settings.get("permissions", {}), settings.get("env", {})
-    permissions["deny"] = [rule for rule in permissions.get("deny", []) if rule not in rules]
-    for item in (item for companion in registry["companions"] for item in companion.get("env", [])):
+    env = settings.get("env", {})
+    for item in (item for companion in registry["companions"]
+                 for item in companion.get("env", []) + companion.get("legacy_env", [])):
         if env.get(item["name"]) == item["value"]:
             del env[item["name"]]
-    for key, value in (("permissions", {k: v for k, v in permissions.items() if v}), ("env", env)):
-        settings.pop(key, None)
-        if value:
-            settings[key] = value
+    settings.pop("env", None)
+    if env:
+        settings["env"] = env
     text = json.dumps(settings, indent=2) + "\n"
     if path.read_text(encoding="utf-8") != text:
         atomic_file.replace_text(path, text)
-
-
-def remove_codex_config() -> None:
-    path = codex_config_path()
-    current = path.read_text(encoding="utf-8") if path.is_file() else ""
-    if CODEX_START in current and CODEX_END in current:
-        head, rest = current.split(CODEX_START, 1)
-        atomic_file.replace_text(path, head.rstrip("\n") + ("\n" if head.strip() else "") + rest.split(CODEX_END, 1)[1].lstrip("\n"))
 
 
 def uninstall(registry: dict, root: Path, hosts: tuple[str, ...]) -> list[dict]:
@@ -449,8 +416,58 @@ def uninstall(registry: dict, root: Path, hosts: tuple[str, ...]) -> list[dict]:
                 for path in Path.home().glob(pattern):
                     shutil.rmtree(path) if path.is_dir() and not path.is_symlink() else path.unlink()
             rows.append({"id": companion["id"], "type": component_type(spec, name), "host": name,
-                         "removed": not present(spec["verify"], root)})
+                         "removed": present(spec["verify"], root) is False})
     return rows
+
+
+
+def configure_explicit_only() -> dict:
+    """Explicit user-wide metadata change. Project refresh never calls this writer."""
+    content = b"policy:\n  allow_implicit_invocation: false\n"
+    sources = companion_routing.sources("codex")
+    if not sources:
+        raise ValueError("Graphify is not installed for this host; configuration does not install packages")
+    targets = []
+    for source in sources:
+        target = source.parent / "agents/openai.yaml"
+        companion_routing.safe_target(Path.home(), target.relative_to(Path.home()).as_posix())
+        before = target.read_bytes() if target.is_file() else None
+        if before is not None and before.replace(b"\r\n", b"\n").strip() != content.strip():
+            raise ValueError(f"existing skill metadata requires review and was preserved: {target}")
+        targets.append((target, before))
+    created = []
+    rows = []
+    try:
+        for target, before in targets:
+            if before is None:
+                atomic_file.real_directory(Path.home(), target.parent.relative_to(Path.home()))
+                descriptor, raw = tempfile.mkstemp(prefix=".explicit-only-", dir=target.parent)
+                temporary = Path(raw)
+                try:
+                    with os.fdopen(descriptor, "wb") as handle:
+                        handle.write(content)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                    os.chmod(temporary, atomic_file.new_file_mode())
+                    # Publish complete bytes only if no other writer created this path.
+                    os.link(temporary, target)
+                    created.append((target, target.stat().st_ino))
+                finally:
+                    atomic_file.discard(temporary)
+            after = target.read_bytes()
+            if target.is_symlink() or after != (content if before is None else before):
+                raise ValueError(f"skill metadata changed concurrently and was preserved: {target}")
+            rows.append({"path": str(target), "status": "created" if before is None else "unchanged",
+                         "before_sha256": hashlib.sha256(before).hexdigest() if before is not None else None,
+                         "after_sha256": hashlib.sha256(after).hexdigest()})
+    except BaseException:
+        for target, inode in reversed(created):
+            if target.is_file() and not target.is_symlink() and target.stat().st_ino == inode and target.read_bytes() == content:
+                target.unlink()
+        raise
+    return {"ok": True, "action": "configure", "scope": "user", "companion": "graphify", "host": "codex",
+            "rows": rows, "native_catalog_state": "configuration_written",
+            "notice": "Start a new host session and verify its catalog. Explicit Graphify invocation and its CLI remain available."}
 
 
 def mark(value) -> str:
@@ -464,23 +481,56 @@ def table(rows: list[dict], columns: tuple[str, ...]) -> None:
 
 
 def main(argv=None) -> int:
+    registry = load_registry()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", nargs="?", choices=("check", "apply", "uninstall"), default="check")
+    parser.add_argument("action", nargs="?", choices=("check", "apply", "uninstall", "configure"), default="check")
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--host", choices=(*HOSTS, "all"), default="all")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--companion", action="append", default=[],
+                           choices=[item["id"] for item in registry["companions"]],
+                           help="select one companion; repeat for several")
+    selection.add_argument("--all", action="store_true",
+                           help="select all four workflow companions")
+    parser.add_argument("--verify-load", action="store_true",
+                        help="also query supported metadata-only host loaders; other hosts stay unverified")
+    parser.add_argument("--explicit-only", action="store_true",
+                        help="with configure, disable implicit invocation of the installed Graphify skill for this user")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.project_root).resolve()
     if not root.is_dir():
         parser.error(f"project root is not a directory: {root}")
+    if args.action == "configure":
+        if args.companion != ["graphify"] or args.host != "codex" or not args.explicit_only or args.all:
+            parser.error("configure requires --companion graphify --host codex --explicit-only")
+        try:
+            result = configure_explicit_only()
+        except (OSError, ValueError) as error:
+            result = {"ok": False, "error": str(error)}
+        print(json.dumps(result, indent=2))
+        return 0 if result["ok"] else 1
+    if args.explicit_only:
+        parser.error("--explicit-only requires the explicit configure action")
     hosts = HOSTS if args.host == "all" else (args.host,)
-    registry = load_registry()
+    if not args.companion and not args.all:
+        if args.action != "check":
+            parser.error("select --companion ID or --all for an explicit package change")
+        catalog = [{"id": item["id"], "recommendation": item["recommendation"],
+                    "purpose": item["purpose"]} for item in registry["companions"]]
+        if args.json:
+            print(json.dumps({"ok": True, "rows": [], "catalog": catalog}, indent=2))
+        else:
+            table(catalog, ("id", "recommendation", "purpose"))
+            print("Select --all to inspect all workflow companions without changing packages.")
+        return 0
+    selected = [item for item in registry["companions"]
+                if item["id"] in args.companion or args.all]
+    registry = {**registry, "companions": selected}
     if args.action == "uninstall":
         rows = uninstall(registry, root, hosts)
         if "claude" in hosts:
             remove_claude_settings(registry, root)
-        if "codex" in hosts:
-            remove_codex_config()
         ok = all(row["removed"] for row in rows)
         if args.json:
             print(json.dumps({"ok": ok, "rows": rows}, indent=2))
@@ -492,11 +542,9 @@ def main(argv=None) -> int:
         owner, notes = install(registry, root, hosts)
         if "claude" in hosts:
             write_claude_settings(registry, root)
-        if "codex" in hosts:
-            write_codex_config(registry)
         write_files(registry, root)
         write_hook_env(registry, root)
-    rows, findings = status(registry, root, hosts)
+    rows, findings = status(registry, root, hosts, verify_load=args.verify_load)
     info = [spec["note"] for companion in registry["companions"]
             for host in hosts if (spec := companion["hosts"][host]).get("note")]
     ok = not findings and not owner and not notes and all(

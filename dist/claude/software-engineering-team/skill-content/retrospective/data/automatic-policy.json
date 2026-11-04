@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "batch_size": 64,
+  "run_seconds": 20,
+  "launch_seconds": 10,
+  "refresh_seconds": 10,
+  "max_attempts": 2,
+  "receipt_max_bytes": 1048576,
+  "recent_tasks": 20,
+  "recent_sessions": 128
+}

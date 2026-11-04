@@ -1,10 +1,13 @@
 # Current plan
 
-User-owned after setup; the team seeds it only when absent. A new session reads
-it first; keep it current at every step and archive finished history out of it.
+User-owned after setup. Read on resume or when coordinating active tasks.
+Record the current outcome, task links, next action and material open decisions.
+Update at meaningful changes or handoff. Archive completed history outside this summary.
 
-## Done
+## Active outcome
 
-## Next step
+## Task links
+
+## Next action
 
 ## Open decisions

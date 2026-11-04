@@ -50,7 +50,6 @@ VALIDATION_WORKFLOW = ".github/workflows/validate.yml"
 VALIDATION_WAIT_SECONDS = 1200
 VALIDATION_APPEAR_SECONDS = 120
 VALIDATION_POLL_SECONDS = 15
-RUN_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/actions/runs/([0-9]+)")
 
 
 class ReleaseError(RuntimeError):
@@ -1782,42 +1781,6 @@ class Commands:
         return subprocess.run(argv, check=False).returncode
 
 
-def dispatched_run(
-    commands: Commands, since: datetime.datetime, *,
-    attempts: int = 12, sleep: Callable[[float], None] = time.sleep,
-) -> str:
-    """Find the Release run a dispatch started when gh did not print it."""
-    for attempt in range(attempts):
-        listed = commands.capture([
-            "gh", "run", "list", "--workflow", RELEASE_WORKFLOW,
-            "--event", "workflow_dispatch", "--branch", "main",
-            "--limit", "10", "--json", "databaseId,createdAt",
-        ])
-        try:
-            runs = json.loads(listed.stdout) if listed.returncode == 0 else []
-        except json.JSONDecodeError:
-            runs = []
-        fresh = []
-        for run in runs if isinstance(runs, list) else []:
-            try:
-                created = datetime.datetime.fromisoformat(
-                    str(run["createdAt"]).replace("Z", "+00:00")
-                )
-                identity = int(run["databaseId"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            if created >= since:
-                fresh.append((created, identity))
-        if fresh:
-            return str(max(fresh)[1])
-        if attempt + 1 < attempts:
-            sleep(5)
-    raise ReleaseError(
-        "the dispatched Release run did not appear; find it with"
-        f" `gh run list --workflow {RELEASE_WORKFLOW}`"
-    )
-
-
 def ship(
     root: Path,
     version: str,
@@ -1825,23 +1788,24 @@ def ship(
     *,
     commands: Commands | None = None,
     watch: bool = True,
-    now: Callable[[], datetime.datetime] = utc_now,
-    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     """Dispatch the Release workflow on main and follow it to the Release."""
     parse_semver(version, "release version")
     commands = commands or Commands()
-    inputs = ["-f", f"version={version}"]
+    inputs = ["-f", f"inputs[version]={version}"]
     resolved = None
     if sha:
         try:
             resolved = git(root, "rev-parse", "--verify", f"{sha}^{{commit}}")
         except ReleaseError as exc:
             raise ReleaseError(f"unknown commit {sha}; fetch origin first") from exc
-        inputs += ["-f", f"sha={require_sha(resolved, 'release commit')}"]
-    since = now() - datetime.timedelta(seconds=30)
+        inputs += ["-f", f"inputs[sha]={require_sha(resolved, 'release commit')}"]
     dispatched = commands.capture([
-        "gh", "workflow", "run", RELEASE_WORKFLOW, "--ref", "main", *inputs,
+        "gh", "api", "--method", "POST",
+        f"repos/{{owner}}/{{repo}}/actions/workflows/{RELEASE_WORKFLOW}/dispatches",
+        "-H", "Accept: application/vnd.github+json",
+        "-H", "X-GitHub-Api-Version: 2026-03-10",
+        "-f", "ref=main", *inputs,
     ])
     if dispatched.returncode != 0:
         raise ReleaseError(
@@ -1849,9 +1813,17 @@ def ship(
             + ((dispatched.stderr or "").strip() or (dispatched.stdout or "").strip()
                or "no detail")
         )
-    match = RUN_URL_RE.search(dispatched.stdout or "") \
-        or RUN_URL_RE.search(dispatched.stderr or "")
-    run_id = match.group(1) if match else dispatched_run(commands, since, sleep=sleep)
+    try:
+        response = json.loads(dispatched.stdout or "")
+    except json.JSONDecodeError:
+        response = None
+    identity = response.get("workflow_run_id") if isinstance(response, dict) else None
+    if type(identity) is not int or identity <= 0:
+        raise ReleaseError(
+            "release dispatch returned no valid workflow_run_id; outcome is unknown. "
+            f"Inspect `gh run list --workflow {RELEASE_WORKFLOW}` before dispatching again"
+        )
+    run_id = str(identity)
     result: dict = {"version": version, "sha": resolved, "run_id": run_id}
     if not watch:
         return result
@@ -1884,8 +1856,6 @@ def auto_release(
     after: str,
     *,
     commands: Commands | None = None,
-    now: Callable[[], datetime.datetime] = utc_now,
-    sleep: Callable[[float], None] = time.sleep,
 ) -> dict:
     """Dispatch the Release for a push to main that carries a release commit."""
     intent = release_intent(root, before, after)
@@ -1893,7 +1863,6 @@ def auto_release(
         return intent
     started = ship(
         root, intent["version"], after, commands=commands, watch=False,
-        now=now, sleep=sleep,
     )
     return {**intent, "run_id": started["run_id"]}
 

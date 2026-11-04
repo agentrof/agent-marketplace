@@ -22,6 +22,11 @@ MODEL_ID_SHAPE = r"[a-z0-9]+(?:[.-][a-z0-9]+)*"
 HOST_CLI_KEY = "codex"
 # A role file's model wins over a spawn-time model, so a role runs its own pins.
 SPAWN_MODEL = None
+READ_ACCESS = {
+    "definition_restricts_tools": False,
+    "note": "Custom agent files inherit the parent sandbox. A read-only task requires an"
+            " independently verified read-only launch boundary; the profile alone cannot enforce it.",
+}
 # The drift check reads the catalog bundled with the CLI, from `codex debug
 # models --bundled`. A pinned source of this form names the CLI release whose
 # bundled catalog the pins were verified against.
@@ -35,10 +40,9 @@ BUNDLED_CATALOG_SOURCE_RE = re.compile(
 DEFAULT_PROMPTS = {"autopilot": "${plugin}:{name} on"}
 # How a frozen-task A/B runs every role on one candidate model.
 MODEL_TRIAL = (
-    "Codex: in a scratch copy of the project, run `generate_codex_project.py"
-    " apply --scope local --execution-profile inherit`, then start the session"
-    " with `--model <model ID>`; each role keeps its class's"
-    " `model_reasoning_effort`."
+    "Codex: configure the selected compute profile's model and effort in a"
+    " scratch project, regenerate its local launch files, and record the"
+    " requested settings separately from the host's observed runtime settings."
 )
 
 
@@ -93,24 +97,20 @@ def skill_artifacts(context: dict, source_name: str, metadata: tuple[str, str, s
     ]
 
 
-def agent_artifacts(context: dict, source) -> list[tuple[str, str]]:
-    fields, body = context["parse_frontmatter"](source)
-    slot = fields.pop("model_class", "")
+def agent_artifacts(context: dict, name: str, spec: dict) -> list[tuple[str, str]]:
+    slot = spec["profile"]
     setting = context["execution_profile"].get(slot)
     if setting is None:
-        raise ValueError(f"{source}: invalid model class {slot!r}")
-    lines = ["---"]
-    for key in ("name", "description"):
-        if not fields.get(key):
-            raise ValueError(f"{source}: missing {key}")
-        lines.append(f"{key}: {fields.pop(key)}")
+        raise ValueError(f"{name}: invalid compute profile {slot!r}")
+    lines = ["---", f"name: {name}", f"description: {spec['description']}"]
     if "model" in setting:
         lines.append(f"model: {setting['model']}")
     if "effort" in setting:
         lines.append(f"model_reasoning_effort: {setting['effort']}")
-    lines.extend(f"{key}: {value}" for key, value in fields.items())
-    lines.extend(("---", "", body.lstrip("\n")))
-    return [(f"agents/{source.name}", "\n".join(lines))]
+    if spec["access"] == "read":
+        lines.append("tools: Read, Grep, Glob")
+    lines.extend(("---", "", context["instructions"], ""))
+    return [(f"agents/{name}.md", "\n".join(lines))]
 
 
 def native_manifest_directory(host_id: str) -> str:

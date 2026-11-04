@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""Small host-neutral team hook.
+"""Announce runtime bindings and refresh project-local companion routing.
 
-The team has no shared state service.  This hook only announces the active
-team at session start and leaves mutation policy to the owning document
-compiler.  It also reports the project's
-rendered role files whose stamp does not match the installed package and the
-project's settings: in the Claude Code package the session then spawns the
-plugin's roles until a refresh, and in the Codex package, which has no other
-identity of a role, the user is told that those roles run what they were
-rendered with until setup.  It never blocks: anything it cannot read leaves
-the announcement as it is.
+The registered hook reconciles only the installed package's managed catalog
+policy. Changed settings require a fresh session. Native launch staleness is
+reported separately; this hook does not render agents or project documents.
 """
 
 from __future__ import annotations
@@ -125,6 +119,26 @@ def stale_codex_roles(generator, root: Path, plugin_root: Path) -> dict | None:
     }
 
 
+
+def refresh_companion_routing(event: dict) -> dict | None:
+    package = Path(__file__).resolve().parents[1]
+    if not (package / "templates/companion-routing.json").is_file():
+        return None
+    directory = event.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR")
+    if not isinstance(directory, str) or not directory:
+        return None
+    try:
+        import companion_routing
+        changed = companion_routing.apply(codex_root(Path(directory)))
+    except (ImportError, OSError, ValueError) as error:
+        message = f"Project-local companion routing needs reconciliation: {error}"
+        return {"message": message, "context": "AGENT_MARKETPLACE_COMPANION_ROUTING: pending\n" + message}
+    if not changed:
+        return None
+    message = "Project-local companion routing refreshed. Start a new host session; the current catalog may still contain the previous skill entry."
+    return {"message": message, "context": "AGENT_MARKETPLACE_COMPANION_ROUTING: refreshed\n" + message}
+
+
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else "pre"
     if mode == "register":
@@ -134,6 +148,7 @@ def main() -> int:
             f"AGENT_MARKETPLACE_HOOKS_ACTIVE: {plugin_name()}",
             f"AGENT_MARKETPLACE_PYTHON: {python_path}",
             f"AGENT_MARKETPLACE_SCRIPTS: {scripts_path}",
+            "Context-only path values. Insert them literally into commands.",
         ))
         event = read_event()
         try:
@@ -141,10 +156,11 @@ def main() -> int:
         except Exception:
             stale = None
         output: dict = {}
-        if stale is not None:
-            context += "\n" + stale["context"]
-            if event.get("source") not in REPEATED_SOURCES:
-                output["systemMessage"] = stale["message"]
+        for warning in (refresh_companion_routing(event), stale):
+            if warning is not None:
+                context += "\n" + warning["context"]
+                if event.get("source") not in REPEATED_SOURCES:
+                    output["systemMessage"] = "\n".join(filter(None, (output.get("systemMessage"), warning["message"])))
         output["hookSpecificOutput"] = {
             "hookEventName": "SessionStart",
             "additionalContext": context,

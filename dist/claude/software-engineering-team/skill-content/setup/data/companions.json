@@ -1,254 +1,26 @@
 {
   "schema_version": 1,
-  "precedence": "The team flow owns plans, task files, branches, worktrees, commits, pull requests, merge and review verdicts; a companion skill that runs its own version of those is not used. Companions are used when installed and relevant, never required.",
+  "precedence": "The team flow owns tasks, write allocation, proof, review and merge decisions. Use each companion for its relevant work when installed and enabled. Setup checks availability without installing, uninstalling or changing global packages. Missing or unverified companions require a recorded fallback.",
   "notes": [
     "Finding context: when `.agentrof/graphify` holds a graph, query it first with `graphify query|path|explain` (the docs graph, `--graph .agentrof/graphify/docs/graph.json`, exists only after its first build; without it use the default graph); otherwise read the task file's sources and grep."
   ],
   "companions": [
     {
-      "id": "superpowers",
-      "repo": "https://github.com/obra/superpowers",
-      "license": "MIT",
-      "purpose": "Debugging, self-verification, review intake and skill-writing disciplines.",
-      "why": "Four skills add method the team lacks; the rest duplicate the deliver flow and stay blocked.",
-      "skill_namespace": "superpowers",
-      "blocked_skills": [
-        "brainstorming",
-        "writing-plans",
-        "executing-plans",
-        "subagent-driven-development",
-        "using-git-worktrees",
-        "finishing-a-development-branch",
-        "test-driven-development",
-        "dispatching-parallel-agents",
-        "requesting-code-review",
-        "diagnosing-superpowers"
-      ],
-      "blocked_reason": "They run their own plans, worktrees, branches, reviews and merges, which the team flow owns; diagnosing-superpowers drafts upstream issues that could carry project data.",
-      "env": [
-        {"name": "SUPERPOWERS_DISABLE_TELEMETRY", "value": "1"}
-      ],
-      "hosts": {
-        "claude": {
-          "scope": "user",
-          "install": [
-            "claude plugin marketplace add obra/superpowers-marketplace",
-            "claude plugin install superpowers@superpowers-marketplace --scope user"
-          ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "superpowers@superpowers-marketplace"},
-          "uninstall": ["claude plugin uninstall superpowers@superpowers-marketplace --scope user"]
-        },
-        "codex": {
-          "scope": "user",
-          "install": [
-            "codex plugin add superpowers@openai-curated-remote"
-          ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "superpowers@openai-curated-remote", "skills": ["superpowers:systematic-debugging", "superpowers:verification-before-completion", "superpowers:receiving-code-review", "superpowers:writing-skills"]},
-          "uninstall": ["codex plugin remove superpowers@openai-curated-remote"]
-        }
-      },
-      "routing": [
-        {"step": "Write code, test fails or bug task", "role": "developer roles", "skill": "superpowers:systematic-debugging", "when": "a failure whose cause is not obvious"},
-        {"step": "Self-check before handoff", "role": "developer roles", "skill": "superpowers:verification-before-completion", "when": "always before reporting done"},
-        {"step": "Fix pass", "role": "same writer", "skill": "superpowers:receiving-code-review", "when": "applying review findings"},
-        {"step": "Team skill authoring", "role": "plugin maintainers", "skill": "superpowers:writing-skills", "when": "writing or changing a skill"}
-      ]
-    },
-    {
-      "id": "humanizer",
-      "repo": "https://github.com/blader/humanizer",
-      "license": "MIT",
-      "purpose": "Removes AI-writing tells from prose.",
-      "why": "Pull request bodies, documents and issues read as written by the team, without changing what they say.",
-      "hosts": {
-        "claude": {
-          "scope": "user",
-          "install": [
-            "claude plugin marketplace add blader/humanizer",
-            "claude plugin install humanizer@humanizer --scope user"
-          ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "humanizer@humanizer"},
-          "uninstall": ["claude plugin uninstall humanizer@humanizer --scope user"]
-        },
-        "codex": {
-          "scope": "user",
-          "install": [
-            "npx skills add blader/humanizer --agent codex -g -y"
-          ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/humanizer/SKILL.md", "base": "home", "skills": ["humanizer:humanizer"]},
-          "uninstall": ["npx skills remove humanizer -g -y"]
-        }
-      },
-      "routing": [
-        {"step": "PR body, docs, README, upstream issue", "role": "writer, deliver", "skill": "humanizer, embedded mode", "when": "prose deliverables; not commit messages"}
-      ]
-    },
-    {
-      "id": "security-audit",
-      "repo": "https://github.com/cloudflare/security-audit-skill",
-      "license": "MIT",
-      "purpose": "Security review lens with a tenant data isolation reference.",
-      "why": "High-rigor reviews get a security method; guidance mode writes nothing.",
-      "hosts": {
-        "claude": {
-          "scope": "user",
-          "install": [
-            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -g -y"
-          ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/security-audit/SKILL.md", "base": "home"},
-          "uninstall": ["npx skills remove security-audit -g -a claude-code -y"]
-        },
-        "codex": {
-          "scope": "user",
-          "install": [
-            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -g -y"
-          ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/security-audit/SKILL.md", "base": "home", "skills": ["security-audit"]},
-          "uninstall": ["npx skills remove security-audit -g -y"]
-        }
-      },
-      "routing": [
-        {"step": "Review, high rigor", "role": "security-reviewer", "skill": "security-audit guidance mode", "when": "auth, tenant data, secrets, money, deletion"},
-        {"step": "Full security audit", "role": "owner request only", "skill": "security-audit full mode", "when": "explicit audit request, reports outside the repo"}
-      ]
-    },
-    {
-      "id": "diagram-design",
-      "repo": "https://github.com/cathrynlavery/diagram-design",
-      "license": "MIT",
-      "purpose": "Architecture, delta, sequence and ER diagrams.",
-      "why": "Structural architecture changes get a drawn delta; no telemetry.",
-      "files": [
-        {"path": ".diagram-design", "content": "profile: default\n"}
-      ],
-      "hosts": {
-        "claude": {
-          "scope": "user",
-          "install": [
-            "claude plugin marketplace add cathrynlavery/diagram-design",
-            "claude plugin install diagram-design@diagram-design --scope user"
-          ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "diagram-design@diagram-design"},
-          "uninstall": ["claude plugin uninstall diagram-design@diagram-design --scope user"]
-        },
-        "codex": {
-          "scope": "user",
-          "install": [
-            "codex plugin marketplace add cathrynlavery/diagram-design",
-            "codex plugin add diagram-design@diagram-design"
-          ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "diagram-design@diagram-design", "skills": ["diagram-design:diagram-design"]},
-          "uninstall": ["codex plugin remove diagram-design@diagram-design"]
-        }
-      },
-      "routing": [
-        {"step": "Architecture change", "role": "software-architect", "skill": "diagram-design (architecture, architecture-delta, sequence, ER)", "when": "a structural change to system-architecture"}
-      ]
-    },
-    {
-      "id": "impeccable",
-      "repo": "https://github.com/pbakaus/impeccable",
-      "license": "Apache-2.0",
-      "purpose": "Frontend design craft and read-only UI critique.",
-      "why": "Closes the frontend design quality gap; installed without hooks and with telemetry off.",
-      "env": [
-        {"name": "IMPECCABLE_CONTEXT_DIR", "value": "workspace/experience-design"},
-        {"name": "IMPECCABLE_NO_TELEMETRY", "value": "1"}
-      ],
-      "files": [
-        {"path": ".impeccable/config.json", "content": {"telemetry": false, "hook": {"enabled": false}}}
-      ],
-      "forbidden_paths": ["DESIGN.md", "PRODUCT.md", "docs/DESIGN.md", "docs/PRODUCT.md"],
-      "forbidden_reason": "DESIGN.md and PRODUCT.md live only in workspace/experience-design.",
-      "hosts": {
-        "claude": {
-          "scope": "user",
-          "install": [
-            "npx impeccable install --providers=claude --user --no-hooks -y"
-          ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/impeccable/SKILL.md", "base": "home"},
-          "remove_paths": [".claude/skills/impeccable", ".claude/agents/impeccable-*.md"]
-        },
-        "codex": {
-          "scope": "user",
-          "install": [
-            "npx impeccable install --providers=codex --user --no-hooks -y"
-          ],
-          "verify": {"kind": "path_exists", "path": ".agents/skills/impeccable/SKILL.md", "base": "home", "skills": ["impeccable"]},
-          "remove_paths": [".agents/skills/impeccable"]
-        }
-      },
-      "routing": [
-        {"step": "Write UI", "role": "frontend-developer", "skill": "impeccable (craft, polish, harden, adapt)", "when": "the task touches UI"},
-        {"step": "Review, UI", "role": "code-reviewer", "skill": "impeccable detect and critique, read-only", "when": "the change touches UI"}
-      ]
-    },
-    {
-      "id": "graphify",
-      "repo": "https://github.com/Graphify-Labs/graphify",
-      "license": "Apache-2.0",
-      "purpose": "Knowledge graph of the project's code and documents.",
-      "why": "Roles find context with a graph query instead of reading many files; the code graph refreshes through git hooks on commit, checkout and merge, the docs graph in the background after deliver merges a task.",
-      "steps": [
-        {
-          "name": "cli",
-          "scope": "user",
-          "install": ["uv tool install graphifyy"],
-          "requires": {"command": "uv", "hint": "uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply."},
-          "verify": {"kind": "command", "command": "graphify --version"},
-          "uninstall": ["uv tool uninstall graphifyy"]
-        },
-        {
-          "name": "git-hook",
-          "scope": "project",
-          "install": ["graphify hook install"],
-          "verify": {"kind": "command", "command": "graphify hook status", "contains": "post-commit: installed"},
-          "uninstall": ["graphify hook uninstall"],
-          "hook_env": {
-            "hooks": ["post-commit", "post-checkout", "post-merge", "post-rewrite"],
-            "marker": "graphify",
-            "line": "export GRAPHIFY_OUT=.agentrof/graphify"
-          }
-        }
-      ],
-      "env": [
-        {"name": "GRAPHIFY_OUT", "value": ".agentrof/graphify"}
-      ],
-      "files": [
-        {"path": ".agentrof/graphify/.gitignore", "content": "*\n"}
-      ],
-      "hosts": {
-        "claude": {
-          "scope": "user",
-          "install": [
-            "graphify install --platform claude"
-          ],
-          "verify": {"kind": "path_exists", "path": ".claude/skills/graphify/SKILL.md", "base": "home"},
-          "remove_paths": [".claude/skills/graphify"]
-        },
-        "codex": {
-          "scope": "user",
-          "install": [
-            "graphify install --platform codex"
-          ],
-          "verify": {"kind": "path_exists", "path": ".codex/skills/graphify/SKILL.md", "base": "home", "skills": ["graphify"]},
-          "remove_paths": [".codex/skills/graphify"]
-        }
-      },
-      "routing": [
-        {"step": "Find context", "role": "all roles", "skill": "graphify query, path, explain", "when": "`.agentrof/graphify` holds a graph"},
-        {"step": "Docs graph refresh", "role": "deliver", "skill": "graphify_refresh.py in the background", "when": "a merged task changed Markdown under workspace/docs"}
-      ]
-    },
-    {
       "id": "ponytail",
+      "recommendation": "required_when_available",
       "repo": "https://github.com/DietrichGebert/ponytail",
       "license": "MIT",
       "purpose": "Smallest complete change, plain-language review and a shortcut debt ledger.",
-      "why": "Developer roles write less code without dropping callers, tests or safety; review and retrospective get its review and debt reports.",
-      "env": [
-        {"name": "PONYTAIL_DEFAULT_MODE", "value": "full"},
-        {"name": "PONYTAIL_SUBAGENT_MATCHER", "value": "^software-engineering-team(:|-)(backend-developer|frontend-developer|devops-engineer)(-mechanical)?$"}
+      "why": "Implementation and review use its scoped method without introducing another delivery loop.",
+      "legacy_env": [
+        {
+          "name": "PONYTAIL_DEFAULT_MODE",
+          "value": "full"
+        },
+        {
+          "name": "PONYTAIL_SUBAGENT_MATCHER",
+          "value": "^software-engineering-team(:|-)(backend-developer|frontend-developer|devops-engineer)(-mechanical)?$"
+        }
       ],
       "hosts": {
         "claude": {
@@ -257,8 +29,14 @@
             "claude plugin marketplace add DietrichGebert/ponytail",
             "claude plugin install ponytail@ponytail --scope user"
           ],
-          "verify": {"kind": "plugin_list", "command": "claude plugin list --json", "plugin_id": "ponytail@ponytail"},
-          "uninstall": ["claude plugin uninstall ponytail@ponytail --scope user"]
+          "verify": {
+            "kind": "plugin_list",
+            "command": "claude plugin list --json",
+            "plugin_id": "ponytail@ponytail"
+          },
+          "uninstall": [
+            "claude plugin uninstall ponytail@ponytail --scope user"
+          ]
         },
         "codex": {
           "scope": "user",
@@ -266,15 +44,292 @@
             "codex plugin marketplace add DietrichGebert/ponytail",
             "codex plugin add ponytail@ponytail"
           ],
-          "verify": {"kind": "plugin_list", "command": "codex plugin list --json", "plugin_id": "ponytail@ponytail", "skills": ["ponytail:ponytail", "ponytail:ponytail-review", "ponytail:ponytail-debt"]},
-          "uninstall": ["codex plugin remove ponytail@ponytail"],
-          "note": "Codex runs the ponytail hooks only after the owner trusts them once in /hooks."
+          "verify": {
+            "kind": "plugin_list",
+            "command": "codex plugin list --json",
+            "plugin_id": "ponytail@ponytail",
+            "skills": [
+              "ponytail:ponytail",
+              "ponytail:ponytail-review",
+              "ponytail:ponytail-debt"
+            ]
+          },
+          "uninstall": [
+            "codex plugin remove ponytail@ponytail"
+          ],
+          "note": "Load Ponytail explicitly for the current implementation or review. Existing hook settings remain user-owned; installation alone does not establish hook execution or skill use."
         }
       },
       "routing": [
-        {"step": "Write code", "role": "developer roles", "skill": "ponytail, level full", "when": "always"},
-        {"step": "Review", "role": "code-reviewer", "skill": "/ponytail-review", "when": "inside its single review pass"},
-        {"step": "Retrospective", "role": "retrospective", "skill": "/ponytail-debt", "when": "report the shortcut debt ledger"}
+        {
+          "step": "Write code",
+          "role": "task owner or coding worker",
+          "skill": "ponytail, level full",
+          "when": "required for implementation when installed and enabled"
+        },
+        {
+          "step": "Review",
+          "role": "reviewer",
+          "skill": "ponytail-review",
+          "when": "required within the existing code review when installed and enabled"
+        },
+        {
+          "step": "Retrospective",
+          "role": "retrospective",
+          "skill": "ponytail-debt",
+          "when": "a shortcut debt report is requested and the companion is available"
+        }
+      ]
+    },
+    {
+      "id": "graphify",
+      "recommendation": "required_when_available",
+      "repo": "https://github.com/Graphify-Labs/graphify",
+      "license": "Apache-2.0",
+      "purpose": "Knowledge graph of the project's code and documents.",
+      "why": "Queries locate relevant relationships before source verification. Existing docs graphs can refresh after ordinary task merges when project Markdown changed.",
+      "steps": [
+        {
+          "name": "cli",
+          "scope": "user",
+          "install": [
+            "uv tool install graphifyy"
+          ],
+          "requires": {
+            "command": "uv",
+            "hint": "uv not found: install it (https://docs.astral.sh/uv/getting-started/installation/), then rerun companions apply --companion graphify."
+          },
+          "verify": {
+            "kind": "command",
+            "command": "graphify --version"
+          },
+          "uninstall": [
+            "uv tool uninstall graphifyy"
+          ]
+        },
+        {
+          "name": "git-hook",
+          "scope": "project",
+          "install": [
+            "graphify hook install"
+          ],
+          "verify": {
+            "kind": "command",
+            "command": "graphify hook status",
+            "contains": "post-commit: installed"
+          },
+          "uninstall": [
+            "graphify hook uninstall"
+          ],
+          "hook_env": {
+            "hooks": [
+              "post-commit",
+              "post-checkout",
+              "post-merge",
+              "post-rewrite"
+            ],
+            "marker": "graphify",
+            "line": "export GRAPHIFY_OUT=.agentrof/graphify"
+          }
+        }
+      ],
+      "env": [
+        {
+          "name": "GRAPHIFY_OUT",
+          "value": ".agentrof/graphify"
+        }
+      ],
+      "files": [
+        {
+          "path": ".agentrof/graphify/.gitignore",
+          "content": "*\n"
+        }
+      ],
+      "hosts": {
+        "claude": {
+          "scope": "user",
+          "install": [
+            "graphify install --platform claude"
+          ],
+          "verify": {
+            "kind": "path_exists",
+            "path": ".claude/skills/graphify/SKILL.md",
+            "base": "home"
+          },
+          "remove_paths": [
+            ".claude/skills/graphify"
+          ]
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "graphify install --platform codex"
+          ],
+          "verify": {
+            "kind": "path_exists",
+            "path": ".codex/skills/graphify/SKILL.md",
+            "base": "home",
+            "skills": [
+              "graphify"
+            ]
+          },
+          "remove_paths": [
+            ".codex/skills/graphify"
+          ]
+        }
+      },
+      "routing": [
+        {
+          "step": "Find context",
+          "role": "task owner or worker",
+          "skill": "graphify query, path, explain",
+          "when": "required for codebase discovery when installed and enabled; verify results against current source"
+        },
+        {
+          "step": "Docs graph refresh",
+          "role": "deliver",
+          "skill": "graphify_refresh.py in the background",
+          "when": "an ordinary merged task changes Markdown under workspace/docs and a docs graph already exists"
+        }
+      ]
+    },
+    {
+      "id": "impeccable",
+      "recommendation": "required_when_available",
+      "repo": "https://github.com/pbakaus/impeccable",
+      "license": "Apache-2.0",
+      "purpose": "Frontend design craft and read-only UI critique.",
+      "why": "Interface work uses its design and review method. Explicit installation keeps hooks disabled and telemetry off.",
+      "env": [
+        {
+          "name": "IMPECCABLE_CONTEXT_DIR",
+          "value": "workspace/experience-design"
+        },
+        {
+          "name": "IMPECCABLE_NO_TELEMETRY",
+          "value": "1"
+        }
+      ],
+      "files": [
+        {
+          "path": ".impeccable/config.json",
+          "content": {
+            "telemetry": false,
+            "hook": {
+              "enabled": false
+            }
+          }
+        }
+      ],
+      "forbidden_paths": [
+        "DESIGN.md",
+        "PRODUCT.md",
+        "docs/DESIGN.md",
+        "docs/PRODUCT.md"
+      ],
+      "forbidden_reason": "DESIGN.md and PRODUCT.md live only in workspace/experience-design.",
+      "hosts": {
+        "claude": {
+          "scope": "user",
+          "install": [
+            "npx impeccable install --providers=claude --user --no-hooks -y"
+          ],
+          "verify": {
+            "kind": "path_exists",
+            "path": ".claude/skills/impeccable/SKILL.md",
+            "base": "home"
+          },
+          "remove_paths": [
+            ".claude/skills/impeccable",
+            ".claude/agents/impeccable-*.md"
+          ]
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "npx impeccable install --providers=codex --user --no-hooks -y"
+          ],
+          "verify": {
+            "kind": "path_exists",
+            "path": ".agents/skills/impeccable/SKILL.md",
+            "base": "home",
+            "skills": [
+              "impeccable"
+            ]
+          },
+          "remove_paths": [
+            ".agents/skills/impeccable"
+          ]
+        }
+      },
+      "routing": [
+        {
+          "step": "Design and write UI",
+          "role": "task owner or coding worker",
+          "skill": "impeccable",
+          "when": "required for user interface work when installed and enabled"
+        },
+        {
+          "step": "Review UI",
+          "role": "reviewer",
+          "skill": "impeccable critique",
+          "when": "required within the existing UI review when installed and enabled"
+        }
+      ]
+    },
+    {
+      "id": "security-audit",
+      "recommendation": "required_when_available",
+      "repo": "https://github.com/cloudflare/security-audit-skill",
+      "license": "MIT",
+      "purpose": "Security review lens with a tenant data isolation reference.",
+      "why": "Security-sensitive work uses guidance within the existing task and review. A full audit needs its own authorized scope.",
+      "hosts": {
+        "claude": {
+          "scope": "user",
+          "install": [
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent claude-code -g -y"
+          ],
+          "verify": {
+            "kind": "path_exists",
+            "path": ".claude/skills/security-audit/SKILL.md",
+            "base": "home"
+          },
+          "uninstall": [
+            "npx skills remove security-audit -g -a claude-code -y"
+          ]
+        },
+        "codex": {
+          "scope": "user",
+          "install": [
+            "npx skills add https://github.com/cloudflare/security-audit-skill --skill security-audit --agent codex -g -y"
+          ],
+          "verify": {
+            "kind": "path_exists",
+            "path": ".agents/skills/security-audit/SKILL.md",
+            "base": "home",
+            "skills": [
+              "security-audit"
+            ]
+          },
+          "uninstall": [
+            "npx skills remove security-audit -g -y"
+          ]
+        }
+      },
+      "routing": [
+        {
+          "step": "Security-sensitive work",
+          "role": "task owner or reviewer",
+          "skill": "security-audit guidance mode",
+          "when": "required for authorization, tenant isolation, secrets, money, deletion or security review when installed and enabled"
+        },
+        {
+          "step": "Full security audit",
+          "role": "owner request only",
+          "skill": "security-audit full mode",
+          "when": "explicit full audit request within its authorized scope"
+        }
       ]
     }
   ]

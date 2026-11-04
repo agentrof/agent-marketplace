@@ -3,9 +3,10 @@
 - The project root is the Git checkout and `workspace/` is the only project
   workspace for this team. Durable truth is kept in tracked project files;
   `.agentrof/agent-marketplace/.runtime/` is disposable local scratch.
-- User decisions are explicit: a workflow pauses at its named gate, recommended
-  option first. Do exactly what was asked; a need found on the way is named and
-  asked, never built silently.
+- Work within the current explicit authority and agreed outcome. Resolve material
+  uncertainty before dependent work. Carry data integrity, confidentiality,
+  environment access and destructive-action limits into every worker brief.
+  Additional scope requires an explicit decision.
 - Authored Markdown body prose follows `output_language`; project terminology
   follows `terminology_language`. Machine keys, ids, paths and CLI output stay
   English. User-facing conversation may use the user's language.

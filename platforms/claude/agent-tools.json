@@ -1,9 +1,18 @@
 {
   "schema_version": 1,
-  "description": "Tools a rendered role never needs, removed through disallowedTools so their schemas stay out of its context, and the CLAUDE.md chain left out through omitClaudeMd: a role takes its rules from the constitution and the spawn prompt. mcp__<server> removes every tool of that server and mcp__* every MCP tool; built-in tools take exact names. A browser role keeps the preview browser and the other MCP servers it may use. Only a role that starts agents keeps Agent.",
+  "description": "Technical workers inherit the parent task boundary. Reviewers have a Read/Grep/Glob whitelist. Write profiles use these deny lists. Workers cannot launch agents. Browser-capable workers retain the existing preview-browser capability and need explicit task authorization for side effects.",
   "omit_claude_md": true,
-  "disallowed": ["Artifact", "ArtifactComments", "ArtifactData", "Workflow", "ScheduleWakeup", "CronCreate"],
-  "disallowed_mcp": ["mcp__*"],
+  "disallowed": [
+    "Artifact",
+    "ArtifactComments",
+    "ArtifactData",
+    "Workflow",
+    "ScheduleWakeup",
+    "CronCreate"
+  ],
+  "disallowed_mcp": [
+    "mcp__*"
+  ],
   "browser_disallowed_mcp": [
     "mcp__claude-in-chrome",
     "mcp__Claude_Code_iOS_Simulator",
@@ -20,8 +29,13 @@
     "mcp__ccd_view",
     "mcp__ccd_window"
   ],
-  "browser_agents": ["frontend-developer", "qa-engineer"],
+  "browser_agents": [
+    "worker",
+    "critical-worker"
+  ],
   "spawning_agents": [],
-  "sources": ["https://code.claude.com/docs/en/sub-agents"],
-  "verified": "2026-10-16"
+  "sources": [
+    "https://code.claude.com/docs/en/sub-agents"
+  ],
+  "verified": "2026-11-04"
 }

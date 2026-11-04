@@ -1,0 +1,70 @@
+{
+  "packet_max_bytes": 32768,
+  "source_max_bytes": 8192,
+  "procedure_min_output_tokens": 8192,
+  "timeout_seconds": 300,
+  "host_output_max_bytes": 4194304,
+  "graph_budget": 600,
+  "graph_output_max_bytes": 4096,
+  "companions": [
+    {
+      "id": "graphify",
+      "sources": [
+        {
+          "id": "graphify",
+          "sections": [
+            "For /graphify query",
+            "Honesty Rules"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ponytail",
+      "sources": [
+        {
+          "id": "ponytail",
+          "sections": [
+            "Before you write",
+            "The smallest complete change"
+          ]
+        },
+        {
+          "id": "ponytail-review",
+          "sections": [
+            "1. Understand first",
+            "2. Look for",
+            "3. Check before you report",
+            "4. Output"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "impeccable",
+      "sources": [
+        {
+          "id": "impeccable",
+          "sections": [
+            "Setup",
+            "How to design",
+            "Modes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "security-audit",
+      "sources": [
+        {
+          "id": "security-audit",
+          "sections": [
+            "Operating modes",
+            "Universal execution safety",
+            "Core principles"
+          ]
+        }
+      ]
+    }
+  ]
+}

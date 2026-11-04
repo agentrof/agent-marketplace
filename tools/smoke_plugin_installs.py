@@ -267,7 +267,7 @@ def init_project(path: Path, env: dict[str, str]) -> None:
     run(["git", "-C", str(path), "config", "user.email", "smoke@example.invalid"], env)
 
 
-def installed_root(inventory: dict | list, host: str) -> Path:
+def installed_root(inventory: dict | list, host: str, install: dict | None = None) -> Path:
     entries = inventory if host == "claude" else inventory.get("installed", [])
     for entry in entries:
         name = entry.get("id", "").split("@", 1)[0] \
@@ -276,9 +276,21 @@ def installed_root(inventory: dict | list, host: str) -> Path:
             continue
         raw = entry.get("installPath") if host == "claude" \
             else entry.get("installedPath")
-        if not raw and host == "codex":
-            source = entry.get("source") or {}
-            raw = source.get("path") if isinstance(source, dict) else ""
+        if host == "codex":
+            if entry.get("pluginId") != f"{TEAM}@{MARKETPLACE}" or entry.get("installed") is not True:
+                continue
+            if not isinstance(entry.get("version"), str) or not entry["version"]:
+                raise SmokeFailure("Codex inventory has no installed version")
+            if install is not None:
+                if any(install.get(key) != entry.get(key) for key in
+                       ("pluginId", "name", "marketplaceName", "version")):
+                    raise SmokeFailure("Codex installation receipt differs from enabled inventory")
+                receipt_path = install.get("installedPath")
+                if raw and raw != receipt_path:
+                    raise SmokeFailure("Codex installed paths disagree")
+                raw = receipt_path
+            if not isinstance(raw, str) or not Path(raw).is_absolute() or not Path(raw).is_dir():
+                raise SmokeFailure("Codex inventory needs an existing installed path or matching add receipt")
         if raw:
             return Path(raw)
     raise SmokeFailure(f"{host} inventory has no enabled {TEAM} install")
@@ -363,7 +375,66 @@ def exercise_package(team_root: Path, project: Path, env: dict[str, str]) -> Non
     ], env)
 
 
-def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:
+def verify_codex_hooks(entry: dict, installed: Path) -> None:
+    """Compare configured metadata using Codex 0.159.1's normalized hook identity.
+
+    Discovery and its hash do not establish trust or native event execution.
+    """
+    source = (installed / "hooks/hooks.json").resolve()
+    plugin_id = f"{TEAM}@{MARKETPLACE}"
+    expected = {}
+    groups = json.loads(source.read_text(encoding="utf-8"))["hooks"]
+    for event, entries in groups.items():
+        event_key = re.sub(r"(?<!^)(?=[A-Z])", "_", event).lower()
+        for group_index, group in enumerate(entries):
+            matcher = group.get("matcher") or None
+            for handler_index, handler in enumerate(group["hooks"]):
+                if handler.get("type") != "command" or set(handler) - {
+                    "type", "command", "timeout", "async", "statusMessage", "additionalContextLimit"
+                }:
+                    raise SmokeFailure("Codex hook smoke needs a supported command definition")
+                timeout = max(1, handler.get("timeout", 1 if event in {"SessionEnd", "Interrupt"} else 600))
+                if event in {"SessionEnd", "Interrupt"}:
+                    timeout = min(timeout, 3)
+                normalized = {**handler, "timeout": timeout, "async": handler.get("async", False)}
+                limit = handler.get("additionalContextLimit") if event in {
+                    "PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "SubagentStart"
+                } else None
+                normalized.pop("additionalContextLimit", None)
+                if limit not in (None, 2500):
+                    normalized["additionalContextLimit"] = limit
+                identity = {"event_name": event_key, "hooks": [normalized]}
+                if matcher is not None:
+                    identity["matcher"] = matcher
+                digest = hashlib.sha256(json.dumps(identity, sort_keys=True, separators=(",", ":"),
+                                                  ensure_ascii=False).encode("utf-8")).hexdigest()
+                command = handler["command"]
+                for variable in ("PLUGIN_ROOT", "CLAUDE_PLUGIN_ROOT"):
+                    command = command.replace("${" + variable + "}", str(installed.resolve()))
+                key = f"{plugin_id}:hooks/hooks.json:{event_key}:{group_index}:{handler_index}"
+                expected[key] = {"eventName": event[0].lower() + event[1:], "handlerType": "command",
+                    "command": command, "matcher": matcher, "timeoutSec": timeout,
+                    "async": handler.get("async", False) and event != "SessionEnd",
+                    "statusMessage": handler.get("statusMessage"), "additionalContextLimit": limit,
+                    "source": "plugin", "sourcePath": str(source), "pluginId": plugin_id,
+                    "enabled": True, "isManaged": False, "currentHash": "sha256:" + digest}
+    if entry.get("errors") != [] or not isinstance(entry.get("hooks"), list):
+        raise SmokeFailure("Codex hooks/list returned load errors or no hook inventory")
+    found = {}
+    for hook in entry["hooks"]:
+        if hook.get("pluginId") != plugin_id and hook.get("sourcePath") != str(source):
+            continue
+        key = hook.get("key")
+        if key not in expected or key in found or any(hook.get(name) != value for name, value in expected[key].items()):
+            raise SmokeFailure("Codex configured hook metadata differs from the installed package")
+        found[key] = hook
+    if set(found) != set(expected):
+        raise SmokeFailure("Codex omitted configured hooks from the installed package")
+
+
+def codex_skill_names(
+    env: dict[str, str], project: Path, installed: Path,
+) -> set[str]:
     process = subprocess.Popen(
         ["codex", "app-server"], stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env,
@@ -403,7 +474,33 @@ def codex_skill_names(env: dict[str, str], project: Path) -> set[str]:
         response = receive(2)
         for item in response.get("result", {}).get("data", []):
             if item.get("cwd") == str(project):
-                return {skill.get("name", "") for skill in item.get("skills", [])}
+                names = set()
+                for skill in item.get("skills", []):
+                    name = skill.get("name", "")
+                    source = skill.get("path")
+                    if (skill.get("enabled") is not True
+                            or not isinstance(name, str)
+                            or not name.startswith(f"{TEAM}:")
+                            or not isinstance(source, str)
+                            or not Path(source).is_absolute()):
+                        continue
+                    expected = installed / "skills" / name.removeprefix(f"{TEAM}:") / "SKILL.md"
+                    if (Path(source).resolve() == expected.resolve()
+                            and expected.resolve().is_relative_to(installed.resolve())
+                            and expected.is_file()
+                            and skill.get("pluginId", f"{TEAM}@{MARKETPLACE}")
+                            in (None, f"{TEAM}@{MARKETPLACE}")):
+                        names.add(name)
+                send({"method": "hooks/list", "id": 3, "params": {"cwds": [str(project)]}})
+                hooks = receive(3)
+                if hooks.get("error"):
+                    raise SmokeFailure("Codex hooks/list is unavailable")
+                projects = [row for row in hooks.get("result", {}).get("data", [])
+                            if row.get("cwd") == str(project)]
+                if len(projects) != 1:
+                    raise SmokeFailure("Codex hooks/list omitted or duplicated the project")
+                verify_codex_hooks(projects[0], installed)
+                return names
         raise SmokeFailure("Codex skills/list omitted the project")
     finally:
         process.terminate()
@@ -458,9 +555,9 @@ def smoke_codex(
         project = state / "project"
         init_project(project, env)
         run(["codex", "plugin", "marketplace", "add", str(source), "--json"], env)
-        run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env)
+        install = json.loads(run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env))
         inventory = json.loads(run(["codex", "plugin", "list", "--json"], env))
-        team_root = installed_root(inventory, "codex")
+        team_root = installed_root(inventory, "codex", install)
         if expected is not None:
             verify_installed_package(team_root, expected, "codex")
         exercise_package(team_root, project, env)
@@ -471,7 +568,7 @@ def smoke_codex(
             # Codex renders an entry with user_invocable false as an internal skill.
             and "user_invocable: false" not in text
         }
-        names = codex_skill_names(env, project)
+        names = codex_skill_names(env, project, team_root)
         if not expected_skills <= names:
             raise SmokeFailure(
                 "Codex omitted entry skills: "
@@ -480,14 +577,16 @@ def smoke_codex(
         if isinstance(source, Path):
             # Local marketplaces are refreshed by reinstalling the plugin;
             # Codex reserves `marketplace upgrade` for Git-backed sources.
-            run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env)
+            install = json.loads(run(["codex", "plugin", "add", f"{TEAM}@{MARKETPLACE}", "--json"], env))
         else:
             run(["codex", "plugin", "marketplace", "upgrade", MARKETPLACE, "--json"], env)
         updated = installed_root(json.loads(run(
-            ["codex", "plugin", "list", "--json"], env)), "codex")
+            ["codex", "plugin", "list", "--json"], env)), "codex", install)
         if expected is not None:
             verify_installed_package(updated, expected, "codex")
         exercise_package(updated, project, env)
+        if not expected_skills <= codex_skill_names(env, project, updated):
+            raise SmokeFailure("Codex upgrade omitted enabled entry skills from the installed package")
 
 
 def smoke_public(
@@ -507,10 +606,9 @@ def smoke_public(
     adapters = set(build_distributions.load_adapters(VERIFIER_ROOT))
     if set(PUBLIC_MARKETPLACES) != adapters:
         raise SmokeFailure("public marketplace sources differ from registered hosts")
-    last_error: SmokeFailure | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            for host in sorted(selected):
+    for host in sorted(selected):
+        for attempt in range(1, attempts + 1):
+            try:
                 require_public_stable(expected_sha, os.environ.copy())
                 expected = root / "dist" / host / TEAM
                 if host == "claude":
@@ -522,16 +620,14 @@ def smoke_public(
                         f"{host} public marketplace smoke is not implemented"
                     )
                 require_public_stable(expected_sha, os.environ.copy())
-            return
-        except SmokeFailure as exc:
-            last_error = exc
-            if attempt == attempts:
+            except SmokeFailure as exc:
+                if attempt == attempts:
+                    raise SmokeFailure(
+                        f"{host} public stable smoke failed after {attempts} fresh attempt(s): {exc}"
+                    ) from exc
+                time.sleep(retry_delay)
+            else:
                 break
-            time.sleep(retry_delay)
-    assert last_error is not None
-    raise SmokeFailure(
-        f"public stable smoke failed after {attempts} fresh attempt(s): {last_error}"
-    )
 
 
 def checkout_marketplace(root: Path, target: Path) -> Path:
@@ -570,9 +666,9 @@ def main() -> int:
         source = checkout_marketplace(root, Path(temporary))
         for host in sorted(selected):
             if host == "claude":
-                smoke_claude(source)
+                smoke_claude(source, expected=root / "dist" / host / TEAM)
             elif host == "codex":
-                smoke_codex(root, source)
+                smoke_codex(root, source, expected=root / "dist" / host / TEAM)
             else:
                 raise SmokeFailure(f"{host} native marketplace smoke is not implemented")
     return 0

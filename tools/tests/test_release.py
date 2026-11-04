@@ -1288,8 +1288,11 @@ class ReleaseCandidateTests(unittest.TestCase):
             self.root, self.feature, self.candidate, commands=commands,
         )
         self.assertEqual(commands.captured, [[
-            "gh", "workflow", "run", "release.yml", "--ref", "main",
-            "-f", f"version={VERSION}", "-f", f"sha={self.candidate}",
+            "gh", "api", "--method", "POST",
+            "repos/{owner}/{repo}/actions/workflows/release.yml/dispatches",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2026-03-10", "-f", "ref=main",
+            "-f", f"inputs[version]={VERSION}", "-f", f"inputs[sha]={self.candidate}",
         ]])
         self.assertEqual(commands.streamed, [])
         self.assertEqual(
@@ -1375,11 +1378,9 @@ class ReleaseNotesTests(unittest.TestCase):
 class FakeShipCommands:
     """Record ship's gh calls and answer them."""
 
-    URL = f"https://github.com/{REPOSITORY}/actions/runs/42"
-
-    def __init__(self, *, dispatch_output: str = URL + "\n", dispatch_code: int = 0,
-                 watch_code: int = 0, release_view: dict | None = None,
-                 runs: list | None = None) -> None:
+    def __init__(self, *, dispatch_output: str = '{"workflow_run_id":42}',
+                 dispatch_code: int = 0, watch_code: int = 0,
+                 release_view: dict | None = None) -> None:
         self.dispatch_output = dispatch_output
         self.dispatch_code = dispatch_code
         self.watch_code = watch_code
@@ -1387,19 +1388,16 @@ class FakeShipCommands:
             "url": "https://github.com/owner/project/releases/tag/v0.0.3",
             "isImmutable": True,
         }
-        self.runs = runs or []
         self.captured: list[list[str]] = []
         self.streamed: list[list[str]] = []
 
     def capture(self, argv: list[str]) -> subprocess.CompletedProcess:
         self.captured.append(list(argv))
-        if argv[:3] == ["gh", "workflow", "run"]:
+        if argv[:4] == ["gh", "api", "--method", "POST"]:
             return subprocess.CompletedProcess(
                 argv, self.dispatch_code, self.dispatch_output,
                 "HTTP 422" if self.dispatch_code else "",
             )
-        if argv[:3] == ["gh", "run", "list"]:
-            return subprocess.CompletedProcess(argv, 0, json.dumps(self.runs), "")
         if argv[:3] == ["gh", "release", "view"]:
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.release_view), "")
         raise AssertionError(argv)
@@ -1412,20 +1410,21 @@ class FakeShipCommands:
 class ShipTests(unittest.TestCase):
     """One maintainer command dispatches the Release and follows it."""
 
-    NOW = datetime.datetime(2026, 10, 2, 12, tzinfo=datetime.timezone.utc)
-
     def ship(self, commands: FakeShipCommands, sha: str | None = None,
              root: Path = Path("."), **options) -> dict:
         return release.ship(
-            root, "0.0.3", sha, commands=commands, now=lambda: self.NOW,
-            sleep=lambda _seconds: None, **options,
+            root, "0.0.3", sha, commands=commands, **options,
         )
 
     def test_dispatch_watch_and_the_immutable_release(self):
         commands = FakeShipCommands()
         result = self.ship(commands)
         self.assertEqual(commands.captured[0], [
-            "gh", "workflow", "run", "release.yml", "--ref", "main", "-f", "version=0.0.3",
+            "gh", "api", "--method", "POST",
+            "repos/{owner}/{repo}/actions/workflows/release.yml/dispatches",
+            "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2026-03-10", "-f", "ref=main",
+            "-f", "inputs[version]=0.0.3",
         ])
         self.assertEqual(commands.streamed, [
             ["gh", "run", "watch", "42", "--exit-status", "--compact"],
@@ -1449,18 +1448,39 @@ class ShipTests(unittest.TestCase):
             full = release.git(root, "rev-parse", "HEAD")
             commands = FakeShipCommands()
             result = self.ship(commands, sha=full[:10], root=root)
-            self.assertEqual(commands.captured[0][-2:], ["-f", f"sha={full}"])
+            self.assertEqual(commands.captured[0][-2:], ["-f", f"inputs[sha]={full}"])
             self.assertEqual(result["sha"], full)
             with self.assertRaisesRegex(release.ReleaseError, "unknown commit"):
                 self.ship(FakeShipCommands(), sha="f" * 12, root=root)
 
-    def test_the_run_is_found_when_gh_prints_no_url(self):
-        commands = FakeShipCommands(dispatch_output="", runs=[
-            {"databaseId": 40, "createdAt": "2026-10-02T11:00:00Z"},
-            {"databaseId": 43, "createdAt": "2026-10-02T12:00:05Z"},
-            {"databaseId": 41, "createdAt": "2026-10-02T11:59:50Z"},
-        ])
+    def test_the_dispatch_response_identifies_the_run_without_polling(self):
+        commands = FakeShipCommands(dispatch_output='{"workflow_run_id":43}')
         self.assertEqual(self.ship(commands, watch=False)["run_id"], "43")
+        self.assertEqual(len(commands.captured), 1)
+        self.assertEqual(commands.streamed, [])
+
+    def test_unknown_dispatch_response_never_guesses_or_redispatches(self):
+        for output in ("", "not JSON", "null", "[]", "{}",
+                       '{"workflow_run_id":true}', '{"workflow_run_id":"42"}',
+                       '{"workflow_run_id":0}', '{"workflow_run_id":-1}'):
+            with self.subTest(output=output):
+                commands = FakeShipCommands(dispatch_output=output)
+                with self.assertRaisesRegex(release.ReleaseError, "outcome is unknown"):
+                    self.ship(commands)
+                self.assertEqual(len(commands.captured), 1)
+                self.assertEqual(commands.streamed, [])
+
+        commands = FakeShipCommands()
+        full = "a" * 40
+        with mock.patch.object(release, "git", return_value=full):
+            result = self.ship(commands, sha=full[:10], watch=False)
+        self.assertEqual(commands.captured[0][-2:], ["-f", f"inputs[sha]={full}"])
+        self.assertEqual(result["sha"], full)
+
+        commands = FakeShipCommands(dispatch_code=1)
+        with self.assertRaisesRegex(release.ReleaseError, "release dispatch failed"):
+            self.ship(commands)
+        self.assertEqual(len(commands.captured), 1)
         self.assertEqual(commands.streamed, [])
 
     def test_each_failure_is_reported_with_its_next_step(self):

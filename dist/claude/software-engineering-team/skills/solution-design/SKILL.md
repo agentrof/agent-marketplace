@@ -1,6 +1,6 @@
 ---
 name: solution-design
-description: Solution landscape knowledge for the team's solution roles. Loaded by software-engineering-team flows; not user-facing.
+description: Chooses component boundaries, interfaces and implementation approach when a task changes architecture, technology or cross-component behavior.
 user-invocable: false
 ---
 

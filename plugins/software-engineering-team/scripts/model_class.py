@@ -1,20 +1,12 @@
 #!/usr/bin/env python3
-"""Resolve the model and effort of one spawn from its purpose class.
+"""Resolve an explicit compute profile and access boundary for a native worker.
 
-Every step that spawns an agent names the purpose class of the work: the
-role's own class (its `model_class`) unless the step says another, such as a
-security review. The class runs one level up, its escalated slot, for a task
-of size `l`, at rigor `high` or on a risk flag the package declares; a class
-that does not escalate never moves. The model and effort come from the
-package class map and the project's `workspace/config.json` overrides, as
-`role_settings.resolve` reads them.
+    model_class.py resolve --profile work --access write --host <host> --json
 
-A host whose `spawn_model` is `alias` takes the model's family alias and the
-effort on the spawn itself; on a host whose role file decides, the agent runs
-its own pins and the spawn passes no model.
-
-    model_class.py resolve --class routine_review --role code-reviewer \\
-        --task TK-012 --project-root . --host <host> --json
+The launch file pins the requested model and effort. Its presence proves
+neither host selection nor the model actually served. Record observations
+from the host separately. A fallback is another explicit resolution for the
+same attempt, never a rewrite of shared project settings.
 """
 
 from __future__ import annotations
@@ -26,126 +18,71 @@ from pathlib import Path
 
 import project_config
 import role_settings
-import task_lane
-
-SIZES = task_lane.SIZES
-RIGORS = task_lane.RIGORS
 
 
-def escalates(size: str | None, rigor: str | None, risks: list[str]) -> bool:
-    """Whether the work runs one level up: size l, rigor high or any risk flag."""
-    return size == "l" or rigor == "high" or bool(risks)
-
-
-def resolve(class_map: dict, config: dict, host: str, model_class: str | None = None, *,
-            role: str | None = None, size: str | None = None, rigor: str | None = None,
-            risks: list[str] | None = None) -> dict:
-    """The model, effort and agent one spawn runs.
-
-    ``model_class`` defaults to the role's own class. The result names the
-    class, the slot, whether it escalated, the model and effort in force, the
-    agent to spawn and the `spawn` fields the spawn call passes; ``note``
-    says when the host cannot set the slot at spawn time, so the agent runs
-    its own pins.
-    """
+def resolve(class_map: dict, config: dict, host: str, profile: str, *, access: str) -> dict:
+    """Return the technical launch identity and its requested runtime settings."""
     if host not in class_map["hosts"]:
-        raise ValueError(f"unknown host {host!r}; hosts are {', '.join(sorted(class_map['hosts']))}")
-    risks = list(risks or [])
-    unknown = sorted(set(risks) - set(class_map["risk_flags"]))
-    if unknown:
-        raise ValueError(f"unknown risk flag {', '.join(unknown)}; flags are"
-                         f" {', '.join(class_map['risk_flags'])}")
-    if size is not None and size not in SIZES:
-        raise ValueError(f"size must be one of {', '.join(SIZES)}")
-    if rigor is not None and rigor not in RIGORS:
-        raise ValueError(f"rigor must be one of {', '.join(RIGORS)}")
-    roles = role_settings.role_classes(class_map, config)
-    if role is not None and role not in roles:
-        raise ValueError(f"unknown role {role!r}; roles are {', '.join(sorted(roles))}")
-    if model_class is None:
-        if role is None:
-            raise ValueError("name a --class, a --role or both")
-        model_class = roles[role]
-    if model_class not in class_map["model_classes"]:
-        raise ValueError(f"unknown class {model_class!r}; classes are"
-                         f" {', '.join(class_map['model_classes'])}")
-    slot = role_settings.escalated_slot(class_map, model_class) \
-        if escalates(size, rigor, risks) else model_class
-    setting = role_settings.slot_setting(
-        class_map, host, slot, role_settings.host_overrides(config, host).get(slot))
-    spec = class_map["hosts"][host]
-    result = {"host": host, "class": model_class, "slot": slot,
-              "escalated": slot != model_class, "model": setting["model"],
-              "effort": setting["effort"], "agent": role, "spawn": {}, "note": None}
-    if spec["spawn_model"] == "alias":
-        # The spawn sets both; `session` leaves the model to the session.
-        family = spec["models"].get(setting["model"], {}).get("family")
-        if setting["model"] != role_settings.SESSION:
-            result["spawn"]["model"] = family or setting["model"]
-        if setting["effort"] is not None:
-            result["spawn"]["effort"] = setting["effort"]
-    elif role is not None:
-        row = role_settings.resolve(class_map, config, host)[role]
-        if row["class"] != slot:
-            result.update(model=row["model"], effort=row["effort"],
-                          note=f"{host} cannot run {role} on {slot};"
-                               f" it runs its own {row['class']} pins")
-    return result
-
-
-def task_facts(project_root: Path, task: str) -> tuple[str | None, str | None, list[str]]:
-    """A fast-lane task's size, rigor and risk flags from its task file."""
-    props = task_lane.task_props(task_lane.task_path(project_root, task))
-    return props.get("size"), props.get("rigor", "normal"), task_lane.field_items(props, "risks")
+        raise ValueError(f"unknown host {host!r}")
+    errors = role_settings.config_errors(config, class_map)
+    if errors:
+        raise ValueError("; ".join(errors))
+    launches = class_map.get("launch_profiles", {})
+    matches = [name for name, spec in launches.items()
+               if spec["profile"] == profile and spec["access"] == access]
+    if len(matches) != 1:
+        raise ValueError(f"no unique launch definition for profile {profile!r} with access {access!r}")
+    agent = matches[0]
+    setting = role_settings.resolve(class_map, config, host)[agent]
+    read_only = access == "read"
+    read_access = class_map["hosts"][host]["read_access"]
+    enforced = read_only and read_access["definition_restricts_tools"]
+    permission_note = read_access["note"] if read_only else (
+        "The worker inherits the host's parent permissions and the attempt's granted scope.")
+    return {
+        "host": host, "profile": profile, "access": access, "agent": agent,
+        "model": setting["model"], "effort": setting["effort"],
+        "requested_model": setting["model"], "requested_effort": setting["effort"],
+        "model_source": setting["model_source"], "effort_source": setting["effort_source"],
+        "observed_model": None, "observed_effort": None, "runtime_status": "unverified",
+        "spawn": {},
+        "permissions": {"declared_read_only": read_only,
+                        "definition_restricts_tools": enforced,
+                        "runtime_verified": False, "note": permission_note},
+        "note": "Use the generated launch identity without a spawn-time model override."
+                " Confirm its loaded settings with host evidence.",
+    }
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("resolve", help="the model, effort and agent of one spawn")
-    p.add_argument("--class", dest="model_class", help="the spawn's purpose class;"
-                   " defaults to the role's own class")
-    p.add_argument("--role", help="the role spawned")
-    p.add_argument("--host", required=True)
-    p.add_argument("--task", help="a fast-lane task id; its size, rigor and risks apply")
-    p.add_argument("--project-root", default=".")
-    p.add_argument("--size", choices=SIZES)
-    p.add_argument("--rigor", choices=RIGORS)
-    p.add_argument("--risk", action="append", default=[],
-                   help="a risk flag of the class map; repeatable")
-    p.add_argument("--json", action="store_true")
+    command = sub.add_parser("resolve", help="the launch identity for one bounded attempt")
+    command.add_argument("--profile", required=True, choices=("light", "work", "review", "critical"))
+    command.add_argument("--access", required=True, choices=("read", "write"))
+    command.add_argument("--host", required=True)
+    command.add_argument("--task", help="task identifier recorded with this resolution")
+    command.add_argument("--project-root", default=".")
+    command.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
-    root = Path(args.project_root).resolve()
     try:
         class_map = role_settings.load_class_map()
         if class_map is None:
-            raise ValueError("this package ships no class map templates/model-classes.json;"
-                             " run the installed package's scripts")
-        config_path = root / "workspace" / "config.json"
-        config = project_config.load(config_path)
-        errors = role_settings.config_errors(config, class_map)
-        if errors:
-            raise ValueError("; ".join(errors))
-        size, rigor, risks = args.size, args.rigor, list(args.risk)
+            raise ValueError("this package ships no templates/model-classes.json; run the installed package scripts")
+        config = project_config.load(Path(args.project_root).resolve() / "workspace" / "config.json")
+        result = resolve(class_map, config, args.host, args.profile, access=args.access)
         if args.task:
-            task_size, task_rigor, task_risks = task_facts(root, args.task)
-            size, rigor = size or task_size, rigor or task_rigor
-            risks = sorted(set(risks) | set(task_risks))
-        result = resolve(class_map, config, args.host, args.model_class, role=args.role,
-                         size=size, rigor=rigor, risks=risks)
-    except (OSError, ValueError, task_lane.Refused) as exc:
+            result["task"] = args.task
+    except (OSError, ValueError) as exc:
         print(f"model_class: {exc}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
-        spawn = ", ".join(f"{key} {value}" for key, value in result["spawn"].items()) \
-            or "the role file's pins"
-        print(f"{result['agent'] or '-'}: {result['slot']} -> {result['model']} at"
-              f" {result['effort'] or 'the session effort'}; spawn with {spawn}")
-        if result["note"]:
-            print(f"note: {result['note']}")
+        print(f"{result['agent']}: {result['profile']}/{result['access']} -> "
+              f"{result['requested_model']} at {result['requested_effort']}; runtime unverified")
+        print(result["permissions"]["note"])
     return 0
 
 

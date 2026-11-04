@@ -5,9 +5,11 @@ GitHub the rest, and the retrospective derives steps and proposals from them."""
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -70,6 +72,22 @@ Export the month's invoices as CSV.
 """
 
 
+def companion_fallbacks(root: Path) -> None:
+    """Give task/proof tests an explicit synthetic-host fallback receipt."""
+    path = root / task_lane.REVIEWS / "fixture-evidence.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("Synthetic host. Core review and verification are exercised by this test.\n", encoding="utf-8")
+    record = {"unavailable_reason": "Companions are not installed in this synthetic test host.",
+              "availability_source": "worker_report", "completion_source": "worker_report",
+              "recorded_at": "2026-11-04T10:00:00Z", "evidence_head": "a" * 40,
+              "host_context": {"host": "codex", "source": "worker_report", "enabled": None},
+              "evidence": path.relative_to(root).as_posix(),
+              "evidence_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    task_lane.methods_path(root, "TK-004").write_text(json.dumps({
+        f"companion/{name}": record for name in ("ponytail", "graphify", "impeccable", "security-audit")
+    }), encoding="utf-8")
+
+
 class TaskTests(unittest.TestCase):
     def write(self, text: str) -> Path:
         directory = Path(tempfile.mkdtemp())
@@ -82,32 +100,37 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(task_lane.lint(self.write(TASK)), [])
 
     def test_criteria_size_rigor_and_times_are_checked(self):
-        bad = (TASK.replace("1. The export lists every invoice of the month.\n", "")
-               .replace("2. Each row carries the invoice number and total.\n", "")
-               .replace("3. An empty month yields a header-only file.\n", "")
+        bad = (re.sub(r"(?m)^[1-5]\. .*\n", "", TASK)
                .replace("size: s", "size: xl").replace("rigor: normal", "rigor: extreme")
                .replace("requested_at: 2026-10-16T10:00:00+00:00\n", ""))
         errors = task_lane.lint(self.write(bad))
-        self.assertTrue(any("found 2" in error for error in errors))
+        self.assertIn("Acceptance Criteria needs at least one numbered, verifiable criterion", errors)
         self.assertTrue(any(error.startswith("size") for error in errors))
         self.assertTrue(any(error.startswith("rigor") for error in errors))
         self.assertIn("requested_at is required", errors)
 
-    def test_a_project_can_widen_the_criteria_range(self):
-        extra = "".join(f"{n}. Property {n} holds.\n" for n in range(6, 15))
-        path = self.write(TASK.replace("5. Docs delta: none.\n", "5. Docs delta: none.\n" + extra))
-        self.assertTrue(any("3 to 8 numbered" in error for error in task_lane.lint(path)))
-        root = Path(tempfile.mkdtemp())
-        self.addCleanup(lambda: __import__("shutil").rmtree(root))
-        (root / "workspace").mkdir()
-        (root / "workspace" / "config.json").write_text('{"task_criteria_range": [3, 20]}', encoding="utf-8")
-        self.assertFalse(any("numbered" in error for error in task_lane.lint(path, root)))
+    def test_one_criterion_and_uncapped_criteria_need_no_live_or_docs_boilerplate(self):
+        compact = re.sub(r"(?s)## Acceptance Criteria.*?(?=<!-- sec: nav -->)",
+                         "## Acceptance Criteria\n\n1. The exported total is exact.\n\n"
+                         "## Tests\n\n- 1: tests/test_export.py\n\n", TASK)
+        self.assertNotIn("Live wiring", compact)
+        self.assertNotIn("Docs delta", compact)
+        self.assertEqual(task_lane.lint(self.write(compact)), [])
+        many = compact.replace("1. The exported total is exact.\n",
+                               "".join(f"{n}. Property {n} holds.\n" for n in range(1, 31)))
+        many = many.replace("- 1: tests/test_export.py", "- " + ", ".join(map(str, range(1, 31)))
+                            + ": tests/test_export.py")
+        self.assertEqual(task_lane.lint(self.write(many)), [])
+        duplicate = compact.replace("1. The exported total is exact.",
+                                    "1. The exported total is exact.\n1. The header appears once.")
+        self.assertIn("Acceptance Criteria numbers must be unique", task_lane.lint(self.write(duplicate)))
+        unmapped = compact.replace("- 1: tests/test_export.py", "- 2: tests/test_export.py")
+        self.assertTrue(any("for criteria 1" in item for item in task_lane.lint(self.write(unmapped))))
 
     def test_the_skeleton_is_valid_once_filled(self):
         text = task_lane.task_text("TK-007", "Rotate keys", "Rotate the signing keys.",
                                     "2026-10-16T10:00:00+00:00", "high")
-        text = (text.replace("1. \n", "1. One.\n").replace("Live wiring: \n", "Live wiring: seen.\n")
-                .replace("Docs delta: \n", "Docs delta: none.\n").replace(": \n", ": t\n"))
+        text = text.replace("1. \n", "1. One.\n").replace("- 1: \n", "- 1: tests/test_keys.py\n")
         path = self.write(text)
         self.assertEqual(task_lane.lint(path), [])
         props = task_lane.task_props(path)
@@ -210,6 +233,12 @@ class RetrospectiveTests(unittest.TestCase):
 
 
 class GitHubCommandTests(unittest.TestCase):
+    def setUp(self):
+        # Native execution and receipt integrity have their own tests.
+        review = mock.patch.object(task_lane, "review_problems", return_value=[])
+        review.start()
+        self.addCleanup(review.stop)
+
     def project(self, rigor: str) -> Path:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
@@ -217,94 +246,286 @@ class GitHubCommandTests(unittest.TestCase):
         tasks.mkdir(parents=True)
         (tasks / "tk-004-export-invoices.md").write_text(
             TASK.replace("rigor: normal", f"rigor: {rigor}"), encoding="utf-8")
+        companion_fallbacks(root)
         return root
 
-    def test_normal_rigor_turns_on_auto_merge(self):
-        calls = []
-        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
-            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
-                                                          detail=None), self.project("normal"))
-        self.assertTrue(result["auto_merge"])
-        self.assertIn(("gh", "pr", "merge", "9", "--auto", "--merge"), calls)
-        self.assertIn(task_lane.REVIEW_MARK, calls[0][-1])
+    head = "a" * 40
 
-    def test_green_checks_merge_at_once_when_auto_merge_is_refused(self):
-        calls = []
+    def merge_args(self, **values):
+        return SimpleNamespace(**{"task": "TK-004", "pr": "9", "style": "merge",
+                                  "detail": None, "head": self.head, "critical": 0, **values})
 
+    def remote(self, calls, **values):
         def run(*args, **kwargs):
             calls.append(args)
-            if "--auto" in args:
-                raise task_lane.Refused("gh pr merge failed: Pull request is in clean status")
+            if args == ("git", "rev-parse", "HEAD"):
+                return self.head
+            if args[:3] == ("gh", "pr", "view"):
+                return json.dumps({"headRefOid": self.head, "baseRefName": "main", "state": "OPEN",
+                                   **values,
+                                   **({"state": "MERGED", "mergedAt": "2026-11-04T10:00:00Z"}
+                                      if "headRefOid,state,mergedAt" in args else {})})
             return ""
-        with mock.patch.object(task_lane, "run", side_effect=run):
-            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
-                                                          detail=None), self.project("normal"))
-        self.assertTrue(result["merged"])
-        self.assertEqual(calls[-1], ("gh", "pr", "merge", "9", "--merge"))
+        return run
 
-    def test_checks_merge_at_once_when_the_repository_has_no_auto_merge(self):
+    def test_merge_requires_zero_blockers_and_the_reviewed_head(self):
+        root = self.project("normal")
+        with mock.patch.object(task_lane, "run") as run:
+            for values in ({"critical": 1}, {"critical": None}, {"head": "short"}):
+                with self.subTest(values=values), self.assertRaises(task_lane.Refused):
+                    task_lane.cmd_merge(self.merge_args(**values), root)
+            run.assert_not_called()
         calls = []
+        with mock.patch.object(task_lane, "run", side_effect=self.remote(calls, headRefOid="b" * 40)):
+            with self.assertRaisesRegex(task_lane.Refused, "changed after review"):
+                task_lane.cmd_merge(self.merge_args(), root)
+        self.assertFalse(any(call[:3] == ("gh", "pr", "merge") for call in calls))
+        for candidate in (("b" * 40, True), (self.head, False)):
+            calls = []
+            with mock.patch.object(task_lane, "run", side_effect=self.remote(calls)), \
+                    mock.patch.object(task_lane, "head_state", return_value=candidate), \
+                    self.assertRaisesRegex(task_lane.Refused, "clean reviewed candidate"):
+                task_lane.cmd_merge(self.merge_args(), root)
+            self.assertFalse(any(call[:3] in (("gh", "pr", "merge"), ("gh", "pr", "comment"))
+                                 for call in calls))
+        calls = []
+        with mock.patch.object(task_lane, "run", side_effect=self.remote(calls)), \
+                mock.patch.object(task_lane, "changed_files", return_value={"db/migrations/0001_total.sql"}), \
+                self.assertRaisesRegex(task_lane.Refused, "method evidence is missing.*data-design"):
+            task_lane.cmd_merge(self.merge_args(), root)
+        self.assertFalse(any(call[:3] in (("gh", "pr", "merge"), ("gh", "pr", "comment"))
+                             for call in calls))
 
-        def run(*args, **kwargs):
-            calls.append(args)
-            if "--auto" in args:
-                raise task_lane.Refused("gh pr merge failed: Pull request does not have required protected branch rules")
-            return ""
-        with mock.patch.object(task_lane, "run", side_effect=run):
-            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
-                                                          detail=None), self.project("normal"))
+    def test_green_checks_merge_only_the_reviewed_head(self):
+        calls = []
+        with mock.patch.object(task_lane, "run", side_effect=self.remote(calls)), \
+                mock.patch.object(task_lane, "refresh_graph"), \
+                mock.patch.object(task_lane, "queue_retrospective", return_value={"retro_job": "queued"}):
+            result = task_lane.cmd_merge(self.merge_args(), self.project("normal"))
         self.assertTrue(result["merged"])
-        self.assertEqual(calls[-1], ("gh", "pr", "merge", "9", "--merge"))
+        self.assertEqual(result["retro_job"], "queued")
+        self.assertFalse(result["auto_merge"])
+        self.assertIn(("gh", "pr", "checks", "9", "--required"), calls)
+        self.assertIn(("gh", "pr", "merge", "9", "--merge", "--match-head-commit", self.head), calls)
+        self.assertFalse(any("--auto" in call for call in calls))
 
-    def test_the_graph_refresh_gets_the_project_root_and_the_merged_range(self):
+    def test_a_caller_zero_cannot_replace_native_review(self):
+        calls = []
+        with mock.patch.object(task_lane, "run", side_effect=self.remote(calls)), \
+                mock.patch.object(task_lane, "review_problems", return_value=["native review missing"]), \
+                self.assertRaisesRegex(task_lane.Refused, "native review missing"):
+            task_lane.cmd_merge(self.merge_args(critical=0), self.project("normal"))
+        self.assertFalse(any(call[:3] in (("gh", "pr", "merge"), ("gh", "pr", "comment")) for call in calls))
+
+    def test_failed_checks_never_publish_a_pass_or_merge(self):
+        calls = []
+        remote = self.remote(calls)
+        def run(*args, **kwargs):
+            if args[:3] == ("gh", "pr", "checks"):
+                raise task_lane.Refused("required check failed")
+            return remote(*args, **kwargs)
+        with mock.patch.object(task_lane, "run", side_effect=run):
+            with self.assertRaisesRegex(task_lane.Refused, "check failed"):
+                task_lane.cmd_merge(self.merge_args(), self.project("normal"))
+        self.assertFalse(any(call[:3] in (("gh", "pr", "merge"), ("gh", "pr", "comment")) for call in calls))
+
+    def test_high_rigor_leaves_the_merge_to_the_owner(self):
+        calls = []
+        with mock.patch.object(task_lane, "run", side_effect=self.remote(calls)):
+            result = task_lane.cmd_merge(self.merge_args(), self.project("high"))
+        self.assertFalse(result["auto_merge"])
+        self.assertFalse(any(call[:3] == ("gh", "pr", "merge") for call in calls))
+
+    def test_high_rigor_merges_only_under_delegation(self):
+        calls = []
+        with mock.patch.object(task_lane, "run", side_effect=self.remote(calls)), \
+                mock.patch.object(task_lane, "refresh_graph"), \
+                mock.patch.object(task_lane, "queue_retrospective", return_value={"retro_job": "queued"}):
+            result = task_lane.cmd_merge(self.merge_args(delegated=True), self.project("high"))
+        self.assertTrue(result["merged"])
+
+    def test_confirmed_risk_requires_delegation_even_with_normal_rigor(self):
+        root = self.project("normal")
+        path = task_lane.task_path(root, "TK-004")
+        text = path.read_text(encoding="utf-8").replace("rigor: normal", "rigor: normal\nrisks: auth")
+        path.write_text(text, encoding="utf-8")
+        for delegated in (False, True):
+            calls = []
+            with self.subTest(delegated=delegated), \
+                    mock.patch.object(task_lane, "run", side_effect=self.remote(calls)), \
+                    mock.patch.object(task_lane, "refresh_graph"), \
+                    mock.patch.object(task_lane, "queue_retrospective", return_value={}):
+                result = task_lane.cmd_merge(self.merge_args(delegated=delegated), root)
+                self.assertEqual(result.get("merged", False), delegated)
+                self.assertFalse(result["auto_merge"])
+                self.assertEqual(any(call[:3] == ("gh", "pr", "merge") for call in calls), delegated)
+                self.assertEqual(any(call[:3] == ("gh", "pr", "comment") for call in calls), delegated)
+                self.assertEqual(any(call[:3] == ("gh", "pr", "checks") for call in calls), delegated)
+                self.assertEqual(path.read_text(encoding="utf-8"), text)
+
+    def test_graph_refresh_gets_the_project_root_and_merged_range(self):
         import graphify_refresh
         script = ROOT / "platforms/shared/software-engineering-team/overlay/scripts/graphify_refresh.py"
-        view = json.dumps({"baseRefName": "main", "headRefOid": "abc123"})
+        view = json.dumps({"baseRefName": "main", "headRefOid": self.head})
         with mock.patch.object(task_lane, "GRAPH_REFRESH", script), \
                 mock.patch.object(task_lane.shutil, "which", return_value="/bin/graphify"), \
-                mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: view if "view" in a else ""), \
+                mock.patch.object(task_lane, "run", return_value=view), \
                 mock.patch.object(task_lane.subprocess, "Popen") as popen:
-            task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None),
-                                self.project("normal"))
+            task_lane.refresh_graph(self.project("normal"), "9")
         argv = popen.call_args.args[0][2:]
-        self.assertEqual(argv[argv.index("--range") + 1], "origin/main...abc123")
+        self.assertEqual(argv[argv.index("--range") + 1], "origin/main..." + self.head)
         with mock.patch.object(graphify_refresh.subprocess, "Popen") as child:
             self.assertEqual(graphify_refresh.main(argv), 0)
         self.assertIn("--wait", child.call_args.args[0])
 
-    def test_high_rigor_leaves_the_merge_to_the_owner(self):
-        calls = []
-        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
-            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
-                                                          detail=None), self.project("high"))
-        self.assertFalse(result["auto_merge"])
-        self.assertFalse(any(call[:3] == ("gh", "pr", "merge") for call in calls))
 
-    def test_high_rigor_auto_merges_under_a_delegation(self):
-        calls = []
-        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
-            result = task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge",
-                                                          detail=None, delegated=True),
-                                         self.project("high"))
-        self.assertTrue(result["auto_merge"])
-        self.assertIn(("gh", "pr", "merge", "9", "--auto", "--merge"), calls)
+class MethodRoutingTests(unittest.TestCase):
+    def test_invalid_issue_refuses_before_task_or_worktree_mutation(self):
+        with mock.patch.object(task_lane, "run") as run:
+            with self.assertRaisesRegex(task_lane.Refused, "positive project issue"):
+                task_lane._start_task(SimpleNamespace(issue=0), Path("unused"))
+            run.assert_not_called()
 
+    def test_retro_git_failure_does_not_undo_delivery(self):
+        import retrospective
+        with mock.patch.object(retrospective, "emit", side_effect=subprocess.CalledProcessError(1, "git")):
+            result = task_lane.queue_retrospective(Path("unused"))
+        self.assertIn("retro_queue_error", result)
 
-class RoleRoutingTests(unittest.TestCase):
+    def test_failed_commands_emit_local_observations_without_changing_exit_status(self):
+        root = Path("/synthetic-project")
+        for failure in (task_lane.Refused("private command detail"),
+                        {"ok": False, "head": "a" * 40, "record": "proof.json"}):
+            options = {"side_effect": failure} if isinstance(failure, Exception) else {"return_value": failure}
+            output = io.StringIO()
+            with mock.patch.object(task_lane, "project_root", return_value=root), \
+                    mock.patch.object(task_lane, "cmd_prove", **options), \
+                    mock.patch.object(task_lane, "queue_retrospective", return_value={"retro_job": "observed"}) as queued, \
+                    contextlib.redirect_stdout(output):
+                code = task_lane.main(["prove", "--task", "TK-004"])
+            self.assertEqual(code, 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+            queued.assert_called_once()
+            project, event = queued.call_args.args
+            self.assertEqual(project, root)
+            self.assertEqual((event["kind"], event["operation"], event["task"]),
+                             ("failure", "prove", "TK-004"))
+            self.assertNotIn("private command detail", json.dumps(event))
+            self.assertGreaterEqual(event["seconds"], 0)
+            if not isinstance(failure, Exception):
+                self.assertEqual(event["receipt_path"], str(root / "proof.json"))
+
     def project(self, task: str = TASK) -> Path:
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
+        companion_fallbacks(root)
         return root
 
-    def roles(self, text: str, kind: str = "build", size: str = "m", root: Path | None = None) -> dict:
-        allowed = task_lane.routing_policy(root)["pre_check_triggers"][size]
-        return {item["role"]: item for item in task_lane.route(task_lane.role_rules(root), text, kind, size,
-                                                               task_lane.named_files(text), allowed)}
+    def test_task_lookup_ignores_evidence_sidecars_and_preserves_task_lint(self):
+        root = self.project()
+        record = task_lane.task_path(root, "TK-004")
+        (record.parent / "tk-004-evidence.md").write_text("# Proof\nObserved the expected result.\n", encoding="utf-8")
+        (record.parent / "tk-004-review.md").write_text(
+            "---\ntype: evidence\nid: EV-004\n---\n# Review\n", encoding="utf-8")
+        self.assertEqual(task_lane.task_path(root, "TK-004"), record)
+        self.assertEqual(task_lane.task_path(root, "tk-004"), record)
+        loaded = task_lane.cmd_method(SimpleNamespace(task="TK-004", name="data-design", evidence=None), root)
+        self.assertEqual(loaded["task_id"], "TK-004")
+        self.assertEqual(task_lane.cmd_approve(SimpleNamespace(task="TK-004"), root)["task_id"], "TK-004")
+        record.write_text(TASK.replace('title: "Export invoices"\n', ''), encoding="utf-8")
+        self.assertEqual(task_lane.task_path(root, "TK-004"), record)
+        self.assertIn("title is required", task_lane.cmd_lint(SimpleNamespace(file=None, task="TK-004"), root)["errors"])
+
+    def test_task_lookup_refuses_duplicate_malformed_or_contradictory_task_identity(self):
+        for text in (TASK, TASK.replace("id: TK-004", "id: TK-005"),
+                     TASK.replace("type: task\n", ""), TASK.replace("id: TK-004\n", ""),
+                     TASK.replace("type: task", "type: evidence"),
+                     "---\ntype: task\nid: TK-004\n", "---\ntype: task\nbroken line\n---\n"):
+            with self.subTest(metadata=text.split("---", 2)[1]):
+                root = self.project()
+                (root / task_lane.TASKS / "tk-004-other.md").write_text(text, encoding="utf-8")
+                with self.assertRaises(task_lane.Refused):
+                    task_lane.task_path(root, "TK-004")
+
+    def test_evidence_without_a_task_record_cannot_become_the_task(self):
+        root = self.project()
+        record = task_lane.task_path(root, "TK-004")
+        record.unlink()
+        (record.parent / "tk-004-evidence.md").write_text("# Proof\n", encoding="utf-8")
+        with self.assertRaisesRegex(task_lane.Refused, "no single task"):
+            task_lane.cmd_method(SimpleNamespace(task="TK-004", name="data-design", evidence=None), root)
+
+    def test_server_rendered_ui_effects_require_experience_design_and_impeccable(self):
+        root = self.project()
+        rules = task_lane.task_triggers(root)["method_skills"]
+        props = task_lane.task_props(task_lane.task_path(root, "TK-004"))
+        for request in ("Correct the UI button label in app.py",
+                        "Preserve semantic markup in app.py", "Fix the visual design in app.py"):
+            with self.subTest(request=request), mock.patch.object(task_lane, "read_methods", return_value={}):
+                methods = task_lane.triggered(rules, "skill", request, {"app.py"})
+                self.assertIn("experience-design", methods)
+                companions = task_lane.companion_evidence(root, "TK-004", methods, props, {"app.py"})
+                required = next(row for row in companions if row["companion"] == "impeccable")
+                self.assertFalse(required["ok"])
+        methods = task_lane.triggered(rules, "skill", "Fix an integer calculation in app.py", {"app.py"})
+        self.assertNotIn("experience-design", methods)
+        with mock.patch.object(task_lane, "read_methods", return_value={}):
+            companions = task_lane.companion_evidence(root, "TK-004", methods, props, {"app.py"})
+        self.assertNotIn("impeccable", [row["companion"] for row in companions])
+
+    def test_routine_integration_proof_does_not_require_solution_design(self):
+        root = self.project()
+        for text, expected in (("Record integration readiness", False), ("Run an integration test", False),
+                               ("Change an external integration", True), ("Change an integration contract", True),
+                               ("Change an integration boundary", True)):
+            with self.subTest(text=text):
+                props = {"rigor": "normal", "required_methods": ["experience-design"]}
+                methods = task_lane.required_methods(root, props, {"app.py"}, text)
+                self.assertEqual("solution-design" in methods, expected)
+                self.assertIn("experience-design", methods)
+                companions = task_lane.companion_evidence(root, "TK-004", methods, props, {"app.py"}, head="a" * 40)
+                self.assertEqual("security-audit" in [row["companion"] for row in companions], expected)
+        self.assertIn("solution-design", task_lane.required_methods(
+            root, {"required_methods": ["solution-design"]}, {"app.py"}, "Record integration readiness"))
+        self.assertIn("solution-design", task_lane.required_methods(root, {}, {"api/contracts/export.py"}))
+        for risk in ("migration", "data_placement"):
+            self.assertIn("data-design", task_lane.required_methods(
+                root, {"risks": [risk]}, {"app.py"}, "Run an integration test"))
+
+    def test_method_discovery_uses_task_contract_and_preserves_legacy_scope(self):
+        task = TASK.replace("rigor: normal", "rigor: normal\nrisks: migration")
+        task = task.replace("<!-- sec: nav -->", "## Design and scope\n\n"
+                            "No UI or external integration change is needed. Existing page.tsx stays intact.\n\n"
+                            "<!-- sec: nav -->")
+        root = self.project(task)
+        path = task_lane.task_path(root, "TK-004")
+        props = task_lane.task_props(path)
+        body = task_lane.task_body(path)
+        self.assertNotIn("No UI", body)
+        self.assertNotIn("page.tsx", task_lane.named_files(body))
+        self.assertEqual(task_lane.required_methods(root, props, {"app.py"}, body), ["data-design"])
+        self.assertIn("experience-design", task_lane.required_methods(root, props, {"page.tsx"}, body))
+        with self.fake_run("app.py"):
+            inputs = task_lane.cmd_review_inputs(SimpleNamespace(task="TK-004", base="main"), root)
+        self.assertEqual(inputs["triggered_skills"], ["data-design"])
+        self.assertNotIn("impeccable", [row["companion"] for row in inputs["companion_evidence"]])
+        for body in ("## Request\n\nFix the UI label.\n\n## Acceptance Criteria\n\n1. Correct text.\n",
+                     "## Request\n\nFix the label.\n\n### Do\n\n- Preserve semantic markup.\n",
+                     "## Request\n\nFix the label.\n\n## Acceptance Criteria\n\n1. Preserve semantic markup.\n",
+                     "Fix the UI label in this legacy unstructured task.\n"):
+            with self.subTest(body=body):
+                path.write_text(body, encoding="utf-8")
+                methods = task_lane.required_methods(root, {}, {"app.py"}, task_lane.task_body(path))
+                self.assertIn("experience-design", methods)
 
     def fake_run(self, changed: str = ""):
         def run(*args, **_kwargs):
+            if args == ("git", "rev-parse", "HEAD"):
+                return "a" * 40
+            if args == ("git", "rev-parse", "--path-format=absolute", "--git-common-dir"):
+                return str(_kwargs["cwd"] / ".git")
             if args[:2] == ("git", "diff") and "--name-only" in args and "--cached" not in args:
                 return changed
             if args[:3] == ("gh", "pr", "list"):
@@ -317,42 +538,30 @@ class RoleRoutingTests(unittest.TestCase):
     def open_pr(self, root: Path) -> dict:
         return task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
 
-    def check(self, root: Path, role: str = "software-architect", at: str | None = None) -> dict:
-        return task_lane.cmd_role_check(SimpleNamespace(task="TK-004", role=role, verdict="go",
-                                                        note="fits the records", at=at), root)
+    def method(self, root: Path, evidence: str | None = None) -> dict:
+        return task_lane.cmd_method(SimpleNamespace(task="TK-004", name="data-design", evidence=evidence), root)
 
-    def test_only_a_path_rule_routes_the_architect_at_size_m_on_the_cheaper_class(self):
-        found = self.roles("Rename the total column in db/migrations/0007_totals.sql please")
-        self.assertEqual(found["software-architect"]["mode"], "require")
-        self.assertEqual(found["software-architect"]["step"], "pre_check")
-        self.assertEqual(found["software-architect"]["model_class"], "routine_review")
-        self.assertIn("file db/migrations/0007_totals.sql matches *migrations/*",
-                      found["software-architect"]["reasons"])
-        self.assertEqual(self.roles("Refactor the invoice model and its database table interface"), {})
-
-    def test_size_s_routes_no_role(self):
-        self.assertEqual(self.roles("Rename the column in db/migrations/0007_totals.sql", size="s"), {})
-
-    def test_size_l_routes_the_architect_only_for_build_tasks(self):
-        self.assertEqual(self.roles("Polish the export", size="l")["software-architect"]["reasons"], ["size l"])
-        self.assertNotIn("software-architect", self.roles("Polish the export", size="m"))
-        self.assertEqual(self.roles("Rewrite the schema notes", kind="knowledge", size="l"), {})
-
-    def test_start_writes_the_roles_field_and_lists_only_require_roles_to_spawn(self):
-        root = self.project()
-        args = SimpleNamespace(delivery=None, at=None, request="Add db/migrations/0009_payments.sql for the"
-                               " approval workflow", request_file=None,
-                               title="Payments", epic=None, source_story=None, covers=None, fixes=None,
-                               knowledge=False, size="l", base="main", switch=True)
-        with self.fake_run():
-            result = task_lane.cmd_start(args, root)
-        self.assertEqual([item["role"] for item in result["roles"]], ["software-architect", "business-analyst",
-                                                                   "qa-engineer"])
-        self.assertIn("file db/migrations/0009_payments.sql matches *migrations/*", result["roles"][0]["reasons"])
-        self.assertEqual(result["spawn"], ["software-architect"])
-        props = task_lane.task_props(root / result["task"])
-        self.assertEqual(props["roles"], "software-architect:require:pre_check, business-analyst:suggest:pre_check,"
-                                        " qa-engineer:suggest:pre_check")
+    def test_small_data_changes_require_the_same_method_as_large_ones(self):
+        for size in ("s", "m", "l"):
+            root = self.project()
+            args = SimpleNamespace(request="Add db/migrations/0009_totals.sql", request_file=None,
+                                   title="Persist totals", epic=None, source_story=None, covers=None,
+                                   fixes=None, knowledge=False, size=size, base="main", risk=None, switch=True)
+            with self.fake_run():
+                result = task_lane.cmd_start(args, root)
+            self.assertEqual(result["required_methods"], ["data-design"])
+            self.assertEqual(result["suggested_risks"], ["migration"])
+            self.assertEqual((result["proposed_rigor"], result["risks"]), ("normal", []))
+            props = task_lane.task_props(root / result["task"])
+            self.assertEqual(props["size"], size)
+            self.assertEqual(task_lane.field_items(props, "required_methods"), ["data-design"])
+            self.assertNotIn("applied_skills", props)
+            self.assertNotIn("roles", props)
+            self.assertNotIn("spawn", result)
+            args.risk = ["migration"]
+            with self.fake_run():
+                result = task_lane.cmd_start(args, root)
+            self.assertEqual((result["proposed_rigor"], result["risks"]), ("high", ["migration"]))
 
     def test_a_knowledge_task_naming_risky_words_starts_normal_with_only_explicit_risks(self):
         root = self.project()
@@ -366,47 +575,141 @@ class RoleRoutingTests(unittest.TestCase):
         with self.fake_run():
             self.assertEqual(task_lane.cmd_start(args, root)["risks"], ["secrets"])
 
-    def test_a_required_role_blocks_open_pr_until_its_verdict_is_recorded(self):
-        root = self.project(TASK.replace("size: s", "size: l"))
-        lint = task_lane.cmd_lint(SimpleNamespace(file=None, task="TK-004"), root)
-        self.assertTrue(lint["ok"])
-        self.assertIn("role-check --task TK-004 --role software-architect", lint["warnings"][0])
-        with self.fake_run(), self.assertRaisesRegex(task_lane.Refused, "software-architect has no recorded verdict"):
-            self.open_pr(root)
-        self.assertEqual(self.check(root)["pending_roles"], [])
-        path = task_lane.task_path(root, "TK-004")
-        self.assertEqual(task_lane.lint(path), [])
-        self.assertEqual(task_lane.role_checks(path)[0]["note"], "fits the records")
-        with self.fake_run():
+    def test_confirmed_data_risks_require_design_without_discovery_matches(self):
+        for risk in ("migration", "data_placement"):
+            with self.subTest(risk=risk):
+                root = self.project(TASK.replace("rigor: normal", f"rigor: high\nrisks: {risk}"))
+                (root / "workspace/config.json").write_text(json.dumps({"task_triggers": {
+                    "method_skills": [{"skill": "data-design", "keywords": [], "path_globs": []}]}}), encoding="utf-8")
+                props = task_lane.task_props(task_lane.task_path(root, "TK-004"))
+                self.assertNotIn("required_methods", props)
+                self.assertEqual(task_lane.required_methods(root, props, {"opaque.py"}), ["data-design"])
+                self.assertEqual(task_lane.required_methods(root, {"risks": "auth"}, {"opaque.py"}), [])
+                args = SimpleNamespace(request="Adjust opaque.py", request_file=None, title="Adjust behavior",
+                                       epic=None, source_story=None, covers=None, fixes=None, knowledge=False,
+                                       size="s", base="main", risk=[risk], switch=True)
+                with self.fake_run():
+                    started = task_lane.cmd_start(args, root)
+                    inputs = task_lane.cmd_review_inputs(SimpleNamespace(task="TK-004", base="main"), root)
+                self.assertEqual(started["required_methods"], ["data-design"])
+                self.assertEqual(inputs["missing_skills"], ["data-design"])
+        self.assertEqual(task_lane.required_methods(None, {"title": "Correct visual design"}, {"opaque.py"}),
+                         ["experience-design"])
+
+    def test_missing_or_stale_discovered_or_confirmed_methods_block_all_publication_and_merge_paths(self):
+        import proof_train
+
+        head, base = "a" * 40, "b" * 40
+        cases = [("data-design", TASK.replace("rigor: normal", f"rigor: high\nrisks: {risk}"))
+                 for risk in ("migration", "data_placement")]
+        cases.append(("experience-design", TASK.replace("Export the month's invoices as CSV.",
+                                                       "Preserve semantic markup in opaque.py.")))
+        for method, text in cases:
+            for state in ("missing", "stale"):
+                with self.subTest(method=method, task=text, evidence=state):
+                    root = self.project(text)
+                    record = task_lane.task_path(root, "TK-004")
+                    self.assertNotIn("required_methods", task_lane.task_props(record))
+                    integration_task = root / "wt-1" / record.relative_to(root)
+                    integration_task.parent.mkdir(parents=True)
+                    integration_task.write_text(text, encoding="utf-8")
+                    evidence = root / "design.md"
+                    evidence.write_text("Reviewed existing rows and tenant ownership.\n", encoding="utf-8")
+                    if state == "stale":
+                        task_lane.cmd_method(SimpleNamespace(task="TK-004", name=method, evidence=None), root)
+                        task_lane.cmd_method(SimpleNamespace(task="TK-004", name=method, evidence="design.md"), root)
+                        self.assertEqual(task_lane.missing_methods(root, "TK-004", [method]), [])
+                        evidence.write_text("Changed design after its receipt.\n", encoding="utf-8")
+                    self.assertEqual(task_lane.missing_methods(root, "TK-004", [method]), [method])
+                    batch = {"id": 1, "status": proof_train.GREEN, "base": "main", "head": head,
+                             "base_head": base, "integration_pr": "99",
+                             "commands": [{"command": "check", "exit_code": 0}],
+                             "members": [{"task": "TK-004", "head": head, "root": str(root)}]}
+                    train_state = SimpleNamespace(batch=lambda *args: batch)
+                    merge = SimpleNamespace(task="TK-004", pr="99", head=head, critical=0,
+                                            non_critical=0, filed=0, detail=None, delegated=True,
+                                            base="main", batch=1, dry_run=False)
+
+                    def run(*args, cwd=None):
+                        if args[:3] == ("gh", "pr", "view"):
+                            return json.dumps({"headRefOid": head, "headRefName": "train/1",
+                                               "baseRefName": "main", "state": "OPEN"})
+                        if args[:2] == ("git", "ls-remote"):
+                            return f"{base}\trefs/heads/main"
+                        if args[:2] == ("git", "diff") and "--name-only" in args:
+                            return "opaque.py"
+                        return head if args == ("git", "rev-parse", "HEAD") else ""
+
+                    with mock.patch.object(task_lane, "run", side_effect=run) as commands, \
+                            mock.patch.object(task_lane, "changed_files", return_value={"opaque.py"}), \
+                            mock.patch.object(task_lane, "head_state", return_value=(head, True)), \
+                            mock.patch.object(task_lane, "proof_commands", return_value=["check"]), \
+                            mock.patch.object(proof_train, "home", return_value=root), \
+                            mock.patch.object(proof_train, "check_reviewed_heads"):
+                        for operation in (lambda: self.open_pr(root),
+                                          lambda: task_lane.cmd_merge(merge, root),
+                                          lambda: proof_train.add(merge, root, task_lane, train_state),
+                                          lambda: proof_train.publish(merge, root, task_lane, train_state),
+                                          lambda: proof_train.merge(merge, root, task_lane, train_state)):
+                            with self.assertRaisesRegex(task_lane.Refused, f"method evidence is missing.*{method}"):
+                                operation()
+                        self.assertFalse(any(call.args[:3] in (("gh", "pr", "create"), ("gh", "pr", "merge"),
+                                                              ("gh", "pr", "comment"))
+                                             or call.args[:2] == ("git", "push") for call in commands.call_args_list))
+
+    def test_required_method_needs_current_load_and_completion_evidence(self):
+        task = TASK.replace("size: s", "size: s\nrequired_methods: data-design\napplied_skills: data-design")
+        root = self.project(task)
+        skills = root / "methods"
+        for name in ("data-design", "solution-design", "experience-design", "verify"):
+            source = skills / name / "SKILL.md"
+            source.parent.mkdir(parents=True)
+            source.write_text(f"# {name}\nExamine the affected contract.\n", encoding="utf-8")
+        source = skills / "data-design" / "SKILL.md"
+        evidence = root / "data-review.md"
+        evidence.write_text("Reviewed nullability and existing rows.\n", encoding="utf-8")
+        with mock.patch.object(task_lane, "SKILLS", skills), self.fake_run() as run:
+            self.assertEqual(task_lane.missing_methods(root, "TK-004", ["data-design"]), ["data-design"])
+            with self.assertRaisesRegex(task_lane.Refused, "method evidence is missing"):
+                self.open_pr(root)
+            self.assertFalse(any(call.args[:2] == ("git", "push") for call in run.call_args_list))
+            with self.assertRaisesRegex(task_lane.Refused, "load this version"):
+                self.method(root, "data-review.md")
+            loaded = self.method(root)
+            self.assertEqual(loaded["content"], source.read_text(encoding="utf-8"))
+            self.assertEqual(loaded["skill_sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
+            self.assertEqual(loaded["load_source"], "method_tool")
+            self.assertNotIn("completion_source", loaded)
+            self.assertEqual(task_lane.missing_methods(root, "TK-004", ["data-design"]), ["data-design"])
+            completed = self.method(root, "data-review.md")
+            self.assertEqual(completed["completion_source"], "worker_report")
+            self.assertEqual(completed["evidence_sha256"], hashlib.sha256(evidence.read_bytes()).hexdigest())
+            self.assertEqual(task_lane.missing_methods(root, "TK-004", ["data-design"]), [])
+            self.assertEqual(self.open_pr(root)["pr"], "9")
+            evidence.write_text("Changed review.\n", encoding="utf-8")
+            with self.assertRaisesRegex(task_lane.Refused, "method evidence is missing"):
+                self.open_pr(root)
+            self.method(root, "data-review.md")
+            source.write_text("# data-design\nNew method requirements.\n", encoding="utf-8")
+            self.assertEqual(task_lane.missing_methods(root, "TK-004", ["data-design"]), ["data-design"])
+            with self.assertRaisesRegex(task_lane.Refused, "load this version"):
+                self.method(root, "data-review.md")
+            self.method(root)
+            self.assertEqual(task_lane.missing_methods(root, "TK-004", ["data-design"]), ["data-design"])
+            self.method(root, "data-review.md")
             self.assertEqual(self.open_pr(root)["pr"], "9")
 
-    def test_a_changed_migration_in_the_diff_requires_the_architect(self):
-        root = self.project(TASK.replace("size: s", "size: m"))
-        with self.fake_run("db/migrations/0008_add_index.sql\n"), \
-                self.assertRaisesRegex(task_lane.Refused, "software-architect"):
-            self.open_pr(root)
-
-    def test_a_project_rule_replaces_adds_or_drops_a_packaged_rule(self):
+    def test_a_changed_migration_requires_evidence_even_when_the_task_omits_the_method(self):
         root = self.project()
-        (root / "workspace").mkdir(exist_ok=True)
-        (root / "workspace/config.json").write_text(json.dumps({"role_routing": {"rules": [
-            {"role": "software-architect", "mode": "suggest", "step": "pre_check", "kinds": ["build"],
-             "keywords": ["table"], "time_budget_minutes": 2, "ask": "Check the table."},
-            {"role": "qa-engineer", "mode": "off", "step": "pre_check"},
-            {"role": "security-reviewer", "mode": "require", "step": "pre_check", "kinds": ["build"],
-             "path_globs": ["*auth/*"], "time_budget_minutes": 3, "ask": "Check the auth change."}]}}),
-            encoding="utf-8")
-        found = self.roles("Add a table, a regression check and a login screen in src/auth/login.tsx",
-                           size="l", root=root)
-        self.assertEqual(found["software-architect"]["mode"], "suggest")
-        self.assertEqual(found["security-reviewer"]["mode"], "require")
-        self.assertNotIn("qa-engineer", found)
+        with self.fake_run("db/migrations/0008_add_index.sql\n"), \
+                self.assertRaisesRegex(task_lane.Refused, "data-design"):
+            self.open_pr(root)
 
     def test_the_retrospective_counts_role_checks_and_their_minutes(self):
         root = self.project()
-        self.check(root, at="2026-10-16T10:05:00+00:00")
-        self.check(root, "qa-engineer", at="2026-10-16T10:06:30+00:00")
         path = task_lane.task_path(root, "TK-004")
+        task_lane.add_line(path, "Role Checks", "- 2026-10-16T10:05:00+00:00 software-architect go: fits the records")
+        task_lane.add_line(path, "Role Checks", "- 2026-10-16T10:06:30+00:00 qa-engineer go: checks passed")
         task = {**task_lane.task_props(path), "role_checks": task_lane.role_checks(path)}
         row = task_lane.task_row(task, pr("2026-10-16T10:12:00Z", "2026-10-16T10:15:00Z",
                                           "2026-10-16T10:14:00Z", "2026-10-16T10:16:00Z"))
@@ -445,6 +748,7 @@ class LocalProofTests(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
+        companion_fallbacks(root)
         if value:
             (root / "workspace" / "config.json").write_text(json.dumps({"pr_proof": value}),
                                                             encoding="utf-8")
@@ -463,12 +767,15 @@ class LocalProofTests(unittest.TestCase):
 
         def run(*args, **_kwargs):
             calls.append(args)
+            if args == ("git", "rev-parse", "HEAD"):
+                return self.HEAD
             if args[:3] == ("gh", "pr", "list"):
                 return "[]"
             if args[:3] == ("gh", "pr", "create"):
                 return "https://github.com/acme/shop/pull/9"
             return ""
         with mock.patch.object(task_lane, "run", side_effect=run), \
+                mock.patch.object(task_lane, "proof_admission", return_value=contextlib.nullcontext()), \
                 mock.patch.object(task_lane, "head_state", return_value=(self.HEAD, clean)):
             result = task_lane.cmd_open_pr(SimpleNamespace(task="TK-004", base="main"), root)
         create = next(call for call in calls if call[:3] == ("gh", "pr", "create"))
@@ -521,6 +828,7 @@ class LocalProofTests(unittest.TestCase):
         own = task_lane.task_path(root, "TK-004").relative_to(root).as_posix()
         for changed, stale in ((own, False), (own + "\nsrc/other.txt", True)):
             with mock.patch.object(task_lane, "run", return_value=changed), \
+                    mock.patch.object(task_lane, "proof_admission", return_value=contextlib.nullcontext()), \
                     mock.patch.object(task_lane, "head_state", return_value=(self.HEAD, True)):
                 problems = task_lane.proof_problems(root, "TK-004")[0]
             self.assertEqual(any("run prove again" in item for item in problems), stale, changed)
@@ -558,6 +866,7 @@ class LocalProofGitTests(unittest.TestCase):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         init_repository(root)
+        (root / ".gitignore").write_text(".agentrof/\n", encoding="utf-8")
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
         (root / "workspace").mkdir(exist_ok=True)
@@ -578,11 +887,12 @@ class LocalProofGitTests(unittest.TestCase):
         git("commit", "-qm", "change")
         self.assertTrue(any("run prove again" in item for item in task_lane.proof_problems(root, "TK-004")[0]))
 
-    def test_a_task_that_declares_a_risk_runs_the_full_local_proof(self):
+    def test_risk_flags_preserve_explicit_impact_based_proof_selection(self):
         def selection(task: str) -> tuple[str, list[str]]:
             root = Path(tempfile.mkdtemp())
             self.addCleanup(lambda: __import__("shutil").rmtree(root))
             init_repository(root)
+            (root / ".gitignore").write_text(".agentrof/\n", encoding="utf-8")
             (root / task_lane.TASKS).mkdir(parents=True)
             (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(task, encoding="utf-8")
             (root / "workspace").mkdir(exist_ok=True)
@@ -603,7 +913,7 @@ class LocalProofGitTests(unittest.TestCase):
             record = task_lane.cmd_prove(SimpleNamespace(task="TK-004", base="main"), root)
             return record["selection"], [item["command"] for item in record["commands"]]
 
-        self.assertEqual(selection(TASK.replace("---\n", "---\nrisks: auth\n", 1)), ("full", ["echo full"]))
+        self.assertEqual(selection(TASK.replace("---\n", "---\nrisks: auth\n", 1)), ("impact", ["echo narrow"]))
         self.assertEqual(selection(TASK), ("impact", ["echo narrow"]))
 
 
@@ -634,18 +944,172 @@ class TaskStartWorktreeTests(unittest.TestCase):
 
     def test_start_leaves_a_dirty_shared_checkout_on_its_branch_and_works_in_a_worktree(self):
         (self.root / "app.txt").write_text("edited", encoding="utf-8")
-        result = self.start(worktree_dir=str(self.tree))
+        with mock.patch("companion_routing.apply", return_value=[".native/local-settings"]) as refresh:
+            result = self.start(worktree_dir=str(self.tree))
+        refresh.assert_called_once_with(self.tree)
+        self.assertEqual(result["companion_routing"], [".native/local-settings"])
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), "main")
         self.assertEqual((self.root / "app.txt").read_text(encoding="utf-8"), "edited")
         self.assertEqual(result["worktree"], str(self.tree))
+        self.assertNotIn("push_reconciliation", result)
         self.assertTrue((self.tree / result["task"]).is_file())
         self.assertFalse((self.root / result["task"]).exists())
         self.assertEqual(task_lane.run("git", "rev-parse", "--abbrev-ref", "HEAD", cwd=self.tree), result["branch"])
+
+    def test_local_routing_failure_preserves_reserved_task_for_resume(self):
+        with mock.patch("companion_routing.apply", side_effect=ValueError("invalid local settings")), \
+                self.assertRaisesRegex(task_lane.Refused, "Resume existing TK-001"):
+            self.start(worktree_dir=str(self.tree))
+        self.assertTrue(list((self.tree / task_lane.TASKS).glob("tk-001-*.md")))
+        branch = task_lane.run("git", "branch", "--show-current", cwd=self.tree)
+        head = task_lane.run("git", "rev-parse", "HEAD", cwd=self.tree)
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", f"refs/heads/{branch}"),
+                         f"{head}\trefs/heads/{branch}")
 
     def test_switch_keeps_the_old_behaviour_on_request(self):
         result = self.start(switch=True)
         self.assertEqual(self.git("rev-parse", "--abbrev-ref", "HEAD"), result["branch"])
         self.assertEqual(result["worktree"], str(self.root))
+
+    def test_local_unpushed_task_branches_reserve_their_ids(self):
+        self.git("branch", "task/tk-009-pending")
+        result = self.start(worktree_dir=str(self.tree))
+        self.assertEqual(result["task_id"], "TK-010")
+
+    def test_denied_worktree_add_removes_only_its_unchanged_unattached_branch(self):
+        original = task_lane.run
+        base = self.git("rev-parse", "origin/main")
+        calls = []
+
+        def run(*args, cwd=None):
+            calls.append(args)
+            if args[:3] == ("git", "worktree", "add"):
+                self.tree.mkdir()
+                (self.tree / "owner.txt").write_text("keep", encoding="utf-8")
+                raise task_lane.Refused("config.lock denied")
+            return original(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run), self.assertRaisesRegex(task_lane.Refused, "config.lock denied.*destination"):
+            self.start(worktree_dir=str(self.tree))
+        ref = "refs/heads/task/tk-001-fix-export"
+        self.assertIn(("git", "update-ref", ref, base, "0" * len(base)), calls)
+        self.assertIn(("git", "update-ref", "-d", ref, base), calls)
+        self.assertEqual(self.git("for-each-ref", "--format=%(refname)", ref), "")
+        self.assertEqual((self.tree / "owner.txt").read_text(encoding="utf-8"), "keep")
+        retried = self.start(worktree_dir=str(self.tree.parent / "retry"))
+        self.assertEqual(retried["task_id"], "TK-001")
+
+    def test_failed_add_preserves_a_branch_that_moved_from_the_starting_base(self):
+        self.git("commit", "--allow-empty", "-qm", "local change")
+        changed = self.git("rev-parse", "HEAD")
+        original = task_lane.run
+
+        def run(*args, cwd=None):
+            if args[:3] == ("git", "worktree", "add"):
+                original("git", "update-ref", f"refs/heads/{args[4]}", changed, cwd=cwd)
+                raise task_lane.Refused("interrupted add")
+            return original(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run), self.assertRaisesRegex(task_lane.Refused, "branch preserved"):
+            self.start(worktree_dir=str(self.tree))
+        self.assertEqual(self.git("rev-parse", "task/tk-001-fix-export"), changed)
+
+    def test_failed_add_preserves_a_branch_that_is_attached_to_a_worktree(self):
+        original = task_lane.run
+
+        def run(*args, cwd=None):
+            result = original(*args, cwd=cwd)
+            if args[:3] == ("git", "worktree", "add"):
+                raise task_lane.Refused("lost add response")
+            return result
+
+        with mock.patch.object(task_lane, "run", run), self.assertRaisesRegex(task_lane.Refused, "branch preserved"):
+            self.start(worktree_dir=str(self.tree))
+        self.assertIn("branch refs/heads/task/tk-001-fix-export", self.git("worktree", "list", "--porcelain"))
+        self.assertTrue((self.tree / "app.txt").is_file())
+
+    def test_failed_add_preserves_a_branch_that_existed_before_the_attempt(self):
+        branch = "task/tk-001-existing"
+        self.git("branch", branch)
+        before = self.git("rev-parse", branch)
+        with self.assertRaisesRegex(task_lane.Refused, "Branch preserved"):
+            task_lane.create_task_worktree(self.root, self.tree, branch, "origin/main")
+        self.assertEqual(self.git("rev-parse", branch), before)
+
+    def test_reservation_preserves_an_external_same_ref_created_at_the_same_base(self):
+        original = task_lane.run
+        ref = "refs/heads/task/tk-001-fix-export"
+        base = self.git("rev-parse", "origin/main")
+        calls = []
+
+        def run(*args, cwd=None):
+            calls.append(args)
+            if args[:3] == ("git", "update-ref", ref):
+                original("git", "update-ref", ref, base, cwd=cwd)
+            return original(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run), self.assertRaisesRegex(task_lane.Refused, "Branch preserved"):
+            self.start(worktree_dir=str(self.tree))
+        self.assertEqual(self.git("rev-parse", ref), base)
+        self.assertFalse(any(args[:3] == ("git", "worktree", "add") for args in calls))
+        self.assertFalse(any(args[:3] == ("git", "update-ref", "-d") for args in calls))
+
+    def test_cleanup_compare_and_swap_preserves_a_concurrently_changed_branch(self):
+        self.git("commit", "--allow-empty", "-qm", "local change")
+        changed = self.git("rev-parse", "HEAD")
+        original = task_lane.run
+
+        def run(*args, cwd=None):
+            if args[:3] == ("git", "worktree", "add"):
+                raise task_lane.Refused("denied add")
+            if args[:3] == ("git", "update-ref", "-d"):
+                original("git", "update-ref", args[3], changed, cwd=cwd)
+            return original(*args, cwd=cwd)
+
+        with mock.patch.object(task_lane, "run", run), self.assertRaisesRegex(task_lane.Refused, "cleanup could not be verified"):
+            self.start(worktree_dir=str(self.tree))
+        self.assertEqual(self.git("rev-parse", "task/tk-001-fix-export"), changed)
+
+    def test_a_push_accepted_before_a_lost_response_is_reconciled_by_exact_remote_head(self):
+        original = task_lane.run
+
+        def run(*args, cwd=None):
+            result = original(*args, cwd=cwd)
+            if args[:3] == ("git", "push", "-u"):
+                raise task_lane.Refused("lost push response")
+            return result
+
+        with mock.patch.object(task_lane, "run", run):
+            result = self.start(worktree_dir=str(self.tree))
+        head = original("git", "rev-parse", "HEAD", cwd=self.tree)
+        self.assertEqual(result["push_reconciliation"], {
+            "status": "remote_confirmed", "remote_head": head,
+            "upstream_tracking": "unverified", "error": "lost push response"})
+        self.assertEqual(self.git("ls-remote", "--heads", "origin", f"refs/heads/{result['branch']}"),
+                         f"{head}\trefs/heads/{result['branch']}")
+        self.assertTrue((self.tree / result["task"]).is_file())
+
+    def test_an_unconfirmed_push_preserves_the_task_and_points_to_its_existing_worktree(self):
+        original = task_lane.run
+        for state in ("missing", "unavailable", "different"):
+            with self.subTest(state=state):
+                tree = self.tree.parent / state
+
+                def run(*args, cwd=None):
+                    if args[:3] == ("git", "push", "-u"):
+                        raise task_lane.Refused("push failed")
+                    if args[:3] == ("git", "ls-remote", "--heads"):
+                        if state == "unavailable":
+                            raise task_lane.Refused("remote unavailable")
+                        return "" if state == "missing" else f"{'b' * 40}\t{args[4]}"
+                    return original(*args, cwd=cwd)
+
+                with mock.patch.object(task_lane, "run", run), self.assertRaises(task_lane.Refused) as raised:
+                    self.start(worktree_dir=str(tree))
+                self.assertIn("Resume existing TK-", str(raised.exception))
+                self.assertIn(str(tree), str(raised.exception))
+                self.assertEqual(len(list((tree / task_lane.TASKS).glob("tk-*-*.md"))), 1)
+                self.assertTrue(original("git", "rev-parse", "HEAD", cwd=tree))
 
 
 @integration
@@ -808,7 +1272,8 @@ class RetrospectiveCostTests(unittest.TestCase):
     def test_cost_and_reading_waste_come_from_the_task_branch(self):
         import session_cost
         home, project = self.transcripts()
-        events = session_cost.scan(project, 0, home / "claude", home / "codex")
+        with mock.patch.object(session_cost, "worktrees", return_value=[project.resolve()]):
+            events = session_cost.scan(project, 0, home / "claude", home / "codex")
         mine = [event for event in events if session_cost.belongs(event, "task/tk-004-export", 0, 1e12)]
         cost = session_cost.cost(mine)
         self.assertEqual(cost["agents"], 1)
@@ -863,7 +1328,7 @@ class RetrospectiveCostTests(unittest.TestCase):
         self.assertEqual(data["targets"]["build"]["total"]["average"], 40.0)
         self.assertIn("define", data["targets"]["knowledge"]["steps"])
         self.assertTrue(data["proposals"][0]["evidence"].startswith("build: "))
-        self.assertIn("vs target 15 min", data["proposals"][0]["evidence"])
+        self.assertIn("vs target 5 min", data["proposals"][0]["evidence"])
         self.assertEqual(data["targets"]["knowledge"]["average_target"], 5)
 
     def test_targets_and_the_previous_run_are_compared(self):
@@ -873,7 +1338,7 @@ class RetrospectiveCostTests(unittest.TestCase):
                                    pr("2026-10-16T10:05:00Z", None, None, "2026-10-16T10:10:00Z"))]
         goal = task_lane.targets(rows, [row["total"] for row in rows])["build"]
         self.assertEqual((goal["average"], goal["average_met"]), (35.0, False))
-        self.assertEqual((goal["max"], goal["max_met"]), (60.0, True))
+        self.assertEqual((goal["max"], goal["max_met"]), (60.0, False))
         self.assertEqual(goal["over_size_target"], ["TK-001", "TK-002"])
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
@@ -934,6 +1399,7 @@ class RetrospectiveDollarTests(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(self.home))
         self.project = self.home / "work" / "shop"
         self.project.mkdir(parents=True)
+        self.enterContext(mock.patch.object(session_cost, "worktrees", return_value=[self.project.resolve()]))
         self.folder = self.home / "claude" / str(self.project.resolve()).replace("/", "-")
         (self.folder / "s1" / "subagents").mkdir(parents=True)
         self.prices = session_cost.load_prices(self.project)
@@ -1027,6 +1493,15 @@ class RetrospectiveDollarTests(unittest.TestCase):
         # Every scanned token lands exactly once: tasks plus the unattributed rest equal the scan.
         self.assertEqual(sum(row["cost"]["tokens"]["output"] for row in rows) + rest["tokens"]["output"],
                          self.session_cost.cost(self.scan(), self.prices)["tokens"]["output"])
+
+    def test_readiness_work_after_merge_remains_attributed_to_the_task(self):
+        (self.folder / "s1.jsonl").write_text(self.call(25, "after-merge", output_tokens=10) + "\n", encoding="utf-8")
+        task = {**RetrospectiveTests.task, "id": "TK-001", "file": "tk-001-a.md"}
+        row = task_lane.task_row(task, pr("2026-10-16T10:10:00Z", None, None, "2026-10-16T10:20:00Z"))
+        row["ready_at"] = "2026-10-16T10:30:00+00:00"
+        rest = task_lane.attach_sessions([row], [task], self.scan(), False, 1e12, self.prices)
+        self.assertEqual(row["cost"]["tokens"]["output"], 10)
+        self.assertEqual(rest["tokens"]["output"], 0)
 
     def test_a_task_session_counts_its_calls_before_start_once_across_a_resume(self):
         # Base branch named task/...; m1 runs before start; m2 streams twice; the resumed run adds m3.
@@ -1142,13 +1617,20 @@ class RetrospectiveQualityTests(unittest.TestCase):
     def test_merge_writes_the_review_counts_and_the_report_reads_them(self):
         root = GitHubCommandTests.project(self, "normal")
         calls = []
-        with mock.patch.object(task_lane, "run", side_effect=lambda *a, **k: calls.append(a) or ""):
+        head = GitHubCommandTests.head
+        def run(*args, **kwargs):
+            calls.append(args)
+            if args == ("git", "rev-parse", "HEAD"):
+                return head
+            return json.dumps({"headRefOid": head, "baseRefName": "main", "state": "OPEN"}) if "view" in args else ""
+        with mock.patch.object(task_lane, "run", side_effect=run), \
+                mock.patch.object(task_lane, "review_problems", return_value=[]):
             task_lane.cmd_merge(SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None,
-                                                critical=1, non_critical=3, filed=2), root)
-        note = calls[0][-1]
-        self.assertIn("findings: critical 1, non-critical 3, filed 2", note)
+                                                head=head, critical=0, non_critical=3, filed=2), root)
+        note = next(call[-1] for call in calls if call[:3] == ("gh", "pr", "comment"))
+        self.assertIn("findings: critical 0, non-critical 3, filed 2", note)
         comments = [{"body": note}, {"body": "unrelated findings: critical 9, non-critical 9, filed 9"}]
-        self.assertEqual(task_lane.findings(comments), {"critical": 1, "non_critical": 3, "filed": 2})
+        self.assertEqual(task_lane.findings(comments), {"critical": 0, "non_critical": 3, "filed": 2})
         self.assertEqual(task_lane.findings([{"body": task_lane.REVIEW_MARK}])["critical"], None)
 
     def test_ci_first_pass_reads_the_first_head_and_counts_red_runs_before_the_merge(self):
@@ -1177,10 +1659,11 @@ class RetrospectiveQualityTests(unittest.TestCase):
         self.assertEqual(task_lane.lint(path), [])
         path.write_text(path.read_text(encoding="utf-8").replace("fixes: TK-004", "fixes: 4"), encoding="utf-8")
         self.assertIn("fixes must be TK-<number>", task_lane.lint(path))
-        with self.assertRaises(task_lane.Refused):
+        with mock.patch.object(task_lane, "run", return_value=str(path.parent / ".git")), \
+                self.assertRaisesRegex(task_lane.Refused, "--fixes must be"):
             task_lane.cmd_start(SimpleNamespace(delivery=None, at=None, request="r", request_file=None,
                                                 title="t", epic=None, source_story=None, covers=None,
-                                                fixes="TK-4"), Path("."))
+                                                fixes="TK-4"), path.parent)
         rows = [task_lane.task_row({**RetrospectiveTests.task, "id": "TK-004"}, None)]
         tasks = [{"id": "TK-004"}, {"id": "TK-009", "fixes": "TK-004"}, {"id": "TK-011", "fixes": "TK-004"}]
         task_lane.link_quality(rows, tasks, {})
@@ -1432,7 +1915,7 @@ class RetrospectiveReworkTests(unittest.TestCase):
         for bad in ({"category": "nope"}, {"ref": "abc"}, {"note": "token: x"}):
             with self.assertRaises(task_lane.Refused):
                 task_lane.cmd_rework(SimpleNamespace(**{**vars(args), **bad}), root)
-        self.assertNotIn("criterion", task_lane.routed_roles(root, path)[0].__repr__())
+        self.assertNotIn(args.note, task_lane.task_body(path))
 
     def test_the_lessons_file_updates_in_place_turns_quiet_entries_fixed_and_caps_its_entries(self):
         root = Path(tempfile.mkdtemp())
@@ -1528,9 +2011,9 @@ class RetrospectiveHonestyTests(unittest.TestCase):
         self.addCleanup(lambda: __import__("shutil").rmtree(root))
         (root / task_lane.TASKS).mkdir(parents=True)
         (root / task_lane.TASKS / "tk-004-export-invoices.md").write_text(TASK, encoding="utf-8")
-        args = SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None, critical=0, non_critical=2,
-                               filed=712)
-        with mock.patch.object(task_lane, "run") as run, self.assertRaises(task_lane.Refused):
+        args = SimpleNamespace(task="TK-004", pr="9", style="merge", detail=None, head="a" * 40,
+                               critical=0, non_critical=2, filed=712)
+        with mock.patch.object(task_lane, "run") as run, self.assertRaisesRegex(task_lane.Refused, "finding counts"):
             task_lane.cmd_merge(args, root)
         run.assert_not_called()
 
@@ -1583,7 +2066,7 @@ class RetrospectiveHonestyTests(unittest.TestCase):
     def test_durations_carry_steps_a_verdict_a_baseline_and_a_cost_method_flag(self):
         data = task_lane.report([self.row("TK-001")], "latest 20")
         text = task_lane.render(data)
-        self.assertIn("Verdict: average 20.0 vs target 15 min (missed); baseline none", text)
+        self.assertIn("Verdict: average 20.0 vs target 5 min (missed); baseline none", text)
         self.assertIn("Steps (average min): define 3.0 / write 7.0 / ci 5.0 / review 8.0 / merge_wait 2.0"
                       " / unaccounted 0.0", text)
         self.assertIn("- TK-001: 20.0 min vs s target 5 (missed); define 3.0 / write 7.0", text)
@@ -1614,7 +2097,7 @@ class TaskTriggerTests(unittest.TestCase):
         text = "Add a migration for the orders table"
         files = {"deploy/Dockerfile", "web/src/Orders.tsx", "db/migrations/0003_orders.sql"}
         self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", text, files),
-                         ["container-environment", "react-typescript", "sql-database-design"])
+                         ["data-design", "experience-design", "verify"])
         self.assertEqual(task_lane.triggered(triggers["risk_flags"], "flag", text, files), ["migration"])
         self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "Fix a Go handler", {"cmd/main.go"}), [])
 
@@ -1627,8 +2110,8 @@ class TaskTriggerTests(unittest.TestCase):
             {"skill": "docker-compose", "path_globs": ["*infra/*"]}]}}), encoding="utf-8")
         triggers = task_lane.task_triggers(root)
         self.assertEqual(task_lane.triggered(triggers["method_skills"], "skill", "", {"infra/x"}),
-                         ["container-environment"])
-        self.assertEqual(task_lane.applied_skills({"applied_skills": "docker-compose"}), ["container-environment"])
+                         ["verify"])
+        self.assertEqual(task_lane.applied_skills({"applied_skills": "docker-compose"}), ["verify"])
 
     def test_a_changed_source_is_reported_at_review(self):
         root = self.project()
@@ -1642,16 +2125,16 @@ class TaskTriggerTests(unittest.TestCase):
                          ["workspace/docs/solution-design/decision.md"])
 
     def test_review_inputs_route_reviewers_and_report_a_missing_skill(self):
-        task = TASK.replace("rigor: normal\n", "rigor: normal\nrisks: auth\napplied_skills: react-typescript\n")
+        task = TASK.replace("rigor: normal\n", "rigor: normal\nrisks: auth\napplied_skills: data-design\n")
         root = self.project(task)
         self.assertEqual(task_lane.lint(root / task_lane.TASKS / "tk-004-export-invoices.md"), [])
-        changed = {"api/models.py", "workspace/docs/business-analysis/rules.md"}
+        changed = {"api/models/invoice.py", "workspace/docs/business-analysis/rules.md"}
         with mock.patch.object(task_lane, "changed_files", return_value=changed), \
                 mock.patch.object(task_lane, "run", return_value="diff --git a/api/models.py"):
             result = task_lane.cmd_review_inputs(SimpleNamespace(task="TK-004", base="main"), root)
-        self.assertEqual(result["reviewers"], ["analysis-challenger", "code-reviewer", "security-reviewer"])
+        self.assertEqual(result["reviewers"], ["reviewer", "critical-reviewer"])
         self.assertEqual((root / result["diff_file"]).read_text(encoding="utf-8"), "diff --git a/api/models.py")
-        self.assertEqual(result["missing_skills"], ["python-fastapi", "sql-database-design"])
+        self.assertEqual(result["missing_skills"], ["data-design"])
 
     def test_an_unknown_risk_flag_fails_lint(self):
         path = self.project(TASK.replace("rigor: normal\n", "rigor: normal\nrisks: weather\n"))

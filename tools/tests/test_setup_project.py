@@ -826,6 +826,39 @@ class SetupInputRulesTests(unittest.TestCase):
         self.assertIn("scale", changed)
         self.assertEqual(self.config.read_bytes(), before)
 
+    def test_migration_preserves_explicit_models_and_custom_trigger_predicates(self):
+        from tools import build_distributions
+
+        class_map = build_distributions.class_map(
+            ROOT, ROOT / "plugins/software-engineering-team", build_distributions.load_adapters(ROOT))
+        current = {"schema_version": 2, "team_id": "software-engineering-team",
+                   "output_language": "English", "terminology_language": "English",
+                   "role_routing": {}, "task_criteria_range": [3, 8],
+                   "class_models": {"codex": {"routine_authoring": {"effort": "low"}}},
+                   "task_triggers": {"method_skills": [{"skill": "sql-database-design",
+                                                         "path_globs": ["store/*"]}]}}
+        self.config.write_text(json.dumps(current))
+        before = self.config.read_bytes()
+        with mock.patch.object(setup_module.project_config, "load_class_map", return_value=class_map):
+            proposed, changed = setup_module.desired_config(self.args, self.config)
+        self.assertEqual(proposed["class_models"], {"codex": {"work": {"effort": "low"}}})
+        self.assertEqual(proposed["task_triggers"], {"method_skills": [{"skill": "data-design",
+                                                                      "path_globs": ["store/*"]}]})
+        self.assertNotIn("role_routing", proposed)
+        self.assertNotIn("task_criteria_range", proposed)
+        self.assertTrue({"role_routing", "task_criteria_range", "class_models", "task_triggers"} <= set(changed))
+        self.assertEqual(self.config.read_bytes(), before)
+
+    def test_custom_legacy_config_requires_decision_before_any_write(self):
+        for field, value in (("role_routing", {"custom": True}), ("task_criteria_range", [1, 3])):
+            self.config.write_text(json.dumps({"schema_version": 2, "team_id": "software-engineering-team",
+                                              "output_language": "English", "terminology_language": "English",
+                                              field: value}))
+            before = self.config.read_bytes()
+            with self.assertRaisesRegex(setup_module.SetupError, "migration requires a decision"):
+                setup_module.desired_config(self.args, self.config)
+            self.assertEqual(self.config.read_bytes(), before)
+
     def test_foreign_owner_and_future_schema_refuse_without_rewriting(self):
         for value, error in (({"team_id": "other-team"}, "owned by other-team"),
                              ({"team_id": "software-engineering-team", "schema_version": 99},

@@ -86,18 +86,10 @@ FIXTURE_TABLES = {
   "schema_version": 4,
   "profiles": {
     "auto": {
-      "mechanical": {"model": "claude-sonnet-5-5", "effort": "high"},
-      "mechanical_escalated": {"model": "claude-sonnet-5-5", "effort": "high"},
-      "routine_authoring": {"model": "claude-opus-5-5", "effort": "medium"},
-      "routine_authoring_escalated": {"model": "claude-opus-5-5", "effort": "medium"},
-      "complex_authoring": {"model": "claude-opus-5-5", "effort": "medium"},
-      "complex_authoring_escalated": {"model": "claude-opus-5-5", "effort": "medium"},
-      "routine_review": {"model": "claude-opus-5-5", "effort": "medium"},
-      "routine_review_escalated": {"model": "claude-opus-5-5", "effort": "medium"},
-      "critical_decision": {"model": "claude-opus-5-5", "effort": "xhigh"},
-      "critical_decision_escalated": {"model": "claude-opus-5-5", "effort": "xhigh"},
-      "security_review": {"model": "claude-opus-5-5", "effort": "xhigh"},
-      "orchestration": {"model": "claude-opus-5-5", "effort": "medium"}
+      "light": {"model": "claude-sonnet-5-5", "effort": "high"},
+      "work": {"model": "claude-opus-5-5", "effort": "medium"},
+      "critical": {"model": "claude-opus-5-5", "effort": "xhigh"},
+      "review": {"model": "claude-opus-5-5", "effort": "medium"}
     }
   }
 }
@@ -149,18 +141,10 @@ FIXTURE_TABLES = {
   "schema_version": 4,
   "profiles": {
     "auto": {
-      "mechanical": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "mechanical_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "routine_authoring": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "routine_authoring_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "complex_authoring": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "complex_authoring_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "routine_review": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "routine_review_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "critical_decision": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "critical_decision_escalated": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "security_review": {"model": "gpt-6.1-sol", "effort": "xhigh"},
-      "orchestration": {"model": "gpt-6.1-sol", "effort": "xhigh"}
+      "light": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "work": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "critical": {"model": "gpt-6.1-sol", "effort": "xhigh"},
+      "review": {"model": "gpt-6.1-sol", "effort": "xhigh"}
     }
   }
 }
@@ -313,10 +297,10 @@ class ModelDriftTests(unittest.TestCase):
             "id": "gpt-6.1-sol",
             "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
         }])
-        # Every class slot runs Sol on Codex here, the mechanical one included.
+        # Every class slot runs Sol on Codex here, the light one included.
         self.assertEqual(strong["slots"], list(json.loads(build_distributions.execution_profile_path(
             self.root, "codex").read_text(encoding="utf-8"))["profiles"]["auto"]))
-        self.assertIn("code-reviewer", strong["roles"])
+        self.assertIn("reviewer", strong["roles"])
         self.assertNotIn("efforts", strong)
         fast = codex["models"]["gpt-6-luna"]
         self.assertEqual((fast["newer"], fast["listed"], fast["drift"]), ([], True, False))
@@ -489,17 +473,17 @@ class ModelDriftTests(unittest.TestCase):
         self.assertIn(f'+      "verified": "{TODAY}"', lines)
         self.assertIn('+    "claude-opus-5-6": {', lines)
         self.assertIn('--- a/platforms/codex/execution-profiles.json', lines)
-        self.assertIn('+      "critical_decision": {"model": "gpt-6.1-sol", "effort": "xhigh"},',
+        self.assertIn('+      "critical": {"model": "gpt-6.1-sol", "effort": "xhigh"},',
                       lines)
-        self.assertIn('+      "critical_decision": {"model": "claude-opus-5-6", "effort": "xhigh"},',
+        self.assertIn('+      "critical": {"model": "claude-opus-5-6", "effort": "xhigh"},',
                       lines)
         # The candidate lists no `xhigh`, so every Codex slot, all at `xhigh`,
         # must change with it.
-        for slot in ("critical_decision", "routine_authoring", "mechanical"):
+        for slot in ("critical", "work", "light"):
             self.assertIn(f"Class slot `{slot}` runs effort `xhigh`", out)
         self.assertNotIn("runs effort `high`", out)
         # The frozen A/B names the slot on each side.
-        self.assertIn("| codex | critical_decision | | `gpt-6.1-sol` | | | |", lines)
+        self.assertIn("| codex | critical | | `gpt-6.1-sol` | | | |", lines)
         self.assertNotIn(str(self.base), out)
 
         report = model_drift.drift_report(self.root, {"codex": codex}, {"codex": "0.159.1"})

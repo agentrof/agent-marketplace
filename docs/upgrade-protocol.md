@@ -25,10 +25,19 @@ project documents. [Host architecture](architecture.md)
    `setup_project.py check --project-root <root> --json`. Both use the shared
    planner. Apply rebuilds its plan under the mutation guard and checks each
    preimage before atomic replacement.
-4. Inspect and refresh the affected host projection. Preserve unrelated host
-   configuration, user instruction companions and authored files. Retired
-   package-owned launch files are removed in the rollback-capable transaction.
-   A conflicting user-owned file remains a reported blocker.
+4. For initial setup or a migration that reconciles tracked project instructions,
+   run the active host's project generator with `inspect`, `apply` and `check`,
+   each using `--project-root <root> --scope all --seed-user-files`. This generates
+   portable instructions for both hosts, seeds missing memory files and refreshes
+   the active host's local worker definitions. Existing authored memory is preserved.
+   For compatible projects with only launch-definition drift, use the affected
+   host's local `apply` and `check` path with `--scope local`. That path leaves
+   tracked instructions and memory outside its scope. Retired package-owned launch
+   files are removed in the rollback-capable transaction. Conflicting user-owned
+   files remain reported blockers. Each host owns its local projection.
+   Use the [Claude contract](../platforms/claude/software-engineering-team/host-contract.md)
+   or [Codex contract](../platforms/codex/software-engineering-team/host-contract.md)
+   for the exact generator invocation.
 5. Verify the remaining plan is empty. Review and commit only the intended
    tracked changes. Reload or restart the host as required, then verify the
    loaded package, hooks, definitions and effective settings.

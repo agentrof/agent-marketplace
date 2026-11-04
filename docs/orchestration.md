@@ -30,6 +30,13 @@ be used at their designated step. An unavailable capability needs a recorded
 reason and core fallback evidence. Availability, source loading and successful
 application remain separate observations.
 
+Covered native launch calls use the delivery flow's `SWE_WORKER_BRIEF` format.
+The launch guard validates that brief, gathers current project rule sources and
+supplies a bounded `SWE_WORKER_PACKET`. Missing or oversized context refuses the
+launch. A receipt records preparation for host delivery. This requires the active
+host hook and does not prove the worker followed the supplied sources. External
+delegation paths remain subject to their own verified controls.
+
 Resolve compute profile and access through `model_class.py`. Native workers
 cannot create an unbounded delegation tree. Reuse the worker for its scoped
 repair when its context remains useful. Fresh independent review gets the

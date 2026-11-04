@@ -20,6 +20,27 @@ from tools.tests.git_fixture import init_repository
 from tools.tests.levels import integration
 
 
+class RetrospectiveReportTests(unittest.TestCase):
+    def test_report_observes_publication_before_completed_queue(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "observations").mkdir()
+            published = {"tasks": ["TK-001"]}
+
+            def complete_before_queue_read():
+                (root / "observations/latest.json").write_text(json.dumps(published), encoding="utf-8")
+                return {"jobs": [{"kind": "retro", "state": "completed", "payload": {
+                    "origin": work_queue.AUTOMATIC_RETRO_ORIGIN}}]}
+
+            state = mock.MagicMock()
+            state.__enter__.side_effect = complete_before_queue_read
+            with mock.patch.object(work_queue, "_directory", return_value=root), \
+                    mock.patch.object(work_queue, "_state", return_value=state):
+                saved = retrospective.report(root)
+            self.assertEqual(saved["queue"], {"completed": 1})
+            self.assertEqual(saved["latest"], published)
+
+
 @integration
 class AutomaticRetrospectiveTests(unittest.TestCase):
     def setUp(self):

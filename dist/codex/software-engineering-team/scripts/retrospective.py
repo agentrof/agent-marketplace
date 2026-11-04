@@ -549,11 +549,12 @@ def run(root: Path, token: str | None = None) -> dict:
 def report(root: Path) -> dict:
     directory = work_queue._directory(root)
     path = directory / "observations/latest.json"
+    # Completion is committed after publication, so read queue state first.
+    with work_queue._state(root, directory) as state:
+        states = dict(Counter(job["state"] for job in state["jobs"] if work_queue.automatic_observation(job)))
     if path.is_symlink():
         raise ValueError("retrospective report cannot be a symbolic link")
     latest = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
-    with work_queue._state(root, directory) as state:
-        states = dict(Counter(job["state"] for job in state["jobs"] if work_queue.automatic_observation(job)))
     return {"report_path": str(path), "latest": latest, "queue": states,
             "inbox_pending": sum(1 for _ in (directory / "inbox").glob("*.json"))}
 

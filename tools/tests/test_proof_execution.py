@@ -227,7 +227,15 @@ class ProofExecutionTests(unittest.TestCase):
             self.assertEqual(task_lane.run_proof_commands(root, ['echo recovered'])[0]['exit_code'], 0)
 
             if os.name == 'posix':
-                result = task_lane.run_proof_commands(root, [command + ' & exit 0'])
+                # Model the leftover group independently of the OS's orphan reaping timing.
+                process = mock.Mock(pid=12345, returncode=0)
+                with mock.patch.object(task_lane.subprocess, 'Popen', return_value=process), \
+                        mock.patch.object(task_lane, 'run', return_value=str(root / '.git')), \
+                        mock.patch.object(task_lane.os, 'killpg', side_effect=[None, None, ProcessLookupError()]) as kill:
+                    result = task_lane.run_proof_commands(root, [command + ' & exit 0'])
+                self.assertEqual(kill.call_args_list, [mock.call(12345, 0),
+                                                      mock.call(12345, task_lane.signal.SIGKILL), mock.call(12345, 0)])
+                self.assertEqual(process.wait.call_count, 2)
                 self.assertEqual(result[0]['exit_code'], 125)
                 self.assertTrue(result[0]['leftover_children'])
                 self.assertEqual(task_lane.run_proof_commands(root, ['echo cleaned'])[0]['exit_code'], 0)

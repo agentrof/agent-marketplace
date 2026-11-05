@@ -211,7 +211,8 @@ class CompanionReceiptTests(unittest.TestCase):
                         mock.patch.object(task_lane, "task_path", return_value=task), \
                         mock.patch.object(task_lane, "head_state", return_value=(head, True)), \
                         mock.patch.object(task_lane, "proof_commands", return_value=["check"]), \
-                        mock.patch.object(task_lane, "run", side_effect=["b" * 40 + " refs/heads/main", ""]), \
+                        mock.patch.object(task_lane, "run", side_effect=lambda *args, **kwargs:
+                                          "b" * 40 + " refs/heads/main" if args[:2] == ("git", "ls-remote") else ""), \
                         self.assertRaisesRegex(task_lane.Refused, "companion use or explicit fallback"):
                     proof_train.candidate(batch, root, task_lane, "main")
 

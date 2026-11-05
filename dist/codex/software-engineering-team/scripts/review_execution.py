@@ -198,6 +198,8 @@ def prepare(root: Path, members: list[dict], base: str, lane, *, diff_path: Path
               "Review this immutable candidate read-only. Apply every supplied source to its listed tasks. "
               "Read the full diff and affected current files. Report each source/task assessment with actual "
               "current project-relative file and line citations with an exact short quote from that line. "
+              "Before returning the report, check every proposed path, line and quote against the current file. "
+              "Copy literal contiguous text from that one line; paraphrases and incorrect line numbers reject the report. "
               "Citations must reference tracked source, test or contract files. Describe runtime proof in assessment text. "
               "Report findings and limitations honestly. "
               "Source delivery is observed; application is your report. Do not edit or launch other agents.\n"
@@ -310,6 +312,24 @@ def execute(args, root: Path, lane) -> dict:
         return run_review(args, root, members, lane)
 
 
+def process_group_snapshot(pid: int) -> dict:
+    """Retain bounded member metadata without arguments or environment values."""
+    try:
+        result = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="],
+                                capture_output=True, text=True, timeout=1, check=False)
+        if result.returncode:
+            return {"pgid": pid, "observation": "ps_failed"}
+        members = []
+        for line in result.stdout.splitlines():
+            fields = line.split(None, 9)
+            if len(fields) == 10 and fields[2] == str(pid):
+                members.append({"pid": int(fields[0]), "ppid": int(fields[1]), "state": fields[3],
+                                "started_at": " ".join(fields[4:9]), "name": fields[9][:256]})
+        return {"pgid": pid, "members": members[:32], "truncated": len(members) > 32}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {"pgid": pid, "observation": "unavailable"}
+
+
 def stop_review(process, directory: Path, lane) -> None:
     try:
         lane.stop_proof(process)
@@ -366,16 +386,23 @@ def run_review(args, root: Path, members: list[dict], lane) -> dict:
             record["source_delivery"] = "submitted_to_host"
             try:
                 code = process.wait(timeout=policy(lane)["timeout_seconds"])
-            except BaseException:
-                stop_review(process, destination.parent, lane)
+            except BaseException as error:
+                try:
+                    stop_review(process, destination.parent, lane)
+                except BaseException as cleanup_error:
+                    raise error from cleanup_error
                 raise
         if os.name == "posix":
+            observation_error = None
             try:
-                os.killpg(process.pid, 0)
-            except ProcessLookupError:
-                pass
-            else:
+                gone = lane.wait_process_group(process.pid, 1)
+            except OSError as error:
+                gone, observation_error = False, error
+            if not gone:
+                record["process_cleanup"] = process_group_snapshot(process.pid)
                 stop_review(process, destination.parent, lane)
+                if observation_error is not None:
+                    raise observation_error
                 raise lane.Refused("native review left child processes running; its process group was stopped")
         if code:
             raise lane.Refused("native review failed. Inspect captured stderr. If the outer sandbox blocked host transport, "

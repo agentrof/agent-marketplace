@@ -78,11 +78,11 @@ it belongs in this proof. Keep its revision and environment identity with the
 result. Post-merge readiness still checks the actual integrated revision in
 the intended environment.
 
-## Share a full proof across a batch
+## Share proof across a batch
 
 Use this only when one atomic integration PR is authorized. Member branches
 remain independently reviewable, while the combined candidate receives the
-full proof and one independent native review.
+selected proof and one independent native review.
 
 - `prove --task <id> --deferred` records pending batch proof and runs no test.
   An ordinary task merge rejects deferred and combined proof records.
@@ -91,11 +91,14 @@ full proof and one independent native review.
   with ordinary proof require their own fresh review record. New members after
   sealing join the next batch.
 - `train prove --batch <n> --base <branch>` integrates the recorded members
-  into `train/<n>` and selects full proof, using the same optional reuse
-  contract. The candidate and base are fixed for that result. Changed members
+  into `train/<n>` and applies `local_proof_map` to the complete fixed-base
+  candidate diff, using the same fallback and optional reuse contract as task
+  proof. Existing valid full-proof receipts remain accepted for that candidate.
+  The candidate, base and member heads are fixed for that result. Changed members
   or base require renewed proof and review.
 - `review --batch <n> --host <host> --base <branch>` reviews the combined
-  candidate. Shared procedure text is supplied once, with assessment coverage
+  candidate with the same impact-selected command contract. Shared procedure text
+  is supplied once, with assessment coverage
   required for each applicable member.
 - `train publish --batch <n> --base <branch>` publishes or reconciles one
   integration PR after fresh aggregate review. A publication
@@ -106,8 +109,10 @@ full proof and one independent native review.
   remote mode. Native branch protection must handle concurrent base updates.
 - `train status` reports state. `train remove --task <id> --batch <n>` can
   remove a member from an open, red or green batch, invalidating the old
-  candidate. `train bisect` samples failing prefixes and reports a suspect. Prefer
-  the actual failure evidence and bounded diagnosis for interacting defects.
+  candidate. `train bisect` samples failing prefixes with the original batch's
+  selected commands and reports a suspect. It does not narrow proof to each
+  prefix's diff. Prefer actual failure evidence and bounded diagnosis for
+  interacting defects.
 
 Observe the merge result, reconcile linked member PRs, then verify readiness.
 A green final tree gives no independent proof for partially merged prefixes.

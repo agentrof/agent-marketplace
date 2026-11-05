@@ -267,7 +267,7 @@ class TrainReviewTests(unittest.TestCase):
 class BisectEvidenceTests(unittest.TestCase):
     def test_nonmonotone_prefixes_produce_observations_and_a_qualified_suspect(self):
         batch = {"id": 1, "status": proof_train.RED, "base": "main", "base_head": "base",
-                 "head": "combined", "members": [{"task": str(n)} for n in range(1, 6)],
+                 "head": "combined", "proof_plan": {"commands": ["check"]}, "members": [{"task": str(n)} for n in range(1, 6)],
                  "commands": [{"command": "check", "exit_code": 1}]}
         state = SimpleNamespace(batch=lambda number, lane: batch)
         lane = SimpleNamespace(Refused=task_lane.Refused, run=lambda *args, **kwargs: "/tmp/git",
@@ -278,7 +278,8 @@ class BisectEvidenceTests(unittest.TestCase):
             tested.append(len(members))
             return Path(str(len(members))), base_head
 
-        def checks(root, lane, tree, base):
+        def checks(root, lane, tree, base, commands):
+            self.assertEqual(commands, ["check"])
             return [{"command": "check", "exit_code": 0 if int(str(tree)) % 2 == 0 else 1}]
 
         args = SimpleNamespace(batch=1, base="main", dry_run=False)
@@ -371,6 +372,59 @@ class MergeTrainTests(unittest.TestCase):
                 self.train("publish")
             self.assertEqual(review.call_count, 1)
             self.assertEqual(review.call_args.args[1][0]["task"], "TK-001")
+
+    def configure_impact(self, rules):
+        self.config({"local_proof": ["echo full"], "local_proof_map": rules})
+        self.git("add", "workspace/config.json")
+        self.git("commit", "-qm", "configure coverage")
+        self.git("push", "-q", "origin", "main")
+
+    def test_combined_impact_union_is_bound_to_candidate_and_receipt(self):
+        self.configure_impact([
+            {"paths": ["f1"], "commands": ["echo first"], "reason": "first component"},
+            {"paths": ["f2"], "commands": ["echo second"], "reason": "second component"},
+            {"paths": ["workspace/docs/*"], "none": True, "reason": "task records"}])
+        self.member(1)
+        self.member(2)
+        result = self.train("prove")
+        self.assertEqual([row["command"] for row in result["commands"]], ["echo first", "echo second"])
+        with contextlib.closing(proof_train.State(self.root / proof_train.STATE)) as state:
+            batch = state.batch(None, task_lane)
+            tree = proof_train.candidate(batch, self.root, task_lane, "main")
+            self.assertIn("Selection: impact", proof_train.integration_body(batch, tree, task_lane))
+            path = self.root / proof_train.STATE / "batch-1.proof.json"
+            record = json.loads(path.read_text())
+            record["commands"] = record["commands"][:1]
+            path.write_text(json.dumps(record))
+            batch["commands"] = record["commands"]
+            with self.assertRaisesRegex(task_lane.Refused, "configured commands"):
+                proof_train.candidate(batch, self.root, task_lane, "main")
+
+    def test_explicit_no_test_batch_is_publishable_and_full_cannot_claim_empty_proof(self):
+        self.configure_impact([{"paths": ["*"], "none": True, "reason": "documentation fixture"}])
+        self.member(1)
+        self.assertEqual(self.train("prove")["commands"], [])
+        with contextlib.closing(proof_train.State(self.root / proof_train.STATE)) as state:
+            batch = state.batch(None, task_lane)
+            tree = proof_train.candidate(batch, self.root, task_lane, "main")
+            self.assertIn("Selection: impact", proof_train.integration_body(batch, tree, task_lane))
+            # A full receipt cannot establish an empty configured proof.
+            path = self.root / proof_train.STATE / "batch-1.proof.json"
+            record = json.loads(path.read_text())
+            record["selection"] = "full"
+            path.write_text(json.dumps(record))
+            with self.assertRaisesRegex(task_lane.Refused, "configured commands"):
+                proof_train.candidate(batch, self.root, task_lane, "main")
+
+    def test_valid_existing_full_batch_remains_accepted_with_an_impact_map(self):
+        self.configure_impact([{"paths": ["*"], "commands": ["echo focused"], "reason": "fixture"}])
+        self.member(1)
+        original = proof_train.candidate_plan
+        with mock.patch.object(proof_train, "candidate_plan", side_effect=lambda *a, **kw: original(*a, full=True)):
+            self.assertEqual(self.train("prove")["commands"][0]["command"], "echo full")
+        with contextlib.closing(proof_train.State(self.root / proof_train.STATE)) as state:
+            proof_train.candidate(state.batch(None, task_lane), self.root, task_lane, "main")
+        self.assertEqual(self.train("prove")["commands"][0]["command"], "echo full")
 
     def test_unchanged_train_reuses_proof_and_failed_retries_remain_invalid(self):
         identity = self.root.parent / "environment.txt"

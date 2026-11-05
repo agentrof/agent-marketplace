@@ -269,6 +269,41 @@ class ReviewExecutionTests(unittest.TestCase):
             artifact.write_text("changed diff", encoding="utf-8")
             self.assertTrue(review.problems(self.root, self.members, "main", self.lane))
 
+    def test_native_runner_uses_bounded_policy_timeout_for_each_host_and_cleans_up_expiry(self):
+        prepared = review.prepare(self.root, self.members, "main", self.lane)
+        observed = {"session_id": "native-session", "report": self.report(prepared)}
+        for name in ("codex", "claude"):
+            for expired in (False, True):
+                with self.subTest(host=name, expired=expired):
+                    process = mock.Mock(pid=43210)
+                    process.wait.return_value = 0
+                    if expired:
+                        process.wait.side_effect = subprocess.TimeoutExpired("native", 600)
+                    host = SimpleNamespace(HOST=name, command=lambda *args: ["native"],
+                                           parse_output=mock.Mock(return_value=observed))
+
+                    def start(command, **kwargs):
+                        kwargs["stdout"].write(json.dumps(observed).encode())
+                        return process
+
+                    self.lane.stop_proof.reset_mock()
+                    args = SimpleNamespace(task="TK-001", batch=None, host=name, base="main")
+                    with mock.patch.object(review, "adapter", return_value=host), \
+                            mock.patch.object(review.model_class, "resolve", return_value={}), \
+                            mock.patch.object(review.subprocess, "Popen", side_effect=start), \
+                            mock.patch.object(self.lane, "wait_process_group", return_value=True):
+                        result = review.execute(args, self.root, self.lane)
+                    process.wait.assert_called_once_with(timeout=600)
+                    self.assertEqual(result["ok"], not expired)
+                    if expired:
+                        self.lane.stop_proof.assert_called_once_with(process)
+                        self.assertEqual(result["status"], "failed")
+                        self.assertIn("timed out", result["error"])
+                        host.parse_output.assert_not_called()
+                    else:
+                        self.lane.stop_proof.assert_not_called()
+                        host.parse_output.assert_called_once()
+
     @unittest.skipUnless(os.name == "posix", "POSIX process groups")
     def test_native_cleanup_allows_transient_members_but_never_approves_persistent_or_unknown_groups(self):
         prepared = review.prepare(self.root, self.members, "main", self.lane)

@@ -2,7 +2,7 @@
   "packet_max_bytes": 131072,
   "source_max_bytes": 8192,
   "procedure_min_output_tokens": 8192,
-  "timeout_seconds": 300,
+  "timeout_seconds": 600,
   "host_output_max_bytes": 4194304,
   "graph_budget": 600,
   "graph_output_max_bytes": 4096,

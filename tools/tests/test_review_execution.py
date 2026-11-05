@@ -46,12 +46,15 @@ class ReviewExecutionTests(unittest.TestCase):
             companion_evidence=lambda *args, **kwargs: [{"companion": "ponytail", "ok": True}],
             proof_path=lambda root, task: root / "proof.json", now=lambda: "2026-11-04T10:00:00Z",
             proof_commands=lambda root, base: ["test-command"],
+            proof_plan=lambda root, base, files=None: {"commands": self.lane.proof_commands(root, base)},
             stop_proof=mock.Mock(),
         )
 
     def git(self, *args, **kwargs):
         if args[:2] == ("git", "ls-tree"):
             return "app.py\ntask.md\nfallback.md"
+        if args[:3] == ("git", "diff", "--name-only"):
+            return "app.py"
         if args[:2] == ("git", "diff"):
             return "diff --git a/app.py b/app.py\n+value = 1\n"
         return self.base
@@ -62,6 +65,15 @@ class ReviewExecutionTests(unittest.TestCase):
              "assessment": "The current value preserves the accepted contract.",
              "citations": [{"path": "app.py", "line": 1, "quote": "value = 1"}]}
             for source in prepared["binding"]["sources"]], "findings": [], "limitations": []}
+
+    def test_review_contract_uses_the_fixed_candidate_impact_plan(self):
+        self.lane.proof_plan = mock.Mock(return_value={"commands": ["focused-check"]})
+        prepared = review.prepare(self.root, self.members, "main", self.lane)
+        self.lane.proof_plan.assert_called_once_with(self.root, "main", files={"app.py"})
+        self.assertEqual(prepared["binding"]["proof_contract"]["commands"], ["focused-check"])
+        self.lane.proof_plan.return_value = {"commands": ["changed-check"]}
+        changed = review.prepare(self.root, self.members, "main", self.lane)
+        self.assertNotEqual(prepared["binding"], changed["binding"])
 
     def test_review_diff_preserves_trailing_lines_without_changing_default_command_results(self):
         output = "diff --git a/app.py b/app.py\n+value = 1\n\n"

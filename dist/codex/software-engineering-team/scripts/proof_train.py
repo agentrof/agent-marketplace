@@ -167,8 +167,13 @@ def integrate(root: Path, lane, batch: dict, members: list[dict], base: str, suf
     return tree, base_head
 
 
-def run_commands(root: Path, lane, tree: Path, base: str) -> list[dict]:
-    return lane.run_proof_commands(tree, lane.proof_commands(tree, base))
+def run_commands(root: Path, lane, tree: Path, base: str, commands: list[str]) -> list[dict]:
+    return lane.run_proof_commands(tree, commands)
+
+
+def candidate_plan(tree: Path, lane, base: str, base_head: str, head: str, *, full: bool = False) -> dict:
+    files = set(lane.run("git", "diff", "--name-only", f"{base_head}...{head}", cwd=tree).splitlines())
+    return lane.proof_plan(tree, base, files=files, full=full)
 
 
 def alive(pid: int | None) -> bool:
@@ -210,6 +215,8 @@ def prove(args, root, lane, state) -> dict:
     if args.dry_run:
         return {"ok": True, "dry_run": True, "batch": batch["id"], "integration_branch": f"train/{batch['id']}",
                 "members": [m["task"] for m in batch["members"]],
+                "selection": "unknown", "preview": "conservative_full",
+                "why": ["impact selection requires the integrated candidate; no candidate is created by dry-run"],
                 "would_run": [lane.proof_runner(root, c) for c in lane.proof_commands(root, args.base)]}
     before = batch["status"]
     # Sealing diverts new members to the next batch while this proof runs.
@@ -234,8 +241,21 @@ def prove(args, root, lane, state) -> dict:
             tree, base_head = integrate(root, lane, batch, batch["members"], args.base, base_head=base_head)
         head = lane.run("git", "rev-parse", "HEAD", cwd=tree)
         candidate_state = {"head": head, "base_head": base_head, "base": args.base, "proof_scope": scope}
-        record = lane.cached_proof(tree, lane.proof_commands(tree, args.base), base=args.base, scope=scope,
-                                   path=path, metadata={"selection": "full", "why": ["one combined candidate"]},
+        try:
+            previous = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = {}
+        # Retain a successful full contract on this exact candidate. The cache still
+        # verifies its input identity before reuse; new candidates use the impact map.
+        keep_full = (unchanged and isinstance(previous, dict) and previous.get("ok") is True
+                     and previous.get("tree_clean") is True and previous.get("head") == head
+                     and previous.get("base") == args.base and previous.get("proof_scope") == scope
+                     and previous.get("selection") == "full"
+                     and previous.get("commands") == batch.get("commands"))
+        plan = candidate_plan(tree, lane, args.base, base_head, head, full=keep_full)
+        candidate_state["proof_plan"] = plan
+        record = lane.cached_proof(tree, plan["commands"], base=args.base, scope=scope,
+                                   path=path, metadata={"selection": plan["selection"], "why": plan["why"]},
                                    expected_head=head)
         if record["head"] != head or not record["tree_clean"]:
             raise lane.Refused("the integration candidate changed while proof ran; restore it and prove again")
@@ -275,25 +295,32 @@ def candidate(batch: dict, root: Path, lane, base: str) -> Path:
     head, clean = lane.head_state(tree)
     if head != batch["head"] or not clean:
         raise lane.Refused("the integration candidate changed after proof; run train prove again")
-    results = batch.get("commands", [])
-    if not results or any(item.get("exit_code") != 0 for item in results) \
-            or [item.get("command") for item in results] != lane.proof_commands(tree, base):
-        raise lane.Refused("the batch has no passing proof for its configured commands")
-    remote = lane.run("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{base}", cwd=root).split()
-    if not remote or remote[0] != batch["base_head"]:
-        raise lane.Refused(f"{base} moved since the batch was proved; run train prove again")
     path = home(root, lane) / f"batch-{batch['id']}.proof.json"
+    record = None
     if "proof_scope" in batch:
         try:
             record = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             raise lane.Refused("the batch proof record is missing or invalid; run train prove again") from exc
-        if (not isinstance(record, dict) or record.get("ok") is not True or record.get("tree_clean") is not True
-                or record.get("head") != head or record.get("base") != base or record.get("selection") != "full"
+        if not isinstance(record, dict) or record.get("selection") not in ("full", "impact"):
+            raise lane.Refused("the batch proof record has no valid selection; run train prove again")
+    plan = candidate_plan(tree, lane, base, batch["base_head"], head,
+                          full=record is None or record["selection"] == "full")
+    results = batch.get("commands", [])
+    if (not results and plan["selection"] != "impact") or any(item.get("exit_code") != 0 for item in results) \
+            or [item.get("command") for item in results] != plan["commands"]:
+        raise lane.Refused("the batch has no passing proof for its configured commands")
+    remote = lane.run("git", "ls-remote", "--exit-code", "origin", f"refs/heads/{base}", cwd=root).split()
+    if not remote or remote[0] != batch["base_head"]:
+        raise lane.Refused(f"{base} moved since the batch was proved; run train prove again")
+    if record is not None:
+        if (record.get("ok") is not True or record.get("tree_clean") is not True
+                or record.get("head") != head or record.get("base") != base
+                or record.get("selection") != plan["selection"]
                 or record.get("proof_scope") != proof_scope(batch, batch["base_head"])
                 or record.get("commands") != results):
             raise lane.Refused("the batch proof record does not match its candidate; run train prove again")
-        problems = lane.cached_proof_problems(tree, record, lane.proof_commands(tree, base),
+        problems = lane.cached_proof_problems(tree, record, plan["commands"],
                                              base=base, scope=proof_scope(batch, batch["base_head"]), path=path)
         if problems:
             raise lane.Refused("; ".join(problems))
@@ -362,11 +389,13 @@ def integration_body(batch: dict, tree: Path, lane) -> str:
     metadata = "<!-- agent-marketplace:integration " + json.dumps(record, separators=(",", ":")) + " -->"
     rows = "\n".join(f"| {m['task']} | #{m['pr']} | `{m['head']}` |" for m in batch["members"])
     closes = "\n".join(f"Closes #{issue}." for issue in sorted(issues))
+    plan = batch.get("proof_plan", {"selection": "full", "why": ["one combined candidate"]})
     proof = lane.proof_section({"head": batch["head"], "commands": batch["commands"],
-                                "selection": "integration", "why": ["one combined candidate"]})
+                                "finished_at": batch.get("finished_at"),
+                                "selection": plan["selection"], "why": plan["why"]})
     return (f"{pr_marker(batch)}\n{metadata}\n\n# Integration batch {batch['id']}\n\n"
             f"Candidate `{batch['head']}` combines the following member heads. "
-            f"Its full proof ran on base `{batch['base_head']}`.\n\n"
+            f"Its selected proof ran on base `{batch['base_head']}`.\n\n"
             f"| Task | Member PR | Member head |\n| --- | --- | --- |\n{rows}\n\n"
             "Review this complete integration candidate before merging it atomically. "
             "Member PRs remain separate records until their disposition is reconciled.\n\n"
@@ -560,10 +589,12 @@ def bisect(args, root, lane, state) -> dict:
             or not any(item.get("exit_code") != 0 for item in batch.get("commands", [])):
         raise lane.Refused("the batch lacks a failed proof for this base")
     check_reviewed_heads(batch, lane)
+    commands = (batch["proof_plan"]["commands"] if "proof_plan" in batch
+                else lane.proof_commands(root, args.base))
     if args.dry_run:
         return {"ok": True, "dry_run": True, "batch": batch["id"],
                 "members": [m["task"] for m in batch["members"]],
-                "would_run": [lane.proof_runner(root, c) for c in lane.proof_commands(root, args.base)]}
+                "would_run": [lane.proof_runner(root, c) for c in commands]}
     low, high = 1, len(batch["members"])
     observations = [{"prefix_length": high, "head": batch["head"], "base_head": batch["base_head"],
                      "passed": False, "source": "batch_proof", "commands": batch["commands"]}]
@@ -572,7 +603,7 @@ def bisect(args, root, lane, state) -> dict:
             mid = (low + high) // 2
             tree, base_head = integrate(root, lane, batch, batch["members"][:mid], args.base,
                                         suffix="-bisect", base_head=batch["base_head"])
-            results = run_commands(root, lane, tree, args.base)
+            results = run_commands(root, lane, tree, args.base, commands)
             passed = all(item["exit_code"] == 0 for item in results)
             observations.append({"prefix_length": mid, "head": lane.head_state(tree)[0],
                                  "base_head": base_head, "passed": passed, "source": "prefix_probe",

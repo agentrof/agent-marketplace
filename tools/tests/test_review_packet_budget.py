@@ -1,13 +1,14 @@
 """A bounded aggregate review keeps every procedure and task contract intact."""
 from __future__ import annotations
 
+import json
 import unittest
 
 from tools.tests import test_review_execution as fixtures
 
 
 class ReviewPacketBudgetTests(unittest.TestCase):
-    def test_five_tasks_with_full_procedures_fit_and_oversized_packets_still_refuse(self):
+    def test_full_aggregate_preserves_content_and_refuses_one_byte_over_budget(self):
         fixture = fixtures.ReviewExecutionTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
@@ -20,11 +21,11 @@ class ReviewPacketBudgetTests(unittest.TestCase):
             path.write_bytes((fixtures.ROOT / "plugins/software-engineering-team/skill-content" / name / "SKILL.md").read_bytes())
             source_files.append(path)
         lane.required_methods = lambda *args: list(methods[:-1])
-        members = [{"task": f"TK-{number:03d}", "root": str(root), "head": fixture.head} for number in range(1, 6)]
+        members = [{"task": f"TK-{number:03d}", "root": str(root), "head": fixture.head} for number in range(1, 13)]
         lane.task_path = lambda root, task: root / f"{task}.md"
         for member in members:
             lane.task_path(root, member["task"]).write_text(
-                f"# {member['task']}\n" + "Preserve existing data, verify refusal paths and inspect the current implementation.\n" * 22,
+                f"# {member['task']}\n" + "Preserve existing data, verify refusal paths and inspect the current implementation.\n" * 50,
                 encoding="utf-8")
         graph_files = {}
         for name, content in (("graph", "{}"), ("executable", "synthetic executable"),
@@ -52,11 +53,17 @@ class ReviewPacketBudgetTests(unittest.TestCase):
         lane.companion_evidence = lambda *args, **kwargs: [{"companion": name, "ok": True} for name in companions]
 
         prepared = review.prepare(root, members, "main", lane)
-        self.assertEqual(review.policy(lane)["packet_max_bytes"], 65536)
+        self.assertEqual(review.policy(lane)["packet_max_bytes"], 131072)
         self.assertEqual(review.policy(lane)["source_max_bytes"], 8192)
         packet_bytes = len(prepared["packet"].encode("utf-8"))
-        self.assertGreater(packet_bytes, 32768)
-        self.assertLessEqual(packet_bytes, 65536)
+        self.assertGreater(packet_bytes, 65536)
+        self.assertLess(packet_bytes, 131072)
+        payload = json.loads(prepared["packet"].split("\n", 2)[2])
+        for field, source in (("procedures", "sources"), ("tasks", "tasks"), ("evidence", "evidence"),
+                              ("proof_contract", "proof_contract")):
+            self.assertEqual(payload[field], json.loads(json.dumps(prepared["binding"][source])))
+        self.assertEqual(payload["graph_results"], [{"task": member["task"], "text": action["text"],
+                                                   "stdout_path": action["stdout_path"]} for member in members])
         expected_tasks = {member["task"] for member in members}
         sources = prepared["binding"]["sources"]
         self.assertEqual(len(sources), 10)
@@ -72,9 +79,22 @@ class ReviewPacketBudgetTests(unittest.TestCase):
 
         largest = lane.task_path(root, members[0]["task"])
         with largest.open("a", encoding="utf-8") as file:
-            file.write("A bounded review must refuse excess input.\n" * 1700)
+            remaining = 131072 - packet_bytes
+            file.write("é" * (remaining // 2) + "x" * (remaining % 2))
+        boundary = review.prepare(root, members, "main", lane)
+        self.assertEqual(len(boundary["packet"].encode("utf-8")), 131072)
+        self.assertEqual(boundary["binding"]["tasks"][0]["contract"], largest.read_text(encoding="utf-8"))
+        with largest.open("a", encoding="utf-8") as file:
+            file.write("x")
         with self.assertRaisesRegex(lane.Refused, "packet exceeds its byte budget"):
             review.prepare(root, members, "main", lane)
+
+        source = source_files[0]
+        source.write_text("x" * 8192, encoding="utf-8")
+        self.assertEqual(review.source_excerpt(source, None, lane)["content"], "x" * 8192)
+        source.write_text("x" * 8193, encoding="utf-8")
+        with self.assertRaisesRegex(lane.Refused, "exceeds its source budget"):
+            review.source_excerpt(source, None, lane)
 
 
 if __name__ == "__main__":

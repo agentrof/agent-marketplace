@@ -264,6 +264,22 @@ class TrainReviewTests(unittest.TestCase):
             proof_train.check_reviewed_heads({"members": [member]}, task_lane)
 
 
+class TrainProofPreviewTests(unittest.TestCase):
+    def test_dry_run_labels_full_commands_as_an_unknown_conservative_preview(self):
+        batch = {"id": 1, "status": proof_train.OPEN, "members": [{"task": "TK-001"}]}
+        state = SimpleNamespace(data={"batches": [batch]}, batch=lambda number, lane: batch)
+        lane = SimpleNamespace(Refused=task_lane.Refused, proof_commands=lambda root, base: ["full-check"],
+                               proof_runner=lambda root, command: command)
+        args = SimpleNamespace(batch=1, base="main", dry_run=True)
+        with mock.patch.object(proof_train, "check_reviewed_heads"), \
+                mock.patch.object(proof_train, "integrate", side_effect=AssertionError("dry-run integrated")):
+            result = proof_train.prove(args, Path("."), lane, state)
+        self.assertEqual(result["selection"], "unknown")
+        self.assertEqual(result["preview"], "conservative_full")
+        self.assertEqual(result["would_run"], ["full-check"])
+        self.assertEqual(batch["status"], proof_train.OPEN)
+
+
 class BisectEvidenceTests(unittest.TestCase):
     def test_nonmonotone_prefixes_produce_observations_and_a_qualified_suspect(self):
         batch = {"id": 1, "status": proof_train.RED, "base": "main", "base_head": "base",
@@ -718,6 +734,8 @@ class MergeTrainTests(unittest.TestCase):
         integrate.assert_not_called()
         self.assertTrue(result["ok"])
         self.assertEqual(result["would_run"], ["test ! -e bad"])
+        self.assertEqual(result["selection"], "unknown")
+        self.assertEqual(result["preview"], "conservative_full")
         self.assertEqual(state_file.read_bytes(), before)
         self.assertEqual(self.git("worktree", "list", "--porcelain"), worktrees)
         self.assertEqual(self.git("show-ref"), refs)

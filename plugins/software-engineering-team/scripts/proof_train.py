@@ -215,6 +215,8 @@ def prove(args, root, lane, state) -> dict:
     if args.dry_run:
         return {"ok": True, "dry_run": True, "batch": batch["id"], "integration_branch": f"train/{batch['id']}",
                 "members": [m["task"] for m in batch["members"]],
+                "selection": "unknown", "preview": "conservative_full",
+                "why": ["impact selection requires the integrated candidate; no candidate is created by dry-run"],
                 "would_run": [lane.proof_runner(root, c) for c in lane.proof_commands(root, args.base)]}
     before = batch["status"]
     # Sealing diverts new members to the next batch while this proof runs.

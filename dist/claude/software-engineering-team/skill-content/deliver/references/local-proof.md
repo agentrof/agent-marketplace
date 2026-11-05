@@ -95,7 +95,9 @@ selected proof and one independent native review.
   candidate diff, using the same fallback and optional reuse contract as task
   proof. Existing valid full-proof receipts remain accepted for that candidate.
   The candidate, base and member heads are fixed for that result. Changed members
-  or base require renewed proof and review.
+  or base require renewed proof and review. `--dry-run` creates no candidate:
+  its command list is labelled `conservative_full`, with selection `unknown`,
+  because the actual impact plan requires the integrated candidate.
 - `review --batch <n> --host <host> --base <branch>` reviews the combined
   candidate with the same impact-selected command contract. Shared procedure text
   is supplied once, with assessment coverage

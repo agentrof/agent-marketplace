@@ -10,8 +10,9 @@ Read this when a task uses local proof or shares proof with a batch.
    `task_lane.py prove --task <id> --base <branch>` with the installed script.
 2. Commands come from `local_proof`, with `make test` as the fallback and
    `{base}` replaced by the target branch. `proof_runner`, when configured,
-   wraps each command. The proof runner admits one shared-environment proof
-   at a time and bounds command duration. Busy capacity leaves work pending.
+   wraps each command. The proof runner admits `proof_concurrency` shared-environment
+   proofs at a time (default 1) and bounds command duration. Busy capacity leaves
+   work pending.
 3. The runner stops at the first failure. Diagnose and fix its cause, commit
    the changed candidate and prove it again. Keep the first failure visible.
 4. The runtime record holds the candidate head, cleanliness, command results,
@@ -28,6 +29,20 @@ Detached sessions and external services require the project's own cleanup
 contract. Windows uses process-tree termination on timeout or cancellation,
 which cannot establish cleanup of children whose parent has already exited.
 Use a project runner with verified lifecycle isolation for that workload.
+
+## Concurrent proof
+
+`proof_concurrency` in `workspace/config.json` is an integer from 1 to 64 and
+defaults to 1, which keeps one proof at a time. A larger value lets that many
+independent proof runs of one repository execute together. The commands of one
+run still execute in order and stop at the first failure. A run beyond the limit
+is refused as busy and stays pending. Reuse checks and proof validation take no
+execution slot. A second request for the same proof record waits briefly, then
+is refused as busy. A run by an older plugin version still takes the whole
+environment, so it never overlaps a configured run, and an unconfirmed cleanup
+still blocks every proof until reconciled. The limit is read from the config of
+the checkout that runs the proof, so keep it equal on every branch. Raise it only
+when the proof commands share no mutable state such as ports, databases or fixtures.
 
 ## Optional reuse of successful proof
 

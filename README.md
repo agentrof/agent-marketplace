@@ -130,7 +130,8 @@ Request → tasks and acceptance criteria → applicable design methods
 - **Parallelism with resource limits.** Independent tasks run concurrently.
   Proof and review can overlap on an immutable candidate. Shared environments
   have explicit ownership and capacity so parallel work does not create
-  competing test environments by default.
+  competing test environments by default. A project can raise the number of
+  concurrent local proofs with `proof_concurrency`, which defaults to 1.
 - **Depth follows risk.** Small changes take a short path. Persisted data,
   security boundaries and irreversible effects receive their applicable checks
   regardless of the line count.

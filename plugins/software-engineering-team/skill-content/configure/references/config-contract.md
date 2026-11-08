@@ -3,7 +3,8 @@
 `workspace/config.json` is the closed project bootstrap contract. Accepted
 keys are `schema_version`, `team_id`, `output_language`, `terminology_language`,
 `tests_root`, `workspace_layout`, `pr_proof`, `local_proof`, `local_proof_map`,
-`proof_runner`, `proof_reuse`, `task_triggers` and `class_models`. The current schema is 2.
+`proof_runner`, `proof_concurrency`, `proof_reuse`, `task_triggers` and `class_models`.
+The current schema is 2.
 Setup supplies missing layout defaults and preserves valid project overrides.
 
 Use `project_config.py set --config workspace/config.json --field <field>
@@ -20,6 +21,11 @@ Model settings use `set-class`, described in `role-models.md`.
 - `pr_proof` selects `remote_ci` or `local_record`. Local proof commands,
   impact rules and an optional runner follow the delivery entry's
   `references/local-proof.md`. An uncovered path requires full proof.
+- `proof_concurrency` optionally raises how many local proofs may use the shared
+  proof environment at once. It is an integer from 1 to 64 and defaults to 1, which
+  keeps proof serial. Booleans and other types are invalid. Setup preserves this
+  project-owned value and leaves it absent on fresh projects. The project owns the
+  claim that its proof commands can run side by side.
 - `proof_reuse` optionally enables reuse of matching successful local proof.
   Its required `identity_command` is a non-empty list of non-blank argv strings,
   executed directly without an implicit shell. Optional `max_age_seconds` is

@@ -30,16 +30,17 @@ CONFIG_FIELDS = {
     "local_proof",
     "local_proof_map",
     "proof_runner",
+    "proof_concurrency",
     "proof_reuse",
     "task_triggers",
     role_settings.CLASS_MODELS,
 }
 ORDINARY_FIELDS = {"output_language", "terminology_language", "tests_root", "workspace_layout",
-                   "pr_proof", "local_proof", "local_proof_map", "proof_runner", "proof_reuse",
-                   "task_triggers"}
+                   "pr_proof", "local_proof", "local_proof_map", "proof_runner", "proof_concurrency",
+                   "proof_reuse", "task_triggers"}
 # Deliver settings the project owns; setup writes none of them and keeps the project's.
-PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "proof_runner", "proof_reuse",
-                  "task_triggers")
+PROJECT_FIELDS = ("pr_proof", "local_proof", "local_proof_map", "proof_runner", "proof_concurrency",
+                  "proof_reuse", "task_triggers")
 RETIRED_DEFAULTS = {"role_routing": {}, "task_criteria_range": [3, 8]}
 REVIEWER_ALIASES = {
     "code-reviewer": "reviewer", "analysis-challenger": "reviewer",
@@ -296,6 +297,9 @@ def base_errors(config: dict) -> list[str]:
         errors.append("local_proof_map must list rules with paths and either commands or none: true")
     if not isinstance(config.get("proof_runner", ""), str):
         errors.append("proof_runner must be a string")
+    concurrency = config.get("proof_concurrency", 1)
+    if type(concurrency) is not int or not 1 <= concurrency <= 64:
+        errors.append("proof_concurrency must be an integer from 1 to 64")
     if "proof_reuse" in config:
         reuse = config["proof_reuse"]
         if not isinstance(reuse, dict):

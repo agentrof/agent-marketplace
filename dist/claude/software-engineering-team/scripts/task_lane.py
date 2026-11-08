@@ -2679,23 +2679,50 @@ def stop_proof(process: subprocess.Popen) -> None:
 
 
 @contextlib.contextmanager
-def proof_admission(root: Path):
-    """Hold the shared proof resource through identity checks and execution."""
+def proof_record_admission(path: Path | None):
+    """Serialize one receipt without consuming shared execution capacity."""
+    if path is None:
+        yield
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.with_suffix(path.suffix + ".lock").open("a+") as handle:
+        if not file_lock.acquire(handle.fileno(), timeout=1):
+            raise Refused("shared proof capacity is busy for this proof record; retry later")
+        yield
+
+
+@contextlib.contextmanager
+def proof_admission(root: Path, *, execution: bool = True):
+    """Bound independent proof runs; retain the legacy exclusive lock boundary."""
+    capacity = project_setting(root, "proof_concurrency", 1)
+    if type(capacity) is not int or not 1 <= capacity <= 64:
+        raise Refused("proof_concurrency must be an integer from 1 to 64")
     common = Path(run("git", "rev-parse", "--path-format=absolute", "--git-common-dir", cwd=root))
     lock_path = common / "agentrof" / "runtime" / "proof.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", newline="\n") as handle:
+    with contextlib.ExitStack() as stack:
+        handle = stack.enter_context(lock_path.open("a+", newline="\n"))
         queued = datetime.now(timezone.utc)
-        if not file_lock.acquire(handle.fileno(), timeout=1):
+        # An old runner's exclusive lock also blocks newly configured parallel runners.
+        if not file_lock.acquire(handle.fileno(), shared=not execution or capacity > 1, timeout=1):
             raise Refused("shared proof capacity is busy; keep independent work moving and retry later")
         blocked = lock_path.with_suffix(".blocked.json")
         if blocked.exists():
             raise Refused(f"proof cleanup needs reconciliation; inspect {blocked} before clearing it")
+        if execution and capacity > 1:
+            for index in range(capacity):
+                slot = stack.enter_context(lock_path.with_name(f"proof-slot-{index}.lock").open("a+"))
+                if file_lock.try_lock(slot.fileno()):
+                    break
+            else:
+                raise Refused("shared proof capacity is busy; keep independent work moving and retry later")
         yield blocked, (datetime.now(timezone.utc) - queued).total_seconds()
+        if blocked.exists():
+            raise Refused(f"proof cleanup needs reconciliation; inspect {blocked} before clearing it")
 
 
 def run_proof_commands(root: Path, commands: list[str], *, admission=None) -> list[dict]:
-    """Serialize shared-environment proof and bound each owned process tree."""
+    """Admit shared-environment proof and bound each owned process tree."""
     if admission is None:
         with proof_admission(root) as admitted:
             return run_proof_commands(root, commands, admission=admitted)
@@ -2772,7 +2799,7 @@ def proof_inputs(root: Path, commands: list[str], base: str, scope: dict):
 
 def cached_proof_problems(root: Path, record: dict, commands: list[str], *, base: str,
                           scope: dict, path: Path | None = None) -> list[str]:
-    with proof_admission(root):
+    with proof_record_admission(path), proof_admission(root, execution=False):
         if path is not None:
             try:
                 if json.loads(path.read_text(encoding="utf-8")) != record:
@@ -2793,42 +2820,56 @@ def cached_proof_problems(root: Path, record: dict, commands: list[str], *, base
 
 def cached_proof(root: Path, commands: list[str], *, base: str, scope: dict,
                  path: Path, metadata: dict, expected_head: str | None = None) -> dict:
-    """Reuse a complete matching proof while holding the same admission as execution."""
-    with proof_admission(root) as admission:
-        head, clean = head_state(root)
-        if not clean or expected_head is not None and head != expected_head:
-            raise Refused("proof needs a clean committed candidate")
-        try:
-            previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-        except (ValueError, OSError):
-            previous = {}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        record = {**metadata, "head": head, "tree_clean": True, "base": base,
-                  "proof_scope": scope, "proof_state": "running", "ok": False, "commands": []}
-        atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
-        try:
+    """Validate reuse without an execution slot; serialize writes to this receipt."""
+    with proof_record_admission(path):
+        with proof_admission(root, execution=False):
+            head, clean = head_state(root)
+            if not clean or expected_head is not None and head != expected_head:
+                raise Refused("proof needs a clean committed candidate")
+            try:
+                previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            except (ValueError, OSError):
+                previous = {}
             inputs = proof_inputs(root, commands, base, scope)
             policy = project_setting(root, "proof_reuse", {})
             age = policy.get("max_age_seconds", 86400) if isinstance(policy, dict) else 0
             if proof_cache.reusable(previous, inputs, commands, age):
-                atomic_file.replace_text(path, json.dumps(previous, indent=2) + "\n")
                 return {**previous, "reused": True}
-            results = run_proof_commands(root, commands, admission=admission) if commands else []
-            final_inputs = proof_inputs(root, commands, base, scope) if inputs is not None else None
-            final_head, final_clean = head_state(root)
-            stable = inputs is None or inputs == final_inputs
-            record.update(tree_clean=final_clean and final_head == head,
-                          proof_state="observed", commands=results, finished_at=now(),
-                          proof_inputs=inputs, inputs_stable=stable,
-                          ok=final_clean and final_head == head and stable
-                          and all(item["exit_code"] == 0 for item in results))
-            record = proof_cache.seal(record)
+        with proof_admission(root) as admission:
+            head, clean = head_state(root)
+            if not clean or expected_head is not None and head != expected_head:
+                raise Refused("proof needs a clean committed candidate")
+            try:
+                previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+            except (ValueError, OSError):
+                previous = {}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            record = {**metadata, "head": head, "tree_clean": True, "base": base,
+                      "proof_scope": scope, "proof_state": "running", "ok": False, "commands": []}
             atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
-            return {**record, "reused": False}
-        except BaseException:
-            record.update(proof_state="failed", ok=False, finished_at=now())
-            atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
-            raise
+            try:
+                inputs = proof_inputs(root, commands, base, scope)
+                policy = project_setting(root, "proof_reuse", {})
+                age = policy.get("max_age_seconds", 86400) if isinstance(policy, dict) else 0
+                if proof_cache.reusable(previous, inputs, commands, age):
+                    atomic_file.replace_text(path, json.dumps(previous, indent=2) + "\n")
+                    return {**previous, "reused": True}
+                results = run_proof_commands(root, commands, admission=admission) if commands else []
+                final_inputs = proof_inputs(root, commands, base, scope) if inputs is not None else None
+                final_head, final_clean = head_state(root)
+                stable = inputs is None or inputs == final_inputs
+                record.update(tree_clean=final_clean and final_head == head,
+                              proof_state="observed", commands=results, finished_at=now(),
+                              proof_inputs=inputs, inputs_stable=stable,
+                              ok=final_clean and final_head == head and stable
+                              and all(item["exit_code"] == 0 for item in results))
+                record = proof_cache.seal(record)
+                atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+                return {**record, "reused": False}
+            except BaseException:
+                record.update(proof_state="failed", ok=False, finished_at=now())
+                atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+                raise
 
 
 def cmd_prove(args, root: Path) -> dict:
@@ -2847,11 +2888,14 @@ def cmd_prove(args, root: Path) -> dict:
                               metadata={"task": args.task, "selection": plan["selection"], "why": plan["why"]},
                               expected_head=head)
         return {**record, "record": str(path.relative_to(root))}
-    record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
-              "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
-              "ok": None, "proof_state": "pending", "commands": []}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
+    with proof_record_admission(path):
+        head, clean = head_state(root)
+        if not clean:
+            raise Refused("proof needs a clean committed candidate")
+        record = {"task": args.task, "head": head, "tree_clean": clean, "base": args.base,
+                  "selection": plan["selection"], "why": plan["why"], "finished_at": now(),
+                  "ok": None, "proof_state": "pending", "commands": []}
+        atomic_file.replace_text(path, json.dumps(record, indent=2) + "\n")
     return {**record, "record": str(path.relative_to(root))}
 
 

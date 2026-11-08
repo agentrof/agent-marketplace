@@ -833,6 +833,75 @@ class LocalProofTests(unittest.TestCase):
                 problems = task_lane.proof_problems(root, "TK-004")[0]
             self.assertEqual(any("run prove again" in item for item in problems), stale, changed)
 
+    def test_proof_concurrency_admits_that_many_executions_and_defaults_to_one(self):
+        import project_config
+
+        file_lock = task_lane.file_lock
+        acquire = file_lock.acquire
+        base = {"schema_version": 2, "team_id": "software-engineering-team",
+                "output_language": "English", "terminology_language": "English"}
+        for fields in (project_config.CONFIG_FIELDS, project_config.ORDINARY_FIELDS,
+                       project_config.PROJECT_FIELDS):
+            self.assertIn("proof_concurrency", fields)
+        for value in (1, 5, 64):
+            self.assertEqual(project_config.check({**base, "proof_concurrency": value}), [])
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        config = root / "workspace" / "config.json"
+        config.parent.mkdir()
+        lock = root / ".git" / "agentrof" / "runtime" / "proof.lock"
+
+        def configure(**settings):
+            config.write_text(json.dumps(settings), encoding="utf-8")
+
+        def busy(**keywords):
+            with self.assertRaisesRegex(task_lane.Refused, "capacity is busy"):
+                with task_lane.proof_admission(root, **keywords):
+                    self.fail("admitted beyond capacity")
+
+        # A busy lock makes the runner wait one second before it refuses; refuse at once here.
+        with mock.patch.object(task_lane, "run", return_value=str(root / ".git")), \
+                mock.patch.object(file_lock, "acquire",
+                                  side_effect=lambda descriptor, **keywords: acquire(descriptor, **{**keywords, "timeout": 0})):
+            configure()
+            with task_lane.proof_admission(root):
+                busy()
+                busy(execution=False)
+
+            configure(proof_concurrency=3)
+            with contextlib.ExitStack() as outer:
+                runs = [outer.enter_context(contextlib.ExitStack()) for _ in range(3)]
+                for admitted in runs:
+                    admitted.enter_context(task_lane.proof_admission(root))
+                busy()
+                with task_lane.proof_admission(root, execution=False):
+                    pass
+                with lock.open("a+") as older_runner:
+                    self.assertFalse(file_lock.try_lock(older_runner.fileno()))
+                runs[0].close()
+                with task_lane.proof_admission(root):
+                    pass
+            with lock.open("a+") as older_runner:
+                self.assertTrue(file_lock.try_lock(older_runner.fileno()))
+                busy()
+
+            receipts = root / "proof"
+            with task_lane.proof_record_admission(receipts / "TK-001.json"):
+                with task_lane.proof_record_admission(receipts / "TK-002.json"):
+                    pass
+                with self.assertRaisesRegex(task_lane.Refused, "proof record"):
+                    with task_lane.proof_record_admission(receipts / "TK-001.json"):
+                        self.fail("admitted a second writer of one receipt")
+
+            for value in (0, 65, True, 2.0, "2", None):
+                with self.subTest(value=value):
+                    configure(proof_concurrency=value)
+                    message = "proof_concurrency must be an integer from 1 to 64"
+                    self.assertIn(message, project_config.check({**base, "proof_concurrency": value}))
+                    with self.assertRaisesRegex(task_lane.Refused, message):
+                        with task_lane.proof_admission(root):
+                            self.fail("admitted an invalid capacity")
+
     def test_failing_test_ids_are_read_from_pytest_and_unittest_output(self):
         output = ("FAILED tests/test_a.py::test_one - AssertionError\nFAIL: test_two (pkg.test_b.Case)\n"
                   "FAILED tests/test_a.py::test_one - again\n")

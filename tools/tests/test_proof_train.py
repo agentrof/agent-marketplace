@@ -212,6 +212,16 @@ class ProofPlanTests(unittest.TestCase):
         self.assertEqual(plan["selection"], "impact")
         self.assertEqual(plan["commands"], ["echo app", "echo full", "echo security-check"])
 
+    def test_a_full_rule_cannot_hide_another_rules_additional_check(self):
+        rules = [{"paths": ["*full*"], "commands": ["echo full"]},
+                 {"paths": ["*extra*"], "commands": ["echo full", "echo security-check"]},
+                 {"paths": ["apps/*"], "commands": ["echo app"]}]
+        for files in ({"0full.py", "zextra.py", "apps/a.py"}, {"zfull.py", "0extra.py", "apps/a.py"}):
+            with self.subTest(files=files):
+                plan = self.plan(files, rules)
+                self.assertEqual(plan["selection"], "impact")
+                self.assertEqual(set(plan["commands"]), {"echo full", "echo security-check", "echo app"})
+
     def test_a_change_the_map_covers_selects_only_its_commands(self):
         self.assertEqual(self.plan({"apps/a/x.py"})["commands"], ["echo a"])
         self.assertEqual(self.plan({"docs/x.md"}), {"selection": "impact", "commands": [], "why": ["documents"]})

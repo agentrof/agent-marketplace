@@ -150,7 +150,8 @@ repository's local and remote validation gates. [Delivery procedure](plugins/sof
 
 When one matching impact rule has exactly the configured `local_proof` command set,
 `prove` selects that full proof once and omits narrower commands from other paths.
-Rules with additional commands retain them. This uses exact command identity,
+If any selected rule adds commands to the full set, the complete impact union is
+retained. This uses exact command identity,
 not shell-command inference.
 
 `prove` and `train prove` reuse successful evidence when their recorded inputs

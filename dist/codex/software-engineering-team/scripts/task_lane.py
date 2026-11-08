@@ -2630,19 +2630,24 @@ def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool 
     if not files:
         return {"selection": "full", "commands": everything, "why": ["no changed file found"]}
     chosen, why = [], []
+    full_commands, full_reason, extra_full = set(everything), None, False
     for item in sorted(files):
         rule = next((r for r in rules if any(fnmatch.fnmatchcase(item.lower(), p.lower()) for p in r.get("paths", []))), None)
         if rule is None:
             return {"selection": "full", "commands": everything, "why": [f"{item} matches no local_proof_map rule"]}
         commands = [command.replace("{base}", base) for command in rule.get("commands", [])]
         reason = rule.get("reason") or ",".join(rule["paths"])
-        if set(everything) == set(commands):
-            return {"selection": "full", "commands": everything, "why": [reason]}
+        command_set = set(commands)
+        if full_commands == command_set:
+            full_reason = reason
+        extra_full = extra_full or full_commands < command_set
         for command in commands:
             if command not in chosen:
                 chosen.append(command)
         if reason not in why:
             why.append(reason)
+    if full_reason is not None and not extra_full:
+        return {"selection": "full", "commands": everything, "why": [full_reason]}
     return {"selection": "impact", "commands": chosen, "why": why}
 
 

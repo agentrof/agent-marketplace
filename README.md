@@ -148,6 +148,10 @@ repository's local and remote validation gates. [Delivery procedure](plugins/sof
 
 ### Avoiding repeated tests
 
+When one matching impact rule contains all configured `local_proof` commands,
+`prove` selects that full proof once and omits narrower commands from other paths.
+This uses exact command identity, not shell-command inference.
+
 `prove` and `train prove` reuse successful evidence when their recorded inputs
 remain valid and the project supplies `proof_reuse.identity_command`. That probe
 identifies relevant external environment state. Changes to code, tests,

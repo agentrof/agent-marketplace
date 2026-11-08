@@ -139,6 +139,18 @@ class ReviewExecutionTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(task_lane.Refused):
                 review.validate_report(broken, prepared, self.root, self.lane)
 
+    def test_a_citation_a_few_lines_off_is_moved_to_its_quote_and_a_far_one_is_refused(self):
+        (self.root / "app.py").write_text("first = 0\nsecond = 0\nvalue = 1\n" + "x = 0\n" * 6 + "last = 1\n", encoding="utf-8")
+        prepared = review.prepare(self.root, self.members, "main", self.lane)
+        near = self.report(prepared)
+        near["checks"][0]["citations"][0]["line"] = 2
+        review.validate_report(near, prepared, self.root, self.lane)
+        self.assertEqual(near["checks"][0]["citations"][0]["line"], 3)
+        far = self.report(prepared)
+        far["checks"][0]["citations"][0].update(line=10, quote="value = 1")
+        with self.assertRaises(task_lane.Refused):
+            review.validate_report(far, prepared, self.root, self.lane)
+
     def test_unrelated_base_tip_does_not_invalidate_same_compared_candidate(self):
         original = self.git
         tips = ["c" * 40, "d" * 40]

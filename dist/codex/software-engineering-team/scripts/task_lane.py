@@ -2621,7 +2621,7 @@ def proof_runner(root: Path, command: str) -> str:
 def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool = False) -> dict:
     """What the proof must run for the changed files: the first ``local_proof_map`` rule that matches a
     file selects its commands (``none`` selects no command); one file no rule matches, or no map,
-    selects the whole ``local_proof``. Never skips what the map does not cover."""
+    selects the whole ``local_proof``. An exact full-proof rule replaces narrower commands."""
     rules = project_setting(root, "local_proof_map", [])
     everything = proof_commands(root, base)
     if full or not rules:
@@ -2630,17 +2630,24 @@ def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool 
     if not files:
         return {"selection": "full", "commands": everything, "why": ["no changed file found"]}
     chosen, why = [], []
+    full_commands, full_reason, extra_full = set(everything), None, False
     for item in sorted(files):
         rule = next((r for r in rules if any(fnmatch.fnmatchcase(item.lower(), p.lower()) for p in r.get("paths", []))), None)
         if rule is None:
             return {"selection": "full", "commands": everything, "why": [f"{item} matches no local_proof_map rule"]}
-        for command in rule.get("commands", []):
-            command = command.replace("{base}", base)
+        commands = [command.replace("{base}", base) for command in rule.get("commands", [])]
+        reason = rule.get("reason") or ",".join(rule["paths"])
+        command_set = set(commands)
+        if full_commands == command_set:
+            full_reason = reason
+        extra_full = extra_full or full_commands < command_set
+        for command in commands:
             if command not in chosen:
                 chosen.append(command)
-        reason = rule.get("reason") or ",".join(rule["paths"])
         if reason not in why:
             why.append(reason)
+    if full_reason is not None and not extra_full:
+        return {"selection": "full", "commands": everything, "why": [full_reason]}
     return {"selection": "impact", "commands": chosen, "why": why}
 
 

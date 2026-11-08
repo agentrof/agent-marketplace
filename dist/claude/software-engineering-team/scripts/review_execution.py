@@ -233,6 +233,9 @@ def schema(prepared: dict) -> dict:
                 "limitations": {"type": "array", "items": string}})
 
 
+CITATION_DRIFT = 3
+
+
 def validate_report(report: dict, prepared: dict, root: Path, lane) -> None:
     binding = prepared["binding"]
     if not isinstance(report, dict) or set(report) != {"head", "verdict", "checks", "findings", "limitations"} \
@@ -254,9 +257,14 @@ def validate_report(report: dict, prepared: dict, root: Path, lane) -> None:
         if not target.is_relative_to(root.resolve()):
             raise lane.Refused("review citation is outside the current candidate")
         lines = target.read_text(encoding="utf-8").splitlines()
-        if line > len(lines) or not isinstance(quote, str) or not 1 <= len(quote.strip()) <= 240 \
-                or "\n" in quote or quote not in lines[line - 1]:
+        if line > len(lines) or not isinstance(quote, str) or not 1 <= len(quote.strip()) <= 240 or "\n" in quote:
             raise lane.Refused("review citation quote does not match its current file line")
+        # Reviewers often miscount by a line or two; the nearest exact match within the window is the cited line.
+        near = sorted((n for n in range(max(1, line - CITATION_DRIFT), min(len(lines), line + CITATION_DRIFT) + 1)
+                       if quote in lines[n - 1]), key=lambda n: abs(n - line))
+        if not near:
+            raise lane.Refused("review citation quote does not match its current file line")
+        item["line"] = near[0]
 
     for check in report.get("checks", []):
         if not isinstance(check, dict) or not isinstance(check.get("assessment"), str) \

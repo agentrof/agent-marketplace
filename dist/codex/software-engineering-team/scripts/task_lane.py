@@ -2621,7 +2621,7 @@ def proof_runner(root: Path, command: str) -> str:
 def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool = False) -> dict:
     """What the proof must run for the changed files: the first ``local_proof_map`` rule that matches a
     file selects its commands (``none`` selects no command); one file no rule matches, or no map,
-    selects the whole ``local_proof``. A rule covering it replaces narrower commands."""
+    selects the whole ``local_proof``. An exact full-proof rule replaces narrower commands."""
     rules = project_setting(root, "local_proof_map", [])
     everything = proof_commands(root, base)
     if full or not rules:
@@ -2636,7 +2636,7 @@ def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool 
             return {"selection": "full", "commands": everything, "why": [f"{item} matches no local_proof_map rule"]}
         commands = [command.replace("{base}", base) for command in rule.get("commands", [])]
         reason = rule.get("reason") or ",".join(rule["paths"])
-        if set(everything) <= set(commands):
+        if set(everything) == set(commands):
             return {"selection": "full", "commands": everything, "why": [reason]}
         for command in commands:
             if command not in chosen:

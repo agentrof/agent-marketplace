@@ -205,6 +205,13 @@ class ProofPlanTests(unittest.TestCase):
                  {"paths": ["b"], "commands": [full[1]], "reason": "b"}]
         self.assertEqual(self.plan({"a", "b"}, split, full)["selection"], "impact")
 
+    def test_a_full_rule_with_extra_commands_keeps_them(self):
+        rules = [{"paths": ["shared/*"], "commands": ["echo full", "echo security-check"]},
+                 {"paths": ["apps/*"], "commands": ["echo app"]}]
+        plan = self.plan({"shared/helper.py", "apps/a.py"}, rules)
+        self.assertEqual(plan["selection"], "impact")
+        self.assertEqual(plan["commands"], ["echo app", "echo full", "echo security-check"])
+
     def test_a_change_the_map_covers_selects_only_its_commands(self):
         self.assertEqual(self.plan({"apps/a/x.py"})["commands"], ["echo a"])
         self.assertEqual(self.plan({"docs/x.md"}), {"selection": "impact", "commands": [], "why": ["documents"]})

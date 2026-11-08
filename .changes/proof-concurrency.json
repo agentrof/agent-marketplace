@@ -1,0 +1,6 @@
+{
+  "summary": "A project can raise how many local proofs run at once. The optional `proof_concurrency` field of `workspace/config.json` takes an integer from 1 to 64 and defaults to 1, which keeps one proof at a time. A run beyond the limit is refused as busy, reuse checks and proof validation take no slot, and a run by an older plugin version still excludes configured runs.",
+  "components": {
+    "software-engineering-team": "minor"
+  }
+}

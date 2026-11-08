@@ -127,12 +127,19 @@ labels omitted output and retains the complete artifact.
 `--unavailable <reason> --evidence <project-file>` records a worker-reported
 availability problem and concrete core fallback. A missing receipt remains a
 gap. `task_lane.py review --task <id> --host <host>` supplies the applicable
-procedures directly to the native reviewer, with a bounded input packet. It
+procedures directly to the native reviewer, with a bounded input packet. The
+development candidate raises that packet limit to 128 KiB while retaining the
+8 KiB per-source limit, exact source content and required source/task coverage.
+An oversized packet still refuses review. Native review has a ten-minute
+deadline; expiry stops the process and cannot produce approval. The runner
 records supplied content separately from the reviewer's assessments and source
 citations. Missing coverage, stale inputs or an unsuccessful host result cannot
 satisfy the review gate. The record does not prove semantic compliance or resist
 a malicious owner with the same filesystem authority. Reviewers retain their
 native read-only boundary and do not write the owner's review record.
+The development candidate gives POSIX helpers a bounded exit grace, records
+member metadata on failure, and blocks retry when process-group cleanup is
+unconfirmed. Persistent zombie groups are not accepted as successful cleanup.
 The companion completion record binds its exact candidate head. A changed
 candidate requires renewed evidence. A knowledge task that changes code receives
 the code-work companion requirements.

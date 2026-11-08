@@ -2664,7 +2664,22 @@ def proof_path(root: Path, task: str) -> Path:
 
 
 
+def wait_process_group(pid: int, timeout: float) -> bool:
+    """Require disappearance, including zombie members whose reaping is still pending."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.05, remaining))
+
+
 def stop_proof(process: subprocess.Popen) -> None:
+    deadline = time.monotonic() + 10
     if os.name == "posix":
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -2675,7 +2690,9 @@ def stop_proof(process: subprocess.Popen) -> None:
                                  capture_output=True, timeout=10, check=False)
         if stopped.returncode and process.poll() is None:
             raise Refused("proof process-tree cleanup is unconfirmed; inspect it before retry")
-    process.wait(timeout=10)
+    process.wait(timeout=max(0.001, deadline - time.monotonic()))
+    if os.name == "posix" and not wait_process_group(process.pid, max(0, deadline - time.monotonic())):
+        raise Refused("proof process-group cleanup is unconfirmed; inspect it before retry")
 
 
 @contextlib.contextmanager
@@ -2685,7 +2702,7 @@ def proof_record_admission(path: Path | None):
         yield
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.with_suffix(path.suffix + ".lock").open("a+") as handle:
+    with path.with_suffix(path.suffix + ".lock").open("a+", newline="\n") as handle:
         if not file_lock.acquire(handle.fileno(), timeout=1):
             raise Refused("shared proof capacity is busy for this proof record; retry later")
         yield
@@ -2711,7 +2728,7 @@ def proof_admission(root: Path, *, execution: bool = True):
             raise Refused(f"proof cleanup needs reconciliation; inspect {blocked} before clearing it")
         if execution and capacity > 1:
             for index in range(capacity):
-                slot = stack.enter_context(lock_path.with_name(f"proof-slot-{index}.lock").open("a+"))
+                slot = stack.enter_context(lock_path.with_name(f"proof-slot-{index}.lock").open("a+", newline="\n"))
                 if file_lock.try_lock(slot.fileno()):
                     break
             else:
@@ -2751,9 +2768,9 @@ def run_proof_commands(root: Path, commands: list[str], *, admission=None) -> li
             except BaseException as error:
                 try:
                     stop_proof(process)
-                except BaseException:
+                except BaseException as cleanup_error:
                     atomic_file.replace_text(blocked, json.dumps({"pid": process.pid, "at": now(), "reason": "cleanup_unconfirmed"}) + "\n")
-                    raise
+                    raise error from cleanup_error
                 if isinstance(error, subprocess.TimeoutExpired):
                     timed_out = True
                 else:

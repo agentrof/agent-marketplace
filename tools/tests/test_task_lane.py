@@ -862,6 +862,38 @@ class LocalProofTests(unittest.TestCase):
 
 @integration
 class LocalProofGitTests(unittest.TestCase):
+    def test_prove_runs_only_full_commands_for_mixed_full_and_narrow_changes(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(root))
+        init_repository(root)
+        (root / ".gitignore").write_text(".agentrof/\n", encoding="utf-8")
+        (root / "workspace").mkdir()
+        full = ["echo full-unit-{base}", "echo full-app"]
+        rules = [{"paths": ["docs/*"], "commands": ["echo narrow-doc"]},
+                 {"paths": ["apps/*"], "commands": ["echo narrow-app"]},
+                 {"paths": ["shared/*"], "commands": full}]
+        (root / "workspace/config.json").write_text(
+            json.dumps({"local_proof": full, "local_proof_map": rules}), encoding="utf-8")
+        for name in ("docs/note.md", "apps/component.py", "shared/helper.py"):
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("before\n", encoding="utf-8")
+        def git(*args):
+            return task_lane.run("git", "-c", "user.name=t", "-c", "user.email=t@example.com", *args, cwd=root)
+        git("add", "-A")
+        git("commit", "-qm", "initial")
+        git("update-ref", "refs/remotes/origin/main", "HEAD")
+        for name in ("docs/note.md", "apps/component.py", "shared/helper.py"):
+            (root / name).write_text("after\n", encoding="utf-8")
+        git("commit", "-qam", "mixed change")
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = task_lane.main(["--project", str(root), "prove", "--task", "TK-004", "--base", "main"])
+        self.assertEqual(code, 0, output.getvalue())
+        record = json.loads(output.getvalue())
+        self.assertEqual(record["selection"], "full")
+        self.assertEqual([item["command"] for item in record["commands"]], ["echo full-unit-main", "echo full-app"])
+
     def test_prove_records_each_command_on_the_real_head_and_a_new_commit_makes_it_stale(self):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(root))

@@ -1,0 +1,6 @@
+{
+  "summary": "Omit narrower proof commands when a selected impact rule covers the configured full proof.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

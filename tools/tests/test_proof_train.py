@@ -183,12 +183,44 @@ class TrainAddDryRunTests(unittest.TestCase):
 
 
 class ProofPlanTests(unittest.TestCase):
-    def plan(self, files, rules=MAP):
+    def plan(self, files, rules=MAP, full=("echo full",)):
         root = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: shutil.rmtree(root))
         (root / "workspace").mkdir()
-        (root / "workspace/config.json").write_text(json.dumps({"local_proof": ["echo full"], "local_proof_map": rules}))
+        (root / "workspace/config.json").write_text(json.dumps({"local_proof": list(full), "local_proof_map": rules}))
         return task_lane.proof_plan(root, "main", set(files))
+
+    def test_one_full_rule_dominates_narrow_commands_without_parsing_them(self):
+        full = ["echo units {base}", "echo apps"]
+        rules = [{"paths": ["docs/*"], "commands": ["echo fast {base}"], "reason": "docs"},
+                 {"paths": ["apps/*"], "commands": ["echo app"], "reason": "app"},
+                 {"paths": ["*shared*"], "commands": list(reversed(full)), "reason": "shared"}]
+        expected = {"selection": "full", "commands": ["echo units main", "echo apps"], "why": ["shared"]}
+        for path in ("0shared.py", "zshared.py"):
+            with self.subTest(path=path):
+                self.assertEqual(self.plan({"docs/readme.md", "apps/a.py", path}, rules, full), expected)
+        self.assertEqual(self.plan({"docs/readme.md", "apps/a.py"}, rules, full)["commands"],
+                         ["echo app", "echo fast main"])
+        split = [{"paths": ["a"], "commands": [full[0]], "reason": "a"},
+                 {"paths": ["b"], "commands": [full[1]], "reason": "b"}]
+        self.assertEqual(self.plan({"a", "b"}, split, full)["selection"], "impact")
+
+    def test_a_full_rule_with_extra_commands_keeps_them(self):
+        rules = [{"paths": ["shared/*"], "commands": ["echo full", "echo security-check"]},
+                 {"paths": ["apps/*"], "commands": ["echo app"]}]
+        plan = self.plan({"shared/helper.py", "apps/a.py"}, rules)
+        self.assertEqual(plan["selection"], "impact")
+        self.assertEqual(plan["commands"], ["echo app", "echo full", "echo security-check"])
+
+    def test_a_full_rule_cannot_hide_another_rules_additional_check(self):
+        rules = [{"paths": ["*full*"], "commands": ["echo full"]},
+                 {"paths": ["*extra*"], "commands": ["echo full", "echo security-check"]},
+                 {"paths": ["apps/*"], "commands": ["echo app"]}]
+        for files in ({"0full.py", "zextra.py", "apps/a.py"}, {"zfull.py", "0extra.py", "apps/a.py"}):
+            with self.subTest(files=files):
+                plan = self.plan(files, rules)
+                self.assertEqual(plan["selection"], "impact")
+                self.assertEqual(set(plan["commands"]), {"echo full", "echo security-check", "echo app"})
 
     def test_a_change_the_map_covers_selects_only_its_commands(self):
         self.assertEqual(self.plan({"apps/a/x.py"})["commands"], ["echo a"])
@@ -203,7 +235,10 @@ class ProofPlanTests(unittest.TestCase):
 
     def test_the_first_matching_rule_wins_and_commands_are_not_repeated(self):
         plan = self.plan({"apps/a/auth.py", "apps/a/y.py"})
-        self.assertEqual(plan["commands"], ["echo full", "echo a"])
+        self.assertEqual(plan["commands"], ["echo full"])
+        self.assertEqual(self.plan({"apps/a/x.py", "apps/a/y.py"})["commands"], ["echo a"])
+        rules = [{"paths": ["apps/*"], "none": True, "reason": "covered elsewhere"}, *MAP]
+        self.assertEqual(self.plan({"apps/a/auth.py"}, rules)["commands"], [])
 
     def test_the_config_check_refuses_a_rule_without_commands_or_none(self):
         self.assertEqual(project_config.base_errors({**BASE_CONFIG, "local_proof_map": MAP}), [])

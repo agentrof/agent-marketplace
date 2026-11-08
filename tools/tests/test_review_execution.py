@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import json
+import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -47,7 +49,7 @@ class ReviewExecutionTests(unittest.TestCase):
             proof_path=lambda root, task: root / "proof.json", now=lambda: "2026-11-04T10:00:00Z",
             proof_commands=lambda root, base: ["test-command"],
             proof_plan=lambda root, base, files=None: {"commands": self.lane.proof_commands(root, base)},
-            stop_proof=mock.Mock(),
+            stop_proof=mock.Mock(), wait_process_group=task_lane.wait_process_group,
         )
 
     def git(self, *args, **kwargs):
@@ -148,6 +150,18 @@ class ReviewExecutionTests(unittest.TestCase):
                                        "quote": "value = 1", "detail": "Observed defect."}]
             with self.subTest(mutation=mutation), self.assertRaises(task_lane.Refused):
                 review.validate_report(broken, prepared, self.root, self.lane)
+
+    def test_a_citation_a_few_lines_off_is_moved_to_its_quote_and_a_far_one_is_refused(self):
+        (self.root / "app.py").write_text("first = 0\nsecond = 0\nvalue = 1\n" + "x = 0\n" * 6 + "last = 1\n", encoding="utf-8")
+        prepared = review.prepare(self.root, self.members, "main", self.lane)
+        near = self.report(prepared)
+        near["checks"][0]["citations"][0]["line"] = 2
+        review.validate_report(near, prepared, self.root, self.lane)
+        self.assertEqual(near["checks"][0]["citations"][0]["line"], 3)
+        far = self.report(prepared)
+        far["checks"][0]["citations"][0].update(line=10, quote="value = 1")
+        with self.assertRaises(task_lane.Refused):
+            review.validate_report(far, prepared, self.root, self.lane)
 
     def test_unrelated_base_tip_does_not_invalidate_same_compared_candidate(self):
         original = self.git
@@ -278,6 +292,119 @@ class ReviewExecutionTests(unittest.TestCase):
             artifact = Path(record["diff_path"])
             artifact.write_text("changed diff", encoding="utf-8")
             self.assertTrue(review.problems(self.root, self.members, "main", self.lane))
+
+    def test_native_runner_uses_bounded_policy_timeout_for_each_host_and_cleans_up_expiry(self):
+        prepared = review.prepare(self.root, self.members, "main", self.lane)
+        observed = {"session_id": "native-session", "report": self.report(prepared)}
+        for name in ("codex", "claude"):
+            for expired in (False, True):
+                with self.subTest(host=name, expired=expired):
+                    process = mock.Mock(pid=43210)
+                    process.wait.return_value = 0
+                    if expired:
+                        process.wait.side_effect = subprocess.TimeoutExpired("native", 600)
+                    host = SimpleNamespace(HOST=name, command=lambda *args: ["native"],
+                                           parse_output=mock.Mock(return_value=observed))
+
+                    def start(command, **kwargs):
+                        kwargs["stdout"].write(json.dumps(observed).encode())
+                        return process
+
+                    self.lane.stop_proof.reset_mock()
+                    args = SimpleNamespace(task="TK-001", batch=None, host=name, base="main")
+                    with mock.patch.object(review, "adapter", return_value=host), \
+                            mock.patch.object(review.model_class, "resolve", return_value={}), \
+                            mock.patch.object(review.subprocess, "Popen", side_effect=start), \
+                            mock.patch.object(self.lane, "wait_process_group", return_value=True):
+                        result = review.execute(args, self.root, self.lane)
+                    process.wait.assert_called_once_with(timeout=600)
+                    self.assertEqual(result["ok"], not expired)
+                    if expired:
+                        self.lane.stop_proof.assert_called_once_with(process)
+                        self.assertEqual(result["status"], "failed")
+                        self.assertIn("timed out", result["error"])
+                        host.parse_output.assert_not_called()
+                    else:
+                        self.lane.stop_proof.assert_not_called()
+                        host.parse_output.assert_called_once()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups")
+    def test_native_cleanup_allows_transient_members_but_never_approves_persistent_or_unknown_groups(self):
+        prepared = review.prepare(self.root, self.members, "main", self.lane)
+        observed = {"session_id": "native-session", "report": self.report(prepared)}
+        host = SimpleNamespace(command=lambda *args: ["native"], parse_output=json.loads)
+        args = SimpleNamespace(task="TK-001", batch=None, host="codex", base="main")
+        snapshot = {"pgid": 43210, "members": [{"pid": 43211, "state": "Z", "name": "helper"}]}
+
+        def start(command, **kwargs):
+            kwargs["stdout"].write(json.dumps(observed).encode())
+            return SimpleNamespace(pid=43210, wait=lambda timeout: 0)
+
+        for case in ("transient", "persistent", "unknown", "cleanup_failed"):
+            self.lane.stop_proof.reset_mock(side_effect=True)
+            if case == "cleanup_failed":
+                self.lane.stop_proof.side_effect = task_lane.Refused("cleanup unconfirmed")
+            with self.subTest(case=case), mock.patch.object(review, "adapter", return_value=host), \
+                    mock.patch.object(review.model_class, "resolve", return_value={}), \
+                    mock.patch.object(review.subprocess, "Popen", side_effect=start), \
+                    mock.patch.object(self.lane, "wait_process_group", return_value=case == "transient") as wait, \
+                    mock.patch.object(review, "process_group_snapshot", return_value=snapshot):
+                if case == "unknown":
+                    wait.side_effect = PermissionError("inspection unavailable")
+                result = review.execute(args, self.root, self.lane)
+                wait.assert_called_once_with(43210, 1)
+                self.assertEqual(result["ok"], case == "transient")
+                if case == "transient":
+                    self.lane.stop_proof.assert_not_called()
+                else:
+                    self.lane.stop_proof.assert_called_once()
+                    record = json.loads(Path(result["record"]).read_text())
+                    self.assertEqual(record["process_cleanup"], snapshot)
+                    self.assertNotIn("result", record)
+                    self.assertTrue(review.problems(self.root, self.members, "main", self.lane))
+                marker = self.root / self.lane.REVIEWS / "cleanup-unconfirmed.json"
+                self.assertEqual(marker.exists(), case == "cleanup_failed")
+                if marker.exists():
+                    with self.assertRaisesRegex(task_lane.Refused, "cleanup is unconfirmed"):
+                        review.execute(args, self.root, self.lane)
+
+    def test_process_snapshot_retains_only_bounded_group_metadata(self):
+        rows = [f"{100 + n} 10 10 Z Wed Nov 4 12:00:00 2026 helper" for n in range(33)]
+        rows.append("999 20 20 S Wed Nov 4 12:00:00 2026 unrelated")
+        with mock.patch.object(review.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="\n".join(rows))) as ps:
+            snapshot = review.process_group_snapshot(10)
+        self.assertEqual(ps.call_args.args[0], ["ps", "-A", "-o", "pid=,ppid=,pgid=,stat=,lstart=,comm="])
+        self.assertEqual(ps.call_args.kwargs["timeout"], 1)
+        self.assertTrue(snapshot["truncated"])
+        self.assertEqual(len(snapshot["members"]), 32)
+        self.assertEqual(snapshot["members"][0], {"pid": 100, "ppid": 10, "state": "Z",
+                                                "started_at": "Wed Nov 4 12:00:00 2026", "name": "helper"})
+        with mock.patch.object(review.subprocess, "run", side_effect=OSError("unavailable")):
+            self.assertEqual(review.process_group_snapshot(10), {"pgid": 10, "observation": "unavailable"})
+
+    def test_native_wait_error_survives_failed_cleanup(self):
+        host = SimpleNamespace(command=lambda *args: ["native"], parse_output=json.loads)
+        args = SimpleNamespace(task="TK-001", batch=None, host="codex", base="main")
+        marker = self.root / self.lane.REVIEWS / "cleanup-unconfirmed.json"
+        for error in (subprocess.TimeoutExpired("native", 1), KeyboardInterrupt()):
+            process = mock.Mock(pid=43210)
+            process.wait.side_effect = error
+            self.lane.stop_proof.side_effect = task_lane.Refused("cleanup unconfirmed")
+            with self.subTest(error=type(error).__name__), \
+                    mock.patch.object(review, "adapter", return_value=host), \
+                    mock.patch.object(review.model_class, "resolve", return_value={}), \
+                    mock.patch.object(review.subprocess, "Popen", return_value=process):
+                if isinstance(error, KeyboardInterrupt):
+                    with self.assertRaises(KeyboardInterrupt) as caught:
+                        review.execute(args, self.root, self.lane)
+                    self.assertIs(caught.exception, error)
+                    self.assertIsInstance(error.__cause__, task_lane.Refused)
+                else:
+                    result = review.execute(args, self.root, self.lane)
+                    self.assertFalse(result["ok"])
+                    self.assertIn("timed out", result["error"])
+                self.assertTrue(marker.exists())
+                marker.unlink()
 
     def test_native_failure_and_candidate_change_never_produce_approval(self):
         prepared = review.prepare(self.root, self.members, "main", self.lane)

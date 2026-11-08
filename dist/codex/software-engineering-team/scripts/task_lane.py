@@ -2621,7 +2621,7 @@ def proof_runner(root: Path, command: str) -> str:
 def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool = False) -> dict:
     """What the proof must run for the changed files: the first ``local_proof_map`` rule that matches a
     file selects its commands (``none`` selects no command); one file no rule matches, or no map,
-    selects the whole ``local_proof``. Never skips what the map does not cover."""
+    selects the whole ``local_proof``. An exact full-proof rule replaces narrower commands."""
     rules = project_setting(root, "local_proof_map", [])
     everything = proof_commands(root, base)
     if full or not rules:
@@ -2630,17 +2630,24 @@ def proof_plan(root: Path, base: str, files: set[str] | None = None, full: bool 
     if not files:
         return {"selection": "full", "commands": everything, "why": ["no changed file found"]}
     chosen, why = [], []
+    full_commands, full_reason, extra_full = set(everything), None, False
     for item in sorted(files):
         rule = next((r for r in rules if any(fnmatch.fnmatchcase(item.lower(), p.lower()) for p in r.get("paths", []))), None)
         if rule is None:
             return {"selection": "full", "commands": everything, "why": [f"{item} matches no local_proof_map rule"]}
-        for command in rule.get("commands", []):
-            command = command.replace("{base}", base)
+        commands = [command.replace("{base}", base) for command in rule.get("commands", [])]
+        reason = rule.get("reason") or ",".join(rule["paths"])
+        command_set = set(commands)
+        if full_commands == command_set:
+            full_reason = reason
+        extra_full = extra_full or full_commands < command_set
+        for command in commands:
             if command not in chosen:
                 chosen.append(command)
-        reason = rule.get("reason") or ",".join(rule["paths"])
         if reason not in why:
             why.append(reason)
+    if full_reason is not None and not extra_full:
+        return {"selection": "full", "commands": everything, "why": [full_reason]}
     return {"selection": "impact", "commands": chosen, "why": why}
 
 
@@ -2657,7 +2664,22 @@ def proof_path(root: Path, task: str) -> Path:
 
 
 
+def wait_process_group(pid: int, timeout: float) -> bool:
+    """Require disappearance, including zombie members whose reaping is still pending."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.05, remaining))
+
+
 def stop_proof(process: subprocess.Popen) -> None:
+    deadline = time.monotonic() + 10
     if os.name == "posix":
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -2668,7 +2690,9 @@ def stop_proof(process: subprocess.Popen) -> None:
                                  capture_output=True, timeout=10, check=False)
         if stopped.returncode and process.poll() is None:
             raise Refused("proof process-tree cleanup is unconfirmed; inspect it before retry")
-    process.wait(timeout=10)
+    process.wait(timeout=max(0.001, deadline - time.monotonic()))
+    if os.name == "posix" and not wait_process_group(process.pid, max(0, deadline - time.monotonic())):
+        raise Refused("proof process-group cleanup is unconfirmed; inspect it before retry")
 
 
 @contextlib.contextmanager
@@ -2717,9 +2741,9 @@ def run_proof_commands(root: Path, commands: list[str], *, admission=None) -> li
             except BaseException as error:
                 try:
                     stop_proof(process)
-                except BaseException:
+                except BaseException as cleanup_error:
                     atomic_file.replace_text(blocked, json.dumps({"pid": process.pid, "at": now(), "reason": "cleanup_unconfirmed"}) + "\n")
-                    raise
+                    raise error from cleanup_error
                 if isinstance(error, subprocess.TimeoutExpired):
                     timed_out = True
                 else:

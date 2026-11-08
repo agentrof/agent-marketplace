@@ -68,7 +68,12 @@ fresh when their environment cannot provide a reliable generation identity.
 `{"paths": ["glob"], "commands": ["command"], "reason": "coverage"}` rules.
 Use `"none": true` in place of commands only for a justified no-test path.
 Matching ignores case and `*` spans folders. The first matching rule per file
-selects commands, and their union runs once. An uncovered path, missing map,
+selects commands, and their union runs once. If one selected rule has exactly the
+configured `local_proof` command set, only `local_proof` runs, in its configured order;
+narrower commands are omitted unless another selected rule adds commands to the
+full set. In that case the complete impact union is retained.
+This compares exact commands after `{base}`
+substitution, without interpreting shell syntax. An uncovered path, missing map,
 empty diff selects full `local_proof`. Risk determines required coverage through
 the selected methods and project rules. An explicit impact map remains in force.
 `prove --full` explicitly selects the full proof.

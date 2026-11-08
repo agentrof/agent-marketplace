@@ -1,0 +1,4 @@
+{
+  "summary": "Native review accepts a citation whose quote sits within three lines of the cited line and records the matched line, instead of failing an approved review on a miscounted line number.",
+  "components": {"software-engineering-team": "patch"}
+}

@@ -116,7 +116,7 @@
       "e6107bdb6971bcb507827fa62443177785d516c284786cf6bd2d7efc60a8dce9"
     ,
     "scripts/review_execution.py":
-      "af68770eddfd02621e3eab180a5f1022fef2f319fa6a209add6a11510b021c42"
+      "9a34e2ea14c75351ba1c0b6a5298b45cb8c70094b71e3e56e629b8191cadd8a8"
     ,
     "scripts/review_host.py":
       "fcd07b14e8db5c8bc96a200e7daa4fea4be4b9fb36bac180d836c6a7b2591f54"
@@ -140,7 +140,7 @@
       "d5cf071e13078c7ba7c24eb1a3b16ed044fcb96acddefc7ea40a7e84969e6c9a"
     ,
     "scripts/task_lane.py":
-      "5857ede9967fe3fd7fd443b459c9b7618e2443677f5f200495a4a877354c4f34"
+      "64f31c83429d9c405516fcc56e923532979f8277587577e8affe2247048f792b"
     ,
     "scripts/team_guard.py":
       "e01524c3b89612457b06033d69fc3e881385dc707a42d5aece7f501de46e9868"
@@ -230,7 +230,7 @@
       "1db850034de2beb719e8111c85f3e192bcddcbbcb24db38460c2c2b46e19b1c3"
     ,
     "skill-content/deliver/references/local-proof.md":
-      "5e007ddf12852dcf6bb1f6118a149f5928dfbf6493d765cdac8d7f7c4dcc6b5c"
+      "50802b8de8513bc48293406fc1ec6f5b20b05c18e7452417dc187ff536b28e7a"
     ,
     "skill-content/experience-design/SKILL.md":
       "06c0d75650c30dcb02dabcf23b54feb5ba12c0143abb473fbb2e6b5858fdc42d"
@@ -263,7 +263,7 @@
       "1159458cce381ecdcae0b15bc1f83f6047cef7b8423f8378eae7a51160445bf5"
     ,
     "skill-content/review/data/review-policy.json":
-      "82a7d486cacb07505ee29c2ccb9be457042a6dedeb6971dbb409fe5c9f701806"
+      "f4c488a6ee8e1c55fb8346ee879b7cbdf42e98dd39082129b88de08267ab787c"
     ,
     "skill-content/review/references/findings.md":
       "93980558fded97dba9dae55355e45306c04597351d7e6cd311abb30948293ff2"

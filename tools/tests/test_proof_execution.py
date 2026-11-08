@@ -21,6 +21,82 @@ from tools.tests.git_fixture import init_repository
 from tools.tests.levels import integration
 
 
+class ProcessCleanupTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups")
+    def test_wait_process_group_requires_disappearance_within_its_deadline(self):
+        clock = [0.0]
+
+        def sleep(seconds):
+            clock[0] += seconds
+
+        with mock.patch.object(task_lane.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(task_lane.time, "sleep", side_effect=sleep), \
+                mock.patch.object(task_lane.os, "killpg", side_effect=[None, None, ProcessLookupError()]):
+            self.assertTrue(task_lane.wait_process_group(12345, 1))
+        self.assertAlmostEqual(clock[0], 0.1)
+        clock[0] = 0.0
+        with mock.patch.object(task_lane.time, "monotonic", side_effect=lambda: clock[0]), \
+                mock.patch.object(task_lane.time, "sleep", side_effect=sleep), \
+                mock.patch.object(task_lane.os, "killpg"):
+            self.assertFalse(task_lane.wait_process_group(12345, 0.1))
+        self.assertAlmostEqual(clock[0], 0.1)
+        with mock.patch.object(task_lane.os, "killpg", side_effect=PermissionError):
+            with self.assertRaises(PermissionError):
+                task_lane.wait_process_group(12345, 1)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process groups")
+    def test_stop_proof_verifies_group_disappearance_after_reaping_the_leader(self):
+        process = mock.Mock(pid=12345)
+        with mock.patch.object(task_lane.os, "killpg") as kill, \
+                mock.patch.object(task_lane.time, "monotonic", side_effect=[100, 102, 104]), \
+                mock.patch.object(task_lane, "wait_process_group", return_value=False) as wait:
+            with self.assertRaisesRegex(task_lane.Refused, "cleanup is unconfirmed"):
+                task_lane.stop_proof(process)
+        kill.assert_called_once_with(12345, task_lane.signal.SIGKILL)
+        process.wait.assert_called_once_with(timeout=8)
+        wait.assert_called_once_with(12345, 6)
+        process.reset_mock()
+        with mock.patch.object(task_lane.os, "killpg"), \
+                mock.patch.object(task_lane, "wait_process_group", return_value=True) as wait:
+            task_lane.stop_proof(process)
+        process.wait.assert_called_once()
+        wait.assert_called_once()
+
+    def test_windows_cleanup_keeps_taskkill_and_waits_for_the_leader(self):
+        process = mock.Mock(pid=12345)
+        with mock.patch.object(task_lane.os, "name", "nt"), \
+                mock.patch.object(task_lane.subprocess, "run", return_value=mock.Mock(returncode=0)) as stop, \
+                mock.patch.object(task_lane.time, "monotonic", side_effect=[100, 102]), \
+                mock.patch.object(task_lane, "wait_process_group") as group:
+            task_lane.stop_proof(process)
+        stop.assert_called_once_with(["taskkill", "/PID", "12345", "/T", "/F"],
+                                     capture_output=True, timeout=10, check=False)
+        process.wait.assert_called_once_with(timeout=8)
+        group.assert_not_called()
+        process.reset_mock()
+        process.poll.return_value = None
+        with mock.patch.object(task_lane.os, "name", "nt"), \
+                mock.patch.object(task_lane.subprocess, "run", return_value=mock.Mock(returncode=1)):
+            with self.assertRaisesRegex(task_lane.Refused, "cleanup is unconfirmed"):
+                task_lane.stop_proof(process)
+        process.wait.assert_not_called()
+
+    def test_original_wait_error_survives_failed_cleanup_and_blocks_retry(self):
+        for error in (subprocess.TimeoutExpired("proof", 1), KeyboardInterrupt()):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                blocked = root / "blocked.json"
+                process = mock.Mock(pid=12345)
+                process.wait.side_effect = error
+                with mock.patch.object(task_lane.subprocess, "Popen", return_value=process), \
+                        mock.patch.object(task_lane, "stop_proof", side_effect=task_lane.Refused("cleanup unconfirmed")), \
+                        self.assertRaises(type(error)) as caught:
+                    task_lane.run_proof_commands(root, ["synthetic"], admission=(blocked, 0))
+                self.assertIs(caught.exception, error)
+                self.assertIsInstance(error.__cause__, task_lane.Refused)
+                self.assertEqual(json.loads(blocked.read_text())["reason"], "cleanup_unconfirmed")
+
+
 @integration
 class ProofExecutionTests(unittest.TestCase):
     def test_prove_reuses_only_unchanged_success_and_serializes_duplicate_requests(self):
@@ -151,7 +227,15 @@ class ProofExecutionTests(unittest.TestCase):
             self.assertEqual(task_lane.run_proof_commands(root, ['echo recovered'])[0]['exit_code'], 0)
 
             if os.name == 'posix':
-                result = task_lane.run_proof_commands(root, [command + ' & exit 0'])
+                # Model the leftover group independently of the OS's orphan reaping timing.
+                process = mock.Mock(pid=12345, returncode=0)
+                with mock.patch.object(task_lane.subprocess, 'Popen', return_value=process), \
+                        mock.patch.object(task_lane, 'run', return_value=str(root / '.git')), \
+                        mock.patch.object(task_lane.os, 'killpg', side_effect=[None, None, ProcessLookupError()]) as kill:
+                    result = task_lane.run_proof_commands(root, [command + ' & exit 0'])
+                self.assertEqual(kill.call_args_list, [mock.call(12345, 0),
+                                                      mock.call(12345, task_lane.signal.SIGKILL), mock.call(12345, 0)])
+                self.assertEqual(process.wait.call_count, 2)
                 self.assertEqual(result[0]['exit_code'], 125)
                 self.assertTrue(result[0]['leftover_children'])
                 self.assertEqual(task_lane.run_proof_commands(root, ['echo cleaned'])[0]['exit_code'], 0)

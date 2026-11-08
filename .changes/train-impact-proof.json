@@ -1,0 +1,6 @@
+{
+  "summary": "Select combined train proof by fixed-candidate impact, preserve valid full receipts, and bind review and failure probes to the selected coverage.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

@@ -136,7 +136,7 @@ def prepare(root: Path, members: list[dict], base: str, lane, *, diff_path: Path
     if not clean or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
         raise lane.Refused("native review requires a clean committed candidate")
     base_head = lane.run("git", "merge-base", f"origin/{base}", head, cwd=root)
-    files = lane.changed_files(root, base)
+    files = set(lane.run("git", "diff", "--name-only", f"{base_head}...{head}", cwd=root).splitlines())
     diff = lane.run("git", "diff", f"{base_head}...{head}", cwd=root, strip_output=False)
     sources, tasks, evidence, graphs = {}, [], [], []
     critical = False
@@ -180,7 +180,7 @@ def prepare(root: Path, members: list[dict], base: str, lane, *, diff_path: Path
                     if action.get("head") != member.get("head", head) or not graph_evidence.validate(action):
                         raise lane.Refused(f"{task} requires a successful current Graphify query")
                     graphs.append({"task": task, "action": action})
-    proof_contract = {"commands": lane.proof_commands(root, base),
+    proof_contract = {"commands": lane.proof_plan(root, base, files=files)["commands"],
                       "receipts": [{"task": member["task"],
                                     "path": str(lane.proof_path(Path(member["root"]), member["task"]))}
                                    for member in members],

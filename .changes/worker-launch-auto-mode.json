@@ -1,0 +1,6 @@
+{
+  "summary": "Keep a native worker launch reviewable in auto mode by carrying its rule packet in a named file instead of rewriting the launch input.",
+  "components": {
+    "software-engineering-team": "patch"
+  }
+}

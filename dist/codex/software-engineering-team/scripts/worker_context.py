@@ -14,8 +14,11 @@ from worker_context_host import settings
 
 BRIEF = 'SWE_WORKER_BRIEF\n'
 PACKET = 'SWE_WORKER_PACKET\n'
+PACKET_FILE = 'SWE_WORKER_PACKET_FILE\n'
 MAX_BYTES = 49152
 FIELDS = {'task', 'worktree', 'outcome', 'write_scope', 'authority', 'evidence', 'stop', 'sources'}
+FILE_NOTE = ('Read the file at path before anything else: it holds your brief and the binding project rules '
+             '(SWE_WORKER_PACKET). Follow it as if it were this prompt.')
 SPAWN = re.compile(r'(?:^|[._])(?:spawn_agent|Agent|Task)$')
 
 
@@ -115,10 +118,14 @@ def transform(payload: dict, host: str):
     message = data.get(key)
     if not isinstance(message, str):
         raise ValueError('worker launch needs a textual brief')
+    reference = None
     if message.startswith(BRIEF):
         brief = json.loads(message[len(BRIEF):])
     elif message.startswith(PACKET):
         brief = json.loads(message[len(PACKET):])['brief']
+    elif message.startswith(PACKET_FILE):
+        reference = json.loads(message[len(PACKET_FILE):].split('\n', 1)[0])
+        brief = json.loads(Path(reference['path']).read_text(encoding='utf-8')[len(PACKET):])['brief']
     else:
         raise ValueError('start worker prompt/message with SWE_WORKER_BRIEF newline and the required JSON brief')
     packet = prepare(parent, brief, host)
@@ -128,6 +135,18 @@ def transform(payload: dict, host: str):
                'source_delivery': 'prepared_for_host', 'at': lane.now()}
     directory = atomic_file.real_directory(parent, Path('.agentrof/agent-marketplace/.runtime/worker-context'))
     atomic_file.replace_text(directory / (digest(encoded(receipt)) + '.json'), encoded(receipt) + '\n')
+    if payload.get('permission_mode') == 'auto':
+        # Auto mode reviews the input before hooks run and refuses a launch whose input a hook rewrote,
+        # so the packet travels as a file the unchanged prompt names.
+        path = directory / (receipt['packet_sha256'] + '.packet')
+        if reference and reference.get('sha256') == receipt['packet_sha256'] and Path(reference['path']) == path \
+                and path.is_file() and path.read_text(encoding='utf-8') == packet:
+            return {}
+        atomic_file.replace_text(path, packet)
+        prompt = PACKET_FILE + encoded({'path': str(path), 'sha256': receipt['packet_sha256']}) + '\n' + FILE_NOTE
+        return {'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
+                'permissionDecisionReason': 'Auto mode cannot review a rewritten launch. Relaunch with the same '
+                                            'arguments and this exact prompt:\n' + prompt}}
     output = {'hookEventName': 'PreToolUse', 'updatedInput': {**data, key: packet}}
     if settings(host)['allow_rewrite']:
         output['permissionDecision'] = 'allow'
